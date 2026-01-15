@@ -15,11 +15,13 @@ class ImagePreviewScreen extends StatelessWidget {
   Future<void> _saveImage(BuildContext context) async {
     try {
       await PermissionService.requestGalleryPermission();
+
+      // ✅ Save PROCESSED file
       await GallerySaver.saveImage(file.path);
 
       if (context.mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Image saved to gallery')),
+          const SnackBar(content: Text('Image saved with watermark')),
         );
       }
     } catch (_) {

@@ -12,16 +12,27 @@ Future<File> drawOverlay(File file, OverlayData data) async {
 
   final text = '''
 ${data.dateTime}
-Lat: ${data.lat}, Lng: ${data.lng}
-Alt: ${data.altitude}m | ${data.direction}
+Lat: ${data.lat.toStringAsFixed(5)}, Lng: ${data.lng.toStringAsFixed(5)}
+Alt: ${data.altitude.toStringAsFixed(1)} m | ${data.direction}
 ${data.note}
 ''';
 
+  // 🔲 Semi-transparent background (bottom bar)
+  img.fillRect(
+    image,
+    x1: 0,
+    y1: image.height - 180,
+    x2: image.width,
+    y2: image.height,
+    color: img.ColorRgba8(0, 0, 0, 140),
+  );
+
+  // 📝 Overlay text (watermark)
   img.drawString(
     image,
     text,
-    font: img.arial24, // ✅ CORRECT
-    x: 20,
+    font: img.arial24,
+    x: 16,
     y: image.height - 160,
     color: img.ColorRgb8(255, 255, 255),
   );

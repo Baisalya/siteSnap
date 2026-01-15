@@ -2,22 +2,29 @@ import 'package:camera/camera.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
-import '../../overlay/presentation/live_overlay_painter.dart';
-import '../../overlay/presentation/overlay_preview_state.dart';
-import '../../location/presentation/location_viewmodel.dart';
-import '../presentation/camera_viewmodel.dart';
 import '../../../core/utils/datetime_utils.dart';
+import '../../location/presentation/location_viewmodel.dart';
+import '../../overlay/domain/overlay_model.dart';
+import '../../overlay/presentation/live_overlay_painter.dart';
+import '../../overlay/presentation/note_controller.dart';
+import '../../overlay/presentation/overlay_preview_state.dart';
+import '../presentation/camera_viewmodel.dart';
+import 'note_input_sheet.dart';
 
 class CameraScreen extends ConsumerWidget {
   const CameraScreen({super.key});
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
+    // Camera state & actions
     final cameraState = ref.watch(cameraViewModelProvider);
     final cameraVM = ref.read(cameraViewModelProvider.notifier);
 
-    // 🔴 Live location updates
-    ref.listen(locationStreamProvider, (prev, next) {
+    // Live overlay data
+    final overlayData = ref.watch(overlayPreviewProvider);
+
+    // 🔴 Listen to live location updates and update overlay
+    ref.listen(locationStreamProvider, (previous, next) {
       next.whenData((position) {
         final current = ref.read(overlayPreviewProvider);
 
@@ -31,37 +38,72 @@ class CameraScreen extends ConsumerWidget {
       });
     });
 
+    // Loading state
     if (!cameraState.isReady || cameraState.controller == null) {
       return const Scaffold(
         body: Center(child: CircularProgressIndicator()),
       );
     }
 
-    final overlayData = ref.watch(overlayPreviewProvider);
-
     return Scaffold(
-      body: Stack(
+      backgroundColor: Colors.black,
+      body: Column(
         children: [
-          CameraPreview(cameraState.controller!),
+          // 🔹 CAMERA PREVIEW AREA
+          Expanded(
+            child: Stack(
+              children: [
+                CameraPreview(cameraState.controller!),
 
-          // ✅ LIVE OVERLAY PREVIEW
-          Positioned.fill(
-            child: IgnorePointer(
-              child: CustomPaint(
-                painter: LiveOverlayPainter(overlayData),
-              ),
+                // Live overlay
+                Positioned.fill(
+                  child: IgnorePointer(
+                    child: CustomPaint(
+                      painter: LiveOverlayPainter(overlayData),
+                    ),
+                  ),
+                ),
+
+                // Edit note button (top-right)
+                Positioned(
+                  top: 48,
+                  right: 16,
+                  child: IconButton(
+                    icon: const Icon(Icons.edit, color: Colors.white),
+                    onPressed: () {
+                      showModalBottomSheet(
+                        context: context,
+                        isScrollControlled: true,
+                        backgroundColor: Colors.transparent,
+                        builder: (_) => const NoteInputSheet(),
+                      );
+                    },
+                  ),
+                ),
+              ],
             ),
           ),
 
-          Positioned(
-            bottom: 32,
-            left: 0,
-            right: 0,
+          // 🔹 PROFESSIONAL CAMERA BOTTOM BAR
+          Container(
+            height: 120,
+            width: double.infinity,
+            color: Colors.black,
             child: Center(
-              child: IconButton(
-                iconSize: 72,
-                icon: const Icon(Icons.camera_alt, color: Colors.white),
-                onPressed: () => cameraVM.capture(context),
+              child: GestureDetector(
+                onTap: () => cameraVM.capture(context),
+                child: Container(
+                  height: 72,
+                  width: 72,
+                  decoration: BoxDecoration(
+                    shape: BoxShape.circle,
+                    color: Colors.white,
+                    border: Border.all(
+                      color: Colors.grey.shade300,
+                      width: 4,
+                    ),
+                  ),
+                ),
               ),
             ),
           ),

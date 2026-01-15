@@ -36,12 +36,17 @@ class CameraViewModel extends StateNotifier<CameraState> {
 
   Future<void> capture(BuildContext context) async {
     final repo = ref.read(cameraRepositoryProvider);
-    final path = await repo.takePicture();
 
+    // 1️⃣ Capture original
+    final originalPath = await repo.takePicture();
+    final originalFile = File(originalPath);
+
+    // 2️⃣ Process overlay (IMPORTANT)
     final processedFile =
     await ref.read(overlayViewModelProvider.notifier)
-        .processImage(File(path), DateTimeUtils.formattedNow());
+        .processImage(originalFile);
 
+    // 3️⃣ Preview PROCESSED file
     if (context.mounted) {
       Navigator.push(
         context,
