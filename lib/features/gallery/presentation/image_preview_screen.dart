@@ -1,66 +1,87 @@
 import 'dart:io';
 import 'package:flutter/material.dart';
-import 'package:gallery_saver/gallery_saver.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 
-import '../../../core/permissions/permission_service.dart';
+import '../../../core/utils/gallery_saver.dart';
+import '../../overlay/presentation/overlay_viewmodel.dart';
+import '../../camera/presentation/note_input_sheet.dart';
 
-class ImagePreviewScreen extends StatelessWidget {
-  final File file;
+class ImagePreviewScreen extends ConsumerStatefulWidget {
+  final File originalFile;
+  final File processedFile;
 
   const ImagePreviewScreen({
     super.key,
-    required this.file,
+    required this.originalFile,
+    required this.processedFile,
   });
 
-  Future<void> _saveImage(BuildContext context) async {
-    try {
-      await PermissionService.requestGalleryPermission();
+  @override
+  ConsumerState<ImagePreviewScreen> createState() =>
+      _ImagePreviewScreenState();
+}
 
-      // ✅ Save PROCESSED file
-      await GallerySaver.saveImage(file.path);
+class _ImagePreviewScreenState
+    extends ConsumerState<ImagePreviewScreen> {
+  late File _currentFile;
 
-      if (context.mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Image saved with watermark')),
-        );
-      }
-    } catch (_) {
-      if (context.mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Permission denied')),
-        );
-      }
-    }
+  @override
+  void initState() {
+    super.initState();
+    _currentFile = widget.processedFile;
   }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
+      backgroundColor: Colors.black,
       appBar: AppBar(
-        title: const Text('Preview'),
+        backgroundColor: Colors.black,
+        actions: [
+          IconButton(
+            icon: const Icon(Icons.check),
+            onPressed: () async {
+              final savedFile = await GallerySaver.saveImage(_currentFile);
+              Navigator.pop(context, savedFile);
+            },
+          ),
+        ],
       ),
       body: Column(
         children: [
+          // IMAGE PREVIEW
           Expanded(
             child: Image.file(
-              file,
+              _currentFile,
               fit: BoxFit.contain,
             ),
           ),
+
+          // EDIT BUTTON
           Padding(
             padding: const EdgeInsets.all(16),
-            child: Row(
-              mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-              children: [
-                OutlinedButton(
-                  onPressed: () => Navigator.pop(context),
-                  child: const Text('Discard'),
-                ),
-                ElevatedButton(
-                  onPressed: () => _saveImage(context),
-                  child: const Text('Save'),
-                ),
-              ],
+            child: ElevatedButton.icon(
+              icon: const Icon(Icons.edit),
+              label: const Text('Edit Watermark Text'),
+              onPressed: () async {
+                // 1️⃣ Open editor
+                await showModalBottomSheet(
+                  context: context,
+                  isScrollControlled: true,
+                  backgroundColor: Colors.transparent,
+                  builder: (_) => const NoteInputSheet(),
+                );
+
+                // 2️⃣ Re-generate watermark from ORIGINAL
+                final updated = await ref
+                    .read(overlayViewModelProvider.notifier)
+                    .processImage(widget.originalFile);
+
+                // 3️⃣ FORCE UI UPDATE
+                setState(() {
+                  _currentFile = updated;
+                });
+              },
             ),
           ),
         ],

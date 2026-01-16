@@ -2,9 +2,10 @@ import 'dart:io';
 import 'package:camera/camera.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+
 import '../../../core/di/providers.dart';
-import '../../../core/utils/datetime_utils.dart';
 import '../../gallery/presentation/image_preview_screen.dart';
+import '../../gallery/presentation/last_image_provider.dart';
 import '../../overlay/presentation/overlay_viewmodel.dart';
 
 final cameraViewModelProvider =
@@ -12,28 +13,50 @@ StateNotifierProvider<CameraViewModel, CameraState>((ref) {
   return CameraViewModel(ref);
 });
 
+/// ✅ SINGLE CameraState (ONLY ONE)
 class CameraState {
   final bool isReady;
   final CameraController? controller;
+  final bool flashOn;
 
-  CameraState({required this.isReady, this.controller});
+  const CameraState({
+    required this.isReady,
+    this.controller,
+    this.flashOn = false,
+  });
+
+  CameraState copyWith({
+    bool? isReady,
+    CameraController? controller,
+    bool? flashOn,
+  }) {
+    return CameraState(
+      isReady: isReady ?? this.isReady,
+      controller: controller ?? this.controller,
+      flashOn: flashOn ?? this.flashOn,
+    );
+  }
 }
 
 class CameraViewModel extends StateNotifier<CameraState> {
   final Ref ref;
 
-  CameraViewModel(this.ref) : super(CameraState(isReady: false)) {
+  CameraViewModel(this.ref)
+      : super(const CameraState(isReady: false)) {
     _init();
   }
 
   Future<void> _init() async {
     final repo = ref.read(cameraRepositoryProvider);
     await repo.initialize();
-    state = CameraState(isReady: true, controller: repo.controller);
+
+    state = state.copyWith(
+      isReady: true,
+      controller: repo.controller,
+    );
   }
 
-  CameraController get controller => state.controller!;
-
+  /// 📸 Capture image with watermark
   Future<void> capture(BuildContext context) async {
     final repo = ref.read(cameraRepositoryProvider);
 
@@ -41,19 +64,41 @@ class CameraViewModel extends StateNotifier<CameraState> {
     final originalPath = await repo.takePicture();
     final originalFile = File(originalPath);
 
-    // 2️⃣ Process overlay (IMPORTANT)
+    // 2️⃣ Create initial watermarked image
     final processedFile =
     await ref.read(overlayViewModelProvider.notifier)
         .processImage(originalFile);
 
-    // 3️⃣ Preview PROCESSED file
+    // 3️⃣ Open preview with BOTH files
     if (context.mounted) {
-      Navigator.push(
+      final result = await Navigator.push<File>(
         context,
         MaterialPageRoute(
-          builder: (_) => ImagePreviewScreen(file: processedFile),
+          builder: (_) => ImagePreviewScreen(
+            originalFile: originalFile,
+            processedFile: processedFile,
+          ),
         ),
       );
+
+      // 4️⃣ Update gallery thumbnail
+      if (result != null) {
+        ref.read(lastImageProvider.notifier).state = result;
+      }
     }
+  }
+
+  /// 🔦 Flash ON / OFF
+  Future<void> toggleFlash() async {
+    final controller = state.controller;
+    if (controller == null) return;
+
+    final newFlashState = !state.flashOn;
+
+    await controller.setFlashMode(
+      newFlashState ? FlashMode.torch : FlashMode.off,
+    );
+
+    state = state.copyWith(flashOn: newFlashState);
   }
 }

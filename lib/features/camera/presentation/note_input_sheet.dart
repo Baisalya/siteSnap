@@ -1,42 +1,78 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import '../../overlay/presentation/note_controller.dart';
 
-class NoteInputSheet extends ConsumerWidget {
+import '../../overlay/presentation/overlay_preview_state.dart';
+
+class NoteInputSheet extends ConsumerStatefulWidget {
   const NoteInputSheet({super.key});
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
-    final note = ref.watch(noteControllerProvider);
+  ConsumerState<NoteInputSheet> createState() => _NoteInputSheetState();
+}
 
+class _NoteInputSheetState extends ConsumerState<NoteInputSheet> {
+  late TextEditingController _controller;
+
+  @override
+  void initState() {
+    super.initState();
+    _controller = TextEditingController(
+      text: ref.read(overlayPreviewProvider).note,
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
     return Padding(
-      padding: MediaQuery.of(context).viewInsets,
-      child: Padding(
-        padding: const EdgeInsets.all(16),
+      padding: EdgeInsets.only(
+        left: 16,
+        right: 16,
+        bottom: MediaQuery.of(context).viewInsets.bottom + 16,
+        top: 16,
+      ),
+      child: Material(
+        borderRadius: BorderRadius.circular(16),
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            const Text(
-              'Add Note',
-              style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+            // HEADER
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                const Text(
+                  'Edit Watermark Text',
+                  style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+                ),
+                IconButton(
+                  icon: const Icon(Icons.check),
+                  onPressed: () {
+                    // ✅ SAVE TEXT
+                    ref.read(overlayPreviewProvider.notifier).state =
+                        ref.read(overlayPreviewProvider).copyWith(
+                          note: _controller.text.trim(),
+                        );
+
+                    // ✅ AUTO CLOSE SHEET
+                    Navigator.pop(context);
+                  },
+                ),
+              ],
             ),
+
             const SizedBox(height: 12),
+
+            // TEXT FIELD
             TextField(
-              maxLength: 120,
+              controller: _controller,
+              maxLines: 3,
               autofocus: true,
               decoration: const InputDecoration(
-                hintText: 'Site name, project, remarks...',
+                hintText: 'Enter watermark note...',
                 border: OutlineInputBorder(),
               ),
-              controller: TextEditingController(text: note)
-                ..selection = TextSelection.fromPosition(
-                  TextPosition(offset: note.length),
-                ),
-              onChanged: (value) {
-                ref.read(noteControllerProvider.notifier).update(value);
-              },
             ),
-            const SizedBox(height: 8),
+
+            const SizedBox(height: 12),
           ],
         ),
       ),
