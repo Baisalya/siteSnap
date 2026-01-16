@@ -7,6 +7,7 @@ import '../../../core/di/providers.dart';
 import '../../gallery/presentation/image_preview_screen.dart';
 import '../../gallery/presentation/last_image_provider.dart';
 import '../../overlay/presentation/overlay_viewmodel.dart';
+import '../domain/camera_lens_type.dart';
 
 final cameraViewModelProvider =
 StateNotifierProvider<CameraViewModel, CameraState>((ref) {
@@ -18,22 +19,26 @@ class CameraState {
   final bool isReady;
   final CameraController? controller;
   final bool flashOn;
+  final CameraLensType currentLens;
 
   const CameraState({
     required this.isReady,
     this.controller,
     this.flashOn = false,
+    this.currentLens = CameraLensType.normal, // ✅ default
   });
 
   CameraState copyWith({
     bool? isReady,
     CameraController? controller,
     bool? flashOn,
+    CameraLensType? currentLens,
   }) {
     return CameraState(
       isReady: isReady ?? this.isReady,
       controller: controller ?? this.controller,
       flashOn: flashOn ?? this.flashOn,
+      currentLens: currentLens ?? this.currentLens,
     );
   }
 }
@@ -48,13 +53,16 @@ class CameraViewModel extends StateNotifier<CameraState> {
 
   Future<void> _init() async {
     final repo = ref.read(cameraRepositoryProvider);
-    await repo.initialize();
+
+    await repo.initialize(CameraLensType.normal);
 
     state = state.copyWith(
       isReady: true,
       controller: repo.controller,
+      currentLens: CameraLensType.normal,
     );
   }
+
 
   /// 📸 Capture image with watermark
   Future<void> capture(BuildContext context) async {
@@ -101,4 +109,21 @@ class CameraViewModel extends StateNotifier<CameraState> {
 
     state = state.copyWith(flashOn: newFlashState);
   }
+  Future<void> switchLens(CameraLensType type) async {
+    if (type == state.currentLens) return;
+
+    final repo = ref.read(cameraRepositoryProvider);
+
+    state.controller?.dispose();
+    state = state.copyWith(isReady: false);
+
+    await repo.initialize(type);
+
+    state = state.copyWith(
+      isReady: true,
+      controller: repo.controller,
+      currentLens: type,
+    );
+  }
+
 }

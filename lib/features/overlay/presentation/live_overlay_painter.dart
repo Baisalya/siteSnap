@@ -8,13 +8,16 @@ class LiveOverlayPainter extends CustomPainter {
 
   @override
   void paint(Canvas canvas, Size size) {
+    if (size.width == 0 || size.height == 0) return;
+
     final textStyle = TextStyle(
       color: Colors.white,
-      fontSize: 14,
+      fontSize: 16, // 🔥 slightly bigger
+      height: 1.25,
       shadows: const [
         Shadow(
-          offset: Offset(1, 1),
-          blurRadius: 3,
+          offset: Offset(1.5, 1.5),
+          blurRadius: 4,
           color: Colors.black,
         ),
       ],
@@ -23,21 +26,42 @@ class LiveOverlayPainter extends CustomPainter {
     final text = '''
 ${data.dateTime}
 Lat: ${data.lat.toStringAsFixed(5)}, Lng: ${data.lng.toStringAsFixed(5)}
-Alt: ${data.altitude.toStringAsFixed(1)} m | ${data.direction}
+Alt: ${data.altitude.toStringAsFixed(1)} m
+Dir: ${data.direction} (${data.heading.toStringAsFixed(0)}°)
 ${data.note}
 ''';
 
     final textPainter = TextPainter(
       text: TextSpan(text: text, style: textStyle),
       textDirection: TextDirection.ltr,
+      maxLines: 6,
+      ellipsis: '…',
     );
 
-    textPainter.layout(maxWidth: size.width - 20);
+    textPainter.layout(
+      maxWidth: size.width * 0.9,
+    );
 
-    // Bottom-left positioning
+    // ✅ Bottom-left safe positioning
     final offset = Offset(
-      10,
-      size.height - textPainter.height - 20,
+      16,
+      size.height - textPainter.height - 24,
+    );
+
+    // 🔲 Optional background for readability
+    final bgRect = Rect.fromLTWH(
+      offset.dx - 8,
+      offset.dy - 8,
+      textPainter.width + 16,
+      textPainter.height + 16,
+    );
+
+    final bgPaint = Paint()
+      ..color = Colors.black.withOpacity(0.45);
+
+    canvas.drawRRect(
+      RRect.fromRectAndRadius(bgRect, const Radius.circular(8)),
+      bgPaint,
     );
 
     textPainter.paint(canvas, offset);

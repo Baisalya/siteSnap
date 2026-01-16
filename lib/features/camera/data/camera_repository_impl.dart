@@ -1,62 +1,56 @@
 import 'package:camera/camera.dart';
 import '../../domain/camera_repository.dart';
+import '../domain/camera_lens_type.dart';
+
+import 'package:camera/camera.dart';
+import '../domain/camera_repository.dart';
+import '../domain/camera_lens_type.dart';
 
 class CameraRepositoryImpl implements CameraRepository {
   late CameraController _controller;
+  late Map<CameraLensType, CameraDescription> _cameraMap;
+
+  CameraLensType _currentLens = CameraLensType.normal;
 
   @override
-  Future<void> initialize() async {
+  Future<void> initialize(CameraLensType lens) async {
     final cameras = await availableCameras();
 
-    // 1️⃣ Filter BACK cameras only
-    final backCameras = cameras
-        .where((c) => c.lensDirection == CameraLensDirection.back)
-        .toList();
+    final backCameras =
+    cameras.where((c) => c.lensDirection == CameraLensDirection.back).toList();
 
     if (backCameras.isEmpty) {
       throw Exception('No back camera found');
     }
 
-    CameraDescription? bestCamera;
-    int maxResolution = 0;
+    // ✅ DO NOT sort by sensorOrientation
+    // Android already orders cameras by priority (OEM standard)
 
-    // 2️⃣ Find camera with highest resolution
-    for (final camera in backCameras) {
-      final tempController = CameraController(
-        camera,
-        ResolutionPreset.max,
-        enableAudio: false,
-      );
+    _cameraMap = {
+      CameraLensType.normal: backCameras.first,
+      if (backCameras.length > 1)
+        CameraLensType.ultraWide: backCameras[1],
+      if (backCameras.length > 2)
+        CameraLensType.macro: backCameras.last,
+    };
 
-      await tempController.initialize();
+    _currentLens = lens;
+    await _initController(_cameraMap[lens]!);
+  }
 
-      final size = tempController.value.previewSize;
-      await tempController.dispose();
-
-      if (size != null) {
-        final pixels = size.width.toInt() * size.height.toInt();
-        if (pixels > maxResolution) {
-          maxResolution = pixels;
-          bestCamera = camera;
-        }
-      }
-    }
-
-    // 3️⃣ Use BEST camera
+  Future<void> _initController(CameraDescription camera) async {
     _controller = CameraController(
-      bestCamera!,
-      ResolutionPreset.max,
-      imageFormatGroup: ImageFormatGroup.jpeg,
+      camera,
+      ResolutionPreset.max, // ✅ highest possible
       enableAudio: false,
+      imageFormatGroup: ImageFormatGroup.jpeg,
     );
 
     await _controller.initialize();
 
-    // 4️⃣ Optimal settings
+    // Quality tweaks
     await _controller.setFocusMode(FocusMode.auto);
     await _controller.setExposureMode(ExposureMode.auto);
-    await _controller.setZoomLevel(1.0);
-    await _controller.setFlashMode(FlashMode.off);
   }
 
   @override
@@ -64,6 +58,18 @@ class CameraRepositoryImpl implements CameraRepository {
     final file = await _controller.takePicture();
     return file.path;
   }
+
+  Future<void> switchLens(CameraLensType type) async {
+    if (type == _currentLens) return;
+    if (!_cameraMap.containsKey(type)) return;
+
+    await _controller.dispose();
+
+    _currentLens = type;
+    await _initController(_cameraMap[type]!);
+  }
+
+  CameraLensType get currentLens => _currentLens;
 
   @override
   CameraController get controller => _controller;
