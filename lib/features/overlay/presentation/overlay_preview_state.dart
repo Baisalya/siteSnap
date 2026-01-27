@@ -5,8 +5,8 @@ final overlayPreviewProvider =
 StateProvider<OverlayData>((ref) {
   return OverlayData(
     dateTime: '',
-    lat: 0.0,
-    lng: 0.0,
+    Latitude: 0.0,
+    Longitude: 0.0,
     altitude: 0.0,
     heading: 0.0,        // ✅ REQUIRED (North)
     direction: 'N',      // ✅ Cardinal direction

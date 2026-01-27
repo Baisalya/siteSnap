@@ -23,8 +23,8 @@ Future<File> drawOverlay(File file, OverlayData data) async {
 
   final text = '''
 ${data.dateTime}
-Lat: ${data.lat.toStringAsFixed(5)}, Lng: ${data.lng.toStringAsFixed(5)}
-Alt: ${data.altitude.toStringAsFixed(1)} m | ${data.direction}
+Latitude: ${data.Latitude.toStringAsFixed(5)}, Longitude: ${data.Longitude.toStringAsFixed(5)}
+Altitude: ${data.altitude.toStringAsFixed(1)} m | ${data.direction}
 ${data.note}
 ''';
 

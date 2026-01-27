@@ -33,8 +33,8 @@ class CameraScreen extends ConsumerWidget {
         ref.read(overlayPreviewProvider.notifier).state =
             current.copyWith(
               dateTime: DateTimeUtils.formattedNow(),
-              lat: position.latitude,
-              lng: position.longitude,
+              Latitude: position.latitude,
+              Longitude: position.longitude,
               altitude: position.altitude,
             );
       });
@@ -105,7 +105,7 @@ class CameraScreen extends ConsumerWidget {
             child: Column(
               children: [
                 // 🔍 LENS SELECTOR
-                Row(
+                /*Row(
                   mainAxisAlignment: MainAxisAlignment.center,
                   children: [
                     _LensButton(
@@ -130,7 +130,7 @@ class CameraScreen extends ConsumerWidget {
                           cameraVM.switchLens(CameraLensType.macro),
                     ),
                   ],
-                ),
+                ),*/
 
                 const SizedBox(height: 16),
 
