@@ -1,7 +1,7 @@
 class OverlayData {
   final String dateTime;
-  final double Latitude;
-  final double Longitude;
+  final double latitude;
+  final double longitude;
   final double altitude;
 
   /// Compass
@@ -13,8 +13,8 @@ class OverlayData {
 
   const OverlayData({
     required this.dateTime,
-    required this.Latitude,
-    required this.Longitude,
+    required this.latitude,
+    required this.longitude,
     required this.altitude,
     required this.heading,
     required this.direction,
@@ -23,8 +23,8 @@ class OverlayData {
 
   OverlayData copyWith({
     String? dateTime,
-    double? Latitude,
-    double? Longitude,
+    double? latitude,
+    double? longitude,
     double? altitude,
     double? heading,
     String? direction,
@@ -32,8 +32,8 @@ class OverlayData {
   }) {
     return OverlayData(
       dateTime: dateTime ?? this.dateTime,
-      Latitude: Latitude ?? this.Latitude,
-      Longitude: Longitude ?? this.Longitude,
+      latitude: latitude ?? this.latitude,
+      longitude: longitude ?? this.longitude,
       altitude: altitude ?? this.altitude,
       heading: heading ?? this.heading,
       direction: direction ?? this.direction,

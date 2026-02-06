@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../core/di/providers.dart';
+import '../../../core/permissions/permission_service.dart';
 import '../../gallery/presentation/image_preview_screen.dart';
 import '../../gallery/presentation/last_image_provider.dart';
 import '../../overlay/presentation/overlay_viewmodel.dart';
@@ -52,15 +53,22 @@ class CameraViewModel extends StateNotifier<CameraState> {
   }
 
   Future<void> _init() async {
-    final repo = ref.read(cameraRepositoryProvider);
+    try {
+      // ✅ Ask permissions FIRST
+      await PermissionService.requestCameraAndLocation();
 
-    await repo.initialize(CameraLensType.normal);
+      final repo = ref.read(cameraRepositoryProvider);
 
-    state = state.copyWith(
-      isReady: true,
-      controller: repo.controller,
-      currentLens: CameraLensType.normal,
-    );
+      await repo.initialize(CameraLensType.normal);
+
+      state = state.copyWith(
+        isReady: true,
+        controller: repo.controller,
+        currentLens: CameraLensType.normal,
+      );
+    } catch (e) {
+      debugPrint('Permission error: $e');
+    }
   }
 
 

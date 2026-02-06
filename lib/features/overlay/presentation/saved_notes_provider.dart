@@ -17,12 +17,38 @@ class SavedNotesController extends StateNotifier<List<SavedNote>> {
   }
 
   Future<void> _load() async {
-    state = await _storage.loadNotes();
+    final notes = await _storage.loadNotes();
+
+    // Always keep sorted by recent usage
+    notes.sort((a, b) => b.lastUsedAt.compareTo(a.lastUsedAt));
+
+    state = notes;
   }
 
   Future<void> addNote(String text) async {
-    final note = SavedNote(id: _uuid.v4(), text: text);
-    state = [note, ...state];
+    final now = DateTime.now().millisecondsSinceEpoch;
+
+    // Remove duplicate text
+    final filtered = state.where((n) => n.text != text).toList();
+
+    final note = SavedNote(
+      id: _uuid.v4(),
+      text: text,
+      lastUsedAt: now,
+    );
+
+    state = [note, ...filtered];
+    await _storage.saveNotes(state);
+  }
+
+  Future<void> markAsUsed(SavedNote note) async {
+    final now = DateTime.now().millisecondsSinceEpoch;
+
+    state = [
+      note.copyWith(lastUsedAt: now),
+      ...state.where((n) => n.id != note.id),
+    ];
+
     await _storage.saveNotes(state);
   }
 

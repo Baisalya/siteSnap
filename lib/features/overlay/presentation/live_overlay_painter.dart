@@ -25,7 +25,7 @@ class LiveOverlayPainter extends CustomPainter {
 
     final text = '''
 ${data.dateTime}
-Latitude: ${data.Latitude.toStringAsFixed(5)}, Longitude: ${data.Longitude.toStringAsFixed(5)}
+Latitude: ${data.latitude.toStringAsFixed(5)}, Longitude: ${data.longitude.toStringAsFixed(5)}
 Altitude: ${data.altitude.toStringAsFixed(1)} m
 Dir: ${data.direction} (${data.heading.toStringAsFixed(0)}°)
 ${data.note}
