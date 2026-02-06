@@ -5,11 +5,14 @@ class OverlayData {
   final double altitude;
 
   /// Compass
-  final double heading;   // 0–360
-  final String direction; // N, NE, E, etc.
+  final double heading;
+  final String direction;
 
   /// User note
   final String note;
+
+  /// Location warning (GPS off / permission denied etc.)
+  final String? locationWarning;
 
   const OverlayData({
     required this.dateTime,
@@ -19,6 +22,7 @@ class OverlayData {
     required this.heading,
     required this.direction,
     required this.note,
+    this.locationWarning,
   });
 
   OverlayData copyWith({
@@ -29,6 +33,7 @@ class OverlayData {
     double? heading,
     String? direction,
     String? note,
+    String? locationWarning,
   }) {
     return OverlayData(
       dateTime: dateTime ?? this.dateTime,
@@ -38,6 +43,8 @@ class OverlayData {
       heading: heading ?? this.heading,
       direction: direction ?? this.direction,
       note: note ?? this.note,
+      locationWarning:
+      locationWarning ?? this.locationWarning,
     );
   }
 }

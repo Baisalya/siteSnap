@@ -59,7 +59,7 @@ class CameraViewModel extends StateNotifier<CameraState> {
 
       final repo = ref.read(cameraRepositoryProvider);
 
-      await repo.initialize(CameraLensType.normal);
+      await repo.initialize(CameraLensType.normal );
 
       state = state.copyWith(
         isReady: true,

@@ -12,7 +12,7 @@ class LiveOverlayPainter extends CustomPainter {
 
     final textStyle = TextStyle(
       color: Colors.white,
-      fontSize: 16, // 🔥 slightly bigger
+      fontSize: 16,
       height: 1.25,
       shadows: const [
         Shadow(
@@ -23,6 +23,7 @@ class LiveOverlayPainter extends CustomPainter {
       ],
     );
 
+    // ✅ FIXED FIELD NAMES
     final text = '''
 ${data.dateTime}
 Latitude: ${data.latitude.toStringAsFixed(5)}, Longitude: ${data.longitude.toStringAsFixed(5)}
@@ -38,17 +39,15 @@ ${data.note}
       ellipsis: '…',
     );
 
-    textPainter.layout(
-      maxWidth: size.width * 0.9,
-    );
+    textPainter.layout(maxWidth: size.width * 0.9);
 
-    // ✅ Bottom-left safe positioning
+    // ✅ Bottom-left positioning
     final offset = Offset(
       16,
       size.height - textPainter.height - 24,
     );
 
-    // 🔲 Optional background for readability
+    // 🔲 Background box
     final bgRect = Rect.fromLTWH(
       offset.dx - 8,
       offset.dy - 8,
@@ -65,6 +64,31 @@ ${data.note}
     );
 
     textPainter.paint(canvas, offset);
+
+    // ===============================
+    // ✅ LOCATION WARNING (NEW)
+    // ===============================
+    if (data.locationWarning != null &&
+        data.locationWarning!.isNotEmpty) {
+      final warningPainter = TextPainter(
+        text: TextSpan(
+          text: data.locationWarning!,
+          style: const TextStyle(
+            color: Colors.red,
+            fontSize: 14,
+            fontWeight: FontWeight.bold,
+          ),
+        ),
+        textDirection: TextDirection.ltr,
+      );
+
+      warningPainter.layout();
+
+      warningPainter.paint(
+        canvas,
+        const Offset(16, 40), // top-left
+      );
+    }
   }
 
   @override

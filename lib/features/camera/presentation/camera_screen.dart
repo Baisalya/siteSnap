@@ -27,17 +27,43 @@ class CameraScreen extends ConsumerWidget {
 
     // 📍 LOCATION → overlay
     ref.listen(locationStreamProvider, (_, next) {
-      next.whenData((position) {
-        final current = ref.read(overlayPreviewProvider);
-        ref.read(overlayPreviewProvider.notifier).state =
-            current.copyWith(
-              dateTime: DateTimeUtils.formattedNow(),
-              latitude: position.latitude,   // ✅ FIX
-              longitude: position.longitude, // ✅ FIX
-              altitude: position.altitude,
-            );
-      });
+      next.when(
+        data: (position) {
+          final current = ref.read(overlayPreviewProvider);
+
+          ref.read(overlayPreviewProvider.notifier).state =
+              current.copyWith(
+                dateTime: DateTimeUtils.formattedNow(),
+                latitude: position.latitude,
+                longitude: position.longitude,
+                altitude: position.altitude,
+                locationWarning: null, // ✅ location OK
+              );
+        },
+
+        loading: () {
+          final current = ref.read(overlayPreviewProvider);
+
+          // ✅ Only show loading if location not yet available
+          if (current.latitude == 0 && current.longitude == 0) {
+            ref.read(overlayPreviewProvider.notifier).state =
+                current.copyWith(
+                  locationWarning: "Fetching location...",
+                );
+          }
+        },
+
+        error: (e, _) {
+          final current = ref.read(overlayPreviewProvider);
+
+          ref.read(overlayPreviewProvider.notifier).state =
+              current.copyWith(
+                locationWarning: "Location unavailable",
+              );
+        },
+      );
     });
+
 
     // 🧭 COMPASS → overlay
     ref.listen(compassHeadingProvider, (_, next) {
