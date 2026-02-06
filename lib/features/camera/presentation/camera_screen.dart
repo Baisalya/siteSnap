@@ -7,6 +7,7 @@ import '../../../core/utils/datetime_utils.dart';
 import '../../../core/utils/direction_utils.dart';
 import '../../../core/utils/focus_point_provider.dart';
 import '../../compass/presentation/compass_provider.dart';
+import '../../gallery/data/gallery_folder_screen.dart';
 import '../../gallery/presentation/gallery_image_viewer.dart';
 import '../../gallery/presentation/last_image_provider.dart';
 import '../../location/presentation/location_viewmodel.dart';
@@ -222,30 +223,25 @@ class CameraScreen extends ConsumerWidget {
 
                 // GALLERY
                 GestureDetector(
-                  onTap: lastImage != null
-                      ? () {
+                  onTap: () {
                     Navigator.push(
                       context,
                       MaterialPageRoute(
-                        builder: (_) =>
-                            GalleryImageViewer(
-                                file: lastImage),
+                        builder: (_) => const GalleryFolderScreen(),
                       ),
                     );
-                  }
-                      : null,
+                  },
                   child: CircleAvatar(
                     radius: 22,
                     backgroundColor: Colors.grey.shade800,
-                    backgroundImage: lastImage != null
-                        ? FileImage(lastImage)
-                        : null,
+                    backgroundImage:
+                    lastImage != null ? FileImage(lastImage) : null,
                     child: lastImage == null
-                        ? const Icon(Icons.image,
-                        color: Colors.white)
+                        ? const Icon(Icons.image, color: Colors.white)
                         : null,
                   ),
                 ),
+
               ],
             ),
           ),
