@@ -23,6 +23,7 @@ class ImagePreviewScreen extends ConsumerStatefulWidget {
 
 class _ImagePreviewScreenState
     extends ConsumerState<ImagePreviewScreen> {
+
   late File _currentFile;
 
   @override
@@ -35,36 +36,57 @@ class _ImagePreviewScreenState
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: Colors.black,
+
       appBar: AppBar(
         backgroundColor: Colors.black,
+        elevation: 0,
         actions: [
           IconButton(
             icon: const Icon(Icons.check),
             onPressed: () async {
-              final savedFile = await GallerySaver.saveImage(_currentFile);
-              Navigator.pop(context, savedFile);
+              final savedFile =
+              await GallerySaver.saveImage(_currentFile);
+
+              if (context.mounted) {
+                Navigator.pop(context, savedFile);
+              }
             },
           ),
         ],
       ),
+
       body: Column(
         children: [
-          // IMAGE PREVIEW
+
+          /// ================= IMAGE PREVIEW =================
           Expanded(
-            child: Image.file(
-              _currentFile,
-              fit: BoxFit.contain,
+            child: Center(
+              child: InteractiveViewer(
+                minScale: 1,
+                maxScale: 5,
+                child: Image.file(
+                  _currentFile,
+
+                  // ✅ VERY IMPORTANT
+                  key: ValueKey(_currentFile.path),
+
+                  fit: BoxFit.contain,
+                  filterQuality: FilterQuality.high,
+                  gaplessPlayback: true,
+                ),
+              ),
             ),
           ),
 
-          // EDIT BUTTON
+          /// ================= EDIT BUTTON =================
           Padding(
             padding: const EdgeInsets.all(16),
             child: ElevatedButton.icon(
               icon: const Icon(Icons.edit),
               label: const Text('Edit Watermark Text'),
               onPressed: () async {
-                // 1️⃣ Open editor
+
+                /// 1️⃣ Open editor
                 await showModalBottomSheet(
                   context: context,
                   isScrollControlled: true,
@@ -72,12 +94,12 @@ class _ImagePreviewScreenState
                   builder: (_) => const NoteInputSheet(),
                 );
 
-                // 2️⃣ Re-generate watermark from ORIGINAL
+                /// 2️⃣ Recreate watermark from ORIGINAL image
                 final updated = await ref
                     .read(overlayViewModelProvider.notifier)
                     .processImage(widget.originalFile);
 
-                // 3️⃣ FORCE UI UPDATE
+                /// 3️⃣ Update preview
                 setState(() {
                   _currentFile = updated;
                 });

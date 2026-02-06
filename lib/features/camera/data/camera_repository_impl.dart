@@ -41,7 +41,7 @@ class CameraRepositoryImpl implements CameraRepository {
   Future<void> _initController(CameraDescription camera) async {
     _controller = CameraController(
       camera,
-      ResolutionPreset.max, // ✅ highest possible
+      ResolutionPreset.veryHigh, // ✅ highest possible
       enableAudio: false,
       imageFormatGroup: ImageFormatGroup.jpeg,
     );
@@ -55,6 +55,11 @@ class CameraRepositoryImpl implements CameraRepository {
 
   @override
   Future<String> takePicture() async {
+    if (!_controller.value.isInitialized ||
+        _controller.value.isTakingPicture) {
+      throw Exception("Camera not ready");
+    }
+
     final file = await _controller.takePicture();
     return file.path;
   }

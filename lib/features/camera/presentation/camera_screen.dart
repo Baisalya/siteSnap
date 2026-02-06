@@ -5,6 +5,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../core/utils/datetime_utils.dart';
 import '../../../core/utils/direction_utils.dart';
+import '../../../core/utils/focus_point_provider.dart';
 import '../../compass/presentation/compass_provider.dart';
 import '../../gallery/presentation/gallery_image_viewer.dart';
 import '../../gallery/presentation/last_image_provider.dart';
@@ -24,8 +25,9 @@ class CameraScreen extends ConsumerWidget {
 
     final overlayData = ref.watch(overlayPreviewProvider);
     final lastImage = ref.watch(lastImageProvider);
+    final focusPoint = ref.watch(focusPointProvider);
 
-    // 📍 LOCATION → overlay
+    // ================= LOCATION LISTENER =================
     ref.listen(locationStreamProvider, (_, next) {
       next.when(
         data: (position) {
@@ -37,14 +39,12 @@ class CameraScreen extends ConsumerWidget {
                 latitude: position.latitude,
                 longitude: position.longitude,
                 altitude: position.altitude,
-                locationWarning: null, // ✅ location OK
+                locationWarning: null,
               );
         },
-
         loading: () {
           final current = ref.read(overlayPreviewProvider);
 
-          // ✅ Only show loading if location not yet available
           if (current.latitude == 0 && current.longitude == 0) {
             ref.read(overlayPreviewProvider.notifier).state =
                 current.copyWith(
@@ -52,8 +52,7 @@ class CameraScreen extends ConsumerWidget {
                 );
           }
         },
-
-        error: (e, _) {
+        error: (_, __) {
           final current = ref.read(overlayPreviewProvider);
 
           ref.read(overlayPreviewProvider.notifier).state =
@@ -64,11 +63,11 @@ class CameraScreen extends ConsumerWidget {
       );
     });
 
-
-    // 🧭 COMPASS → overlay
+    // ================= COMPASS LISTENER =================
     ref.listen(compassHeadingProvider, (_, next) {
       next.whenData((heading) {
         final current = ref.read(overlayPreviewProvider);
+
         ref.read(overlayPreviewProvider.notifier).state =
             current.copyWith(
               heading: heading,
@@ -89,48 +88,111 @@ class CameraScreen extends ConsumerWidget {
         children: [
           // ================= CAMERA PREVIEW =================
           Expanded(
-            child: Stack(
-              children: [
-                CameraPreview(cameraState.controller!),
+            child: LayoutBuilder(
+              builder: (context, constraints) {
+                final previewSize = Size(
+                  constraints.maxWidth,
+                  constraints.maxHeight,
+                );
 
-                // 🔴 LIVE OVERLAY
-                Positioned.fill(
-                  child: IgnorePointer(
-                    child: CustomPaint(
-                      painter: LiveOverlayPainter(overlayData),
+                return Stack(
+                  children: [
+                    // ✅ TAP TO FOCUS AREA
+                    GestureDetector(
+                      onTapDown: (details) {
+                        final tapPosition = details.localPosition;
+
+                        ref
+                            .read(focusPointProvider.notifier)
+                            .state = tapPosition;
+
+                        cameraVM.setFocusPoint(
+                          tapPosition,
+                          previewSize,
+                        );
+
+                        // auto hide focus box
+                        Future.delayed(
+                          const Duration(seconds: 1),
+                              () {
+                            ref
+                                .read(focusPointProvider.notifier)
+                                .state = null;
+                          },
+                        );
+                      },
+                      child: CameraPreview(
+                        cameraState.controller!,
+                      ),
                     ),
-                  ),
-                ),
 
-                // ✏️ Edit note
-                Positioned(
-                  top: 48,
-                  right: 16,
-                  child: IconButton(
-                    icon: const Icon(Icons.edit, color: Colors.white),
-                    onPressed: () {
-                      showModalBottomSheet(
-                        context: context,
-                        isScrollControlled: true,
-                        backgroundColor: Colors.transparent,
-                        builder: (_) => const NoteInputSheet(),
-                      );
-                    },
-                  ),
-                ),
-              ],
+                    // ✅ LIVE OVERLAY
+                    Positioned.fill(
+                      child: IgnorePointer(
+                        child: CustomPaint(
+                          painter:
+                          LiveOverlayPainter(overlayData),
+                        ),
+                      ),
+                    ),
+
+                    // ✅ FOCUS INDICATOR
+                    if (focusPoint != null)
+                      Positioned(
+                        left: focusPoint.dx - 30,
+                        top: focusPoint.dy - 30,
+                        child: Container(
+                          width: 60,
+                          height: 60,
+                          decoration: BoxDecoration(
+                            border: Border.all(
+                              color: Colors.yellow,
+                              width: 2,
+                            ),
+                            borderRadius:
+                            BorderRadius.circular(8),
+                          ),
+                        ),
+                      ),
+
+                    // ✏️ Edit note button
+                    Positioned(
+                      top: 48,
+                      right: 16,
+                      child: IconButton(
+                        icon: const Icon(
+                          Icons.edit,
+                          color: Colors.white,
+                        ),
+                        onPressed: () {
+                          showModalBottomSheet(
+                            context: context,
+                            isScrollControlled: true,
+                            backgroundColor:
+                            Colors.transparent,
+                            builder: (_) =>
+                            const NoteInputSheet(),
+                          );
+                        },
+                      ),
+                    ),
+                  ],
+                );
+              },
             ),
           ),
 
           // ================= BOTTOM BAR =================
           Container(
             height: 140,
-            padding: const EdgeInsets.symmetric(horizontal: 24),
+            padding:
+            const EdgeInsets.symmetric(horizontal: 24),
             color: Colors.black,
             child: Row(
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              mainAxisAlignment:
+              MainAxisAlignment.spaceBetween,
               children: [
-                // Flash
+                // FLASH
                 IconButton(
                   icon: Icon(
                     cameraState.flashOn
@@ -141,7 +203,7 @@ class CameraScreen extends ConsumerWidget {
                   onPressed: cameraVM.toggleFlash,
                 ),
 
-                // Capture
+                // CAPTURE BUTTON
                 GestureDetector(
                   onTap: () => cameraVM.capture(context),
                   child: Container(
@@ -158,7 +220,7 @@ class CameraScreen extends ConsumerWidget {
                   ),
                 ),
 
-                // Gallery
+                // GALLERY
                 GestureDetector(
                   onTap: lastImage != null
                       ? () {
@@ -166,7 +228,8 @@ class CameraScreen extends ConsumerWidget {
                       context,
                       MaterialPageRoute(
                         builder: (_) =>
-                            GalleryImageViewer(file: lastImage),
+                            GalleryImageViewer(
+                                file: lastImage),
                       ),
                     );
                   }
@@ -174,10 +237,12 @@ class CameraScreen extends ConsumerWidget {
                   child: CircleAvatar(
                     radius: 22,
                     backgroundColor: Colors.grey.shade800,
-                    backgroundImage:
-                    lastImage != null ? FileImage(lastImage) : null,
+                    backgroundImage: lastImage != null
+                        ? FileImage(lastImage)
+                        : null,
                     child: lastImage == null
-                        ? const Icon(Icons.image, color: Colors.white)
+                        ? const Icon(Icons.image,
+                        color: Colors.white)
                         : null,
                   ),
                 ),
