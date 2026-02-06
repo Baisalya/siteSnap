@@ -85,7 +85,7 @@ class CameraViewModel extends StateNotifier<CameraState>
   }
 
   /// =======================================================
-  /// ✅ APP LIFECYCLE HANDLING (VERY IMPORTANT)
+  /// ✅ APP LIFECYCLE HANDLING
   /// =======================================================
   @override
   void didChangeAppLifecycleState(AppLifecycleState lifecycleState) {
@@ -120,7 +120,28 @@ class CameraViewModel extends StateNotifier<CameraState>
   }
 
   /// =======================================================
-  /// 📸 CAPTURE IMAGE (SAFE VERSION)
+  /// ✅ PRO AUTO FOCUS PREPARATION (NEW)
+  /// =======================================================
+  Future<void> _prepareAutoFocus() async {
+    final controller = state.controller;
+    if (controller == null) return;
+
+    try {
+      await controller.setFocusMode(FocusMode.auto);
+      await Future.delayed(const Duration(milliseconds: 250));
+
+      await controller.setExposureMode(ExposureMode.auto);
+      await Future.delayed(const Duration(milliseconds: 150));
+
+      // Flash needs extra exposure calculation time
+      if (state.flashOn) {
+        await Future.delayed(const Duration(milliseconds: 200));
+      }
+    } catch (_) {}
+  }
+
+  /// =======================================================
+  /// 📸 CAPTURE IMAGE (PRO VERSION)
   /// =======================================================
   Future<void> capture(BuildContext context) async {
     final controller = state.controller;
@@ -138,15 +159,24 @@ class CameraViewModel extends StateNotifier<CameraState>
     try {
       final repo = ref.read(cameraRepositoryProvider);
 
+      // ✅ VERY IMPORTANT — prepare focus first
+      await _prepareAutoFocus();
+
+      // Small safety delay
+      await Future.delayed(const Duration(milliseconds: 120));
+
+      // 1️⃣ Capture original image
       final originalPath = await repo.takePicture();
       final originalFile = File(originalPath);
 
+      // 2️⃣ Apply watermark
       final processedFile = await ref
           .read(overlayViewModelProvider.notifier)
           .processImage(originalFile);
 
       if (!context.mounted) return;
 
+      // 3️⃣ Preview screen
       final result = await Navigator.push<File>(
         context,
         MaterialPageRoute(
@@ -157,6 +187,7 @@ class CameraViewModel extends StateNotifier<CameraState>
         ),
       );
 
+      // 4️⃣ Update thumbnail
       if (result != null) {
         ref.read(lastImageProvider.notifier).state = result;
       }
@@ -168,7 +199,7 @@ class CameraViewModel extends StateNotifier<CameraState>
   }
 
   /// =======================================================
-  /// 🔦 FLASH TOGGLE
+  /// 🔦 FLASH
   /// =======================================================
   Future<void> toggleFlash() async {
     final controller = state.controller;
@@ -204,7 +235,7 @@ class CameraViewModel extends StateNotifier<CameraState>
   }
 
   /// =======================================================
-  /// 🎯 TAP TO FOCUS + EXPOSURE
+  /// 🎯 TAP TO FOCUS
   /// =======================================================
   Future<void> setFocusPoint(
       Offset position, Size previewSize) async {
