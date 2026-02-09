@@ -25,11 +25,53 @@ class _ImagePreviewScreenState
     extends ConsumerState<ImagePreviewScreen> {
 
   late File _currentFile;
+  bool _saving = false;
 
   @override
   void initState() {
     super.initState();
     _currentFile = widget.processedFile;
+  }
+
+  /// ✅ SAVE IMAGE
+  Future<void> _saveImage() async {
+    if (_saving) return;
+
+    setState(() => _saving = true);
+
+    try {
+      final savedFile =
+      await GallerySaver.saveImage(_currentFile);
+
+      if (mounted) {
+        Navigator.pop(context, savedFile);
+      }
+    } catch (e) {
+      debugPrint("Save failed: $e");
+    } finally {
+      if (mounted) {
+        setState(() => _saving = false);
+      }
+    }
+  }
+
+  /// ✅ EDIT WATERMARK
+  Future<void> _editWatermark() async {
+    await showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (_) => const NoteInputSheet(),
+    );
+
+    // regenerate watermark from original
+    final updated = await ref
+        .read(overlayViewModelProvider.notifier)
+        .processImage(widget.originalFile);
+
+    setState(() {
+      _currentFile = updated;
+    });
   }
 
   @override
@@ -39,71 +81,67 @@ class _ImagePreviewScreenState
 
       appBar: AppBar(
         backgroundColor: Colors.black,
-        elevation: 0,
-        actions: [
-          IconButton(
-            icon: const Icon(Icons.check),
-            onPressed: () async {
-              final savedFile =
-              await GallerySaver.saveImage(_currentFile);
-
-              if (context.mounted) {
-                Navigator.pop(context, savedFile);
-              }
-            },
-          ),
-        ],
+        title: const Text("Preview"),
       ),
 
       body: Column(
         children: [
-
-          /// ================= IMAGE PREVIEW =================
+          // ================= IMAGE PREVIEW =================
           Expanded(
-            child: Center(
-              child: InteractiveViewer(
-                minScale: 1,
-                maxScale: 5,
-                child: Image.file(
-                  _currentFile,
-
-                  // ✅ VERY IMPORTANT
-                  key: ValueKey(_currentFile.path),
-
-                  fit: BoxFit.contain,
-                  filterQuality: FilterQuality.high,
-                  gaplessPlayback: true,
-                ),
+            child: InteractiveViewer(
+              child: Image.file(
+                _currentFile,
+                filterQuality: FilterQuality.high,
               ),
             ),
           ),
 
-          /// ================= EDIT BUTTON =================
-          Padding(
+          // ================= ACTION BAR =================
+          Container(
             padding: const EdgeInsets.all(16),
-            child: ElevatedButton.icon(
-              icon: const Icon(Icons.edit),
-              label: const Text('Edit Watermark Text'),
-              onPressed: () async {
+            color: Colors.black,
+            child: Row(
+              children: [
+                // EDIT BUTTON
+                Expanded(
+                  child: OutlinedButton.icon(
+                    icon: const Icon(Icons.edit),
+                    label: const Text("Edit"),
+                    style: OutlinedButton.styleFrom(
+                      foregroundColor: Colors.white,
+                      side:
+                      const BorderSide(color: Colors.white),
+                    ),
+                    onPressed: _editWatermark,
+                  ),
+                ),
 
-                /// 1️⃣ Open editor
-                await showModalBottomSheet(
-                  context: context,
-                  isScrollControlled: true,
-                  backgroundColor: Colors.transparent,
-                  builder: (_) => const NoteInputSheet(),
-                );
+                const SizedBox(width: 16),
 
-                /// 2️⃣ Recreate watermark from ORIGINAL image
-                final updated = await ref
-                    .read(overlayViewModelProvider.notifier)
-                    .processImage(widget.originalFile);
-
-                /// 3️⃣ Update preview
-                setState(() {
-                  _currentFile = updated;
-                });
-              },
+                // SAVE BUTTON
+                Expanded(
+                  child: ElevatedButton.icon(
+                    icon: _saving
+                        ? const SizedBox(
+                      width: 18,
+                      height: 18,
+                      child:
+                      CircularProgressIndicator(
+                        strokeWidth: 2,
+                        color: Colors.black,
+                      ),
+                    )
+                        : const Icon(Icons.check),
+                    label: const Text("Save"),
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: Colors.white,
+                      foregroundColor: Colors.black,
+                    ),
+                    onPressed:
+                    _saving ? null : _saveImage,
+                  ),
+                ),
+              ],
             ),
           ),
         ],

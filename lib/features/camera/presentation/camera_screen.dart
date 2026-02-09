@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../core/utils/datetime_utils.dart';
+import '../../../core/utils/developer_info_dialog.dart';
 import '../../../core/utils/direction_utils.dart';
 import '../../../core/utils/focus_point_provider.dart';
 import '../../compass/presentation/compass_provider.dart';
@@ -136,7 +137,21 @@ class CameraScreen extends ConsumerWidget {
                         ),
                       ),
                     ),
-
+                    // ✅ INFO
+                    Positioned(
+                      top: 48,
+                      left: 16,
+                      child: IconButton(
+                        icon: const Icon(Icons.info_outline,
+                            color: Colors.white),
+                        onPressed: () {
+                          showDialog(
+                            context: context,
+                            builder: (_) => const DeveloperInfoDialog(),
+                          );
+                        },
+                      ),
+                    ),
                     // ✅ FOCUS INDICATOR
                     if (focusPoint != null)
                       Positioned(
@@ -155,6 +170,7 @@ class CameraScreen extends ConsumerWidget {
                           ),
                         ),
                       ),
+
 
                     // ✏️ Edit note button
                     Positioned(
