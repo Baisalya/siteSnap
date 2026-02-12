@@ -35,32 +35,41 @@ class CameraScreen extends ConsumerWidget {
         data: (position) {
           final current = ref.read(overlayPreviewProvider);
 
+          // ✅ UPDATE DATA + REMOVE WARNING
           ref.read(overlayPreviewProvider.notifier).state =
               current.copyWith(
                 dateTime: DateTimeUtils.formattedNow(),
                 latitude: position.latitude,
                 longitude: position.longitude,
                 altitude: position.altitude,
-                locationWarning: null,
+                locationWarning: null, // IMPORTANT
               );
         },
+
         loading: () {
           final current = ref.read(overlayPreviewProvider);
 
-          if (current.latitude == 0 && current.longitude == 0) {
+          // show loading only if no valid location yet
+          if (current.latitude == 0 &&
+              current.longitude == 0) {
             ref.read(overlayPreviewProvider.notifier).state =
                 current.copyWith(
                   locationWarning: "Fetching location...",
                 );
           }
         },
+
         error: (_, __) {
           final current = ref.read(overlayPreviewProvider);
 
-          ref.read(overlayPreviewProvider.notifier).state =
-              current.copyWith(
-                locationWarning: "Location unavailable",
-              );
+          // ✅ ONLY show error if location really missing
+          if (current.latitude == 0 &&
+              current.longitude == 0) {
+            ref.read(overlayPreviewProvider.notifier).state =
+                current.copyWith(
+                  locationWarning: "Location unavailable",
+                );
+          }
         },
       );
     });
