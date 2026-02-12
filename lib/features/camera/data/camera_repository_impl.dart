@@ -16,25 +16,45 @@ class CameraRepositoryImpl implements CameraRepository {
   Future<void> initialize(CameraLensType lens) async {
     final cameras = await availableCameras();
 
-    final backCameras =
-    cameras.where((c) => c.lensDirection == CameraLensDirection.back).toList();
+    final backCameras = cameras
+        .where((c) => c.lensDirection == CameraLensDirection.back)
+        .toList();
 
     if (backCameras.isEmpty) {
       throw Exception('No back camera found');
     }
 
-    // ✅ DO NOT sort by sensorOrientation
-    // Android already orders cameras by priority (OEM standard)
+    /// ✅ Detect MAIN camera (highest resolution sensor)
+    /// OEM main camera usually has:
+    /// - highest resolution
+    /// - larger sensor orientation value
+    backCameras.sort(
+          (a, b) => b.sensorOrientation.compareTo(a.sensorOrientation),
+    );
+
+    final mainCamera = backCameras.first;
+
+    CameraDescription? ultraWide;
+    CameraDescription? macro;
+
+    if (backCameras.length > 1) {
+      ultraWide = backCameras.last;
+    }
+
+    if (backCameras.length > 2) {
+      macro = backCameras[1];
+    }
 
     _cameraMap = {
-      CameraLensType.normal: backCameras.first,
-      if (backCameras.length > 1)
-        CameraLensType.ultraWide: backCameras[1],
-      if (backCameras.length > 2)
-        CameraLensType.macro: backCameras.last,
+      CameraLensType.normal: mainCamera,
+      if (ultraWide != null)
+        CameraLensType.ultraWide: ultraWide,
+      if (macro != null)
+        CameraLensType.macro: macro,
     };
 
     _currentLens = lens;
+
     await _initController(_cameraMap[lens]!);
   }
 

@@ -76,7 +76,7 @@ class _GalleryImageViewerState extends State<GalleryImageViewer> {
         backgroundColor: Colors.black,
         title: Text(
           "${currentIndex + 1} / ${widget.images.length}",
-        ),
+          style: TextStyle(color: Colors.white),),
         actions: [
           IconButton(
             icon: const Icon(Icons.share,color: Colors.white,),

@@ -8,6 +8,7 @@ import '../../../core/di/providers.dart';
 import '../../../core/permissions/permission_service.dart';
 import '../../gallery/presentation/image_preview_screen.dart';
 import '../../gallery/presentation/last_image_provider.dart';
+import '../../location/presentation/location_viewmodel.dart';
 import '../../overlay/presentation/overlay_viewmodel.dart';
 import '../domain/camera_lens_type.dart';
 
@@ -56,6 +57,7 @@ class CameraState {
 /// =======================================================
 class CameraViewModel extends StateNotifier<CameraState>
     with WidgetsBindingObserver {
+
   final Ref ref;
 
   CameraViewModel(this.ref)
@@ -70,6 +72,7 @@ class CameraViewModel extends StateNotifier<CameraState>
   Future<void> _init() async {
     try {
       await PermissionService.requestCameraAndLocation();
+      ref.invalidate(locationStreamProvider);
 
       final repo = ref.read(cameraRepositoryProvider);
       await repo.initialize(CameraLensType.normal);
@@ -120,20 +123,18 @@ class CameraViewModel extends StateNotifier<CameraState>
   }
 
   /// =======================================================
-  /// ✅ PRO AUTO FOCUS PREPARATION (NEW)
+  /// ✅ PRO AUTOFOCUS + EXPOSURE PREPARATION
+  /// (PREVENTS BLUR + FLASH MISFIRE)
   /// =======================================================
-  Future<void> _prepareAutoFocus() async {
-    final controller = state.controller;
-    if (controller == null) return;
-
+  Future<void> _prepareAutoFocus(CameraController controller) async {
     try {
       await controller.setFocusMode(FocusMode.auto);
+      await controller.setExposureMode(ExposureMode.auto);
+
+      // allow focus to settle
       await Future.delayed(const Duration(milliseconds: 250));
 
-      await controller.setExposureMode(ExposureMode.auto);
-      await Future.delayed(const Duration(milliseconds: 150));
-
-      // Flash needs extra exposure calculation time
+      // flash needs extra exposure calculation time
       if (state.flashOn) {
         await Future.delayed(const Duration(milliseconds: 200));
       }
@@ -159,24 +160,18 @@ class CameraViewModel extends StateNotifier<CameraState>
     try {
       final repo = ref.read(cameraRepositoryProvider);
 
-      // ✅ VERY IMPORTANT — prepare focus first
-      await _prepareAutoFocus();
+      // ✅ LOCK FOCUS BEFORE CAPTURE
+      await _prepareAutoFocus(controller);
 
-      // Small safety delay
-      await Future.delayed(const Duration(milliseconds: 120));
-
-      // 1️⃣ Capture original image
       final originalPath = await repo.takePicture();
       final originalFile = File(originalPath);
 
-      // 2️⃣ Apply watermark
       final processedFile = await ref
           .read(overlayViewModelProvider.notifier)
           .processImage(originalFile);
 
       if (!context.mounted) return;
 
-      // 3️⃣ Preview screen
       final result = await Navigator.push<File>(
         context,
         MaterialPageRoute(
@@ -187,10 +182,10 @@ class CameraViewModel extends StateNotifier<CameraState>
         ),
       );
 
-      // 4️⃣ Update thumbnail
       if (result != null) {
         ref.read(lastImageProvider.notifier).state = result;
       }
+
     } catch (e) {
       debugPrint('Capture error: $e');
     } finally {
@@ -199,7 +194,7 @@ class CameraViewModel extends StateNotifier<CameraState>
   }
 
   /// =======================================================
-  /// 🔦 FLASH
+  /// 🔦 FLASH TOGGLE
   /// =======================================================
   Future<void> toggleFlash() async {
     final controller = state.controller;
@@ -239,6 +234,7 @@ class CameraViewModel extends StateNotifier<CameraState>
   /// =======================================================
   Future<void> setFocusPoint(
       Offset position, Size previewSize) async {
+
     final controller = state.controller;
     if (controller == null) return;
 

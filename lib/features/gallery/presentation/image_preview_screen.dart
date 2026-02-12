@@ -103,7 +103,7 @@ class _ImagePreviewScreenState
             child: Row(
               children: [
                 // EDIT BUTTON
-                Expanded(
+                /*Expanded(
                   child: OutlinedButton.icon(
                     icon: const Icon(Icons.edit),
                     label: const Text("Edit"),
@@ -114,7 +114,7 @@ class _ImagePreviewScreenState
                     ),
                     onPressed: _editWatermark,
                   ),
-                ),
+                ),*/
 
                 const SizedBox(width: 16),
 

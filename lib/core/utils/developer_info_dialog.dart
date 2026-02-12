@@ -15,6 +15,20 @@ class DeveloperInfoDialog extends StatelessWidget {
     }
   }
 
+  /// OPEN UPI PAYMENT
+  Future<void> _openUPI() async {
+    final Uri upiUri = Uri.parse(
+      "upi://pay?pa=baishalya1999@oksbi&pn=SiteSnap&cu=INR",
+    );
+
+    if (!await launchUrl(
+      upiUri,
+      mode: LaunchMode.externalApplication,
+    )) {
+      debugPrint("UPI app not found");
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     return Dialog(
@@ -50,7 +64,7 @@ class DeveloperInfoDialog extends StatelessWidget {
 
             const SizedBox(height: 20),
 
-            // PORTFOLIO BUTTON
+            /// PORTFOLIO
             SizedBox(
               width: double.infinity,
               child: OutlinedButton(
@@ -60,8 +74,7 @@ class DeveloperInfoDialog extends StatelessWidget {
                 },
                 style: OutlinedButton.styleFrom(
                   foregroundColor: Colors.white,
-                  side:
-                  const BorderSide(color: Colors.white),
+                  side: const BorderSide(color: Colors.white),
                 ),
                 child: const Text("View Portfolio"),
               ),
@@ -69,7 +82,7 @@ class DeveloperInfoDialog extends StatelessWidget {
 
             const SizedBox(height: 10),
 
-            // BUY ME A COFFEE
+            /// BUY ME A COFFEE
             /*SizedBox(
               width: double.infinity,
               child: ElevatedButton.icon(
@@ -81,10 +94,37 @@ class DeveloperInfoDialog extends StatelessWidget {
                 ),
                 onPressed: () {
                   _openLink(
-                      "https://buymeacoffee.com/bAISALYA");
+                      "https://buymeacoffee.com/baisalya");
                 },
               ),
             ),*/
+
+            const SizedBox(height: 10),
+
+            /// UPI SUPPORT BUTTON (NEW)
+            SizedBox(
+              width: double.infinity,
+              child: ElevatedButton.icon(
+                icon: const Icon(Icons.coffee),
+                label: const Text("Buy me a Coffee"),
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: Colors.green,
+                  foregroundColor: Colors.white,
+                ),
+                onPressed: _openUPI,
+              ),
+            ),
+
+            const SizedBox(height: 6),
+
+            const Text(
+              "SiteSnap is free. Support helps future updates.",
+              style: TextStyle(
+                color: Colors.grey,
+                fontSize: 12,
+              ),
+              textAlign: TextAlign.center,
+            ),
 
             const SizedBox(height: 8),
 

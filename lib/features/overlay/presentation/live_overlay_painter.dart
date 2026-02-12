@@ -10,9 +10,12 @@ class LiveOverlayPainter extends CustomPainter {
   void paint(Canvas canvas, Size size) {
     if (size.width == 0 || size.height == 0) return;
 
+    // ===============================
+    // TEXT STYLE
+    // ===============================
     final textStyle = TextStyle(
       color: Colors.white,
-      fontSize: 16,
+      fontSize: size.width * 0.035, // ✅ responsive size
       height: 1.25,
       shadows: const [
         Shadow(
@@ -23,7 +26,9 @@ class LiveOverlayPainter extends CustomPainter {
       ],
     );
 
-    // ✅ FIXED FIELD NAMES
+    // ===============================
+    // WATERMARK TEXT
+    // ===============================
     final text = '''
 ${data.dateTime}
 Latitude: ${data.latitude.toStringAsFixed(5)}, Longitude: ${data.longitude.toStringAsFixed(5)}
@@ -41,41 +46,55 @@ ${data.note}
 
     textPainter.layout(maxWidth: size.width * 0.9);
 
-    // ✅ Bottom-left positioning
+    // ===============================
+    // ✅ RELATIVE POSITIONING (FIX)
+    // Works in portrait + landscape
+    // ===============================
+    final marginX = size.width * 0.03;
+    final marginY = size.height * 0.03;
+
     final offset = Offset(
-      16,
-      size.height - textPainter.height - 24,
+      marginX,
+      size.height - textPainter.height - marginY,
     );
 
-    // 🔲 Background box
+    // ===============================
+    // BACKGROUND BOX
+    // ===============================
     final bgRect = Rect.fromLTWH(
-      offset.dx - 8,
-      offset.dy - 8,
-      textPainter.width + 16,
-      textPainter.height + 16,
+      offset.dx - size.width * 0.01,
+      offset.dy - size.height * 0.01,
+      textPainter.width + size.width * 0.02,
+      textPainter.height + size.height * 0.02,
     );
 
     final bgPaint = Paint()
       ..color = Colors.black.withOpacity(0.45);
 
     canvas.drawRRect(
-      RRect.fromRectAndRadius(bgRect, const Radius.circular(8)),
+      RRect.fromRectAndRadius(
+        bgRect,
+        const Radius.circular(8),
+      ),
       bgPaint,
     );
 
+    // ===============================
+    // DRAW TEXT
+    // ===============================
     textPainter.paint(canvas, offset);
 
     // ===============================
-    // ✅ LOCATION WARNING (NEW)
+    // LOCATION WARNING (TOP LEFT)
     // ===============================
     if (data.locationWarning != null &&
         data.locationWarning!.isNotEmpty) {
       final warningPainter = TextPainter(
         text: TextSpan(
           text: data.locationWarning!,
-          style: const TextStyle(
+          style: TextStyle(
             color: Colors.red,
-            fontSize: 14,
+            fontSize: size.width * 0.032,
             fontWeight: FontWeight.bold,
           ),
         ),
@@ -86,7 +105,10 @@ ${data.note}
 
       warningPainter.paint(
         canvas,
-        const Offset(16, 40), // top-left
+        Offset(
+          size.width * 0.03,
+          size.height * 0.05,
+        ),
       );
     }
   }

@@ -18,7 +18,6 @@ class _GalleryFolderScreenState extends State<GalleryFolderScreen> {
   List<File> images = [];
   bool loading = true;
 
-  /// ✅ Selection mode
   Set<File> selectedImages = {};
   bool selectionMode = false;
 
@@ -30,9 +29,6 @@ class _GalleryFolderScreenState extends State<GalleryFolderScreen> {
     _initGallery();
   }
 
-  /// ===============================
-  /// INIT
-  /// ===============================
   Future<void> _initGallery() async {
     await _requestPermission();
     await _loadImages();
@@ -42,7 +38,7 @@ class _GalleryFolderScreenState extends State<GalleryFolderScreen> {
     if (Platform.isAndroid) {
       await Permission.photos.request();
       await Permission.storage.request();
-    } else if (Platform.isIOS) {
+    } else {
       await Permission.photos.request();
     }
   }
@@ -58,9 +54,6 @@ class _GalleryFolderScreenState extends State<GalleryFolderScreen> {
     });
   }
 
-  /// ===============================
-  /// SHARE SELECTED
-  /// ===============================
   void _shareSelected() {
     if (selectedImages.isEmpty) return;
 
@@ -69,33 +62,39 @@ class _GalleryFolderScreenState extends State<GalleryFolderScreen> {
     );
   }
 
-  /// ===============================
-  /// BUILD
-  /// ===============================
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: Colors.black,
 
+      // ================= APPBAR =================
       appBar: AppBar(
+        elevation: 0,
         backgroundColor: Colors.black,
-        title: Text(
-          selectionMode
-              ? "${selectedImages.length} selected"
-              : "SiteSnap Photos",
-
-        ),
+        title: selectionMode
+            ? Container(
+          padding:
+          const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+          decoration: BoxDecoration(
+            color: Colors.white12,
+            borderRadius: BorderRadius.circular(20),
+          ),
+          child: Text(
+            "${selectedImages.length} selected",
+            style: const TextStyle(fontSize: 16,color: Colors.white),
+          ),
+        )
+            : const Text("SiteSnap Photos",style: TextStyle(color: Colors.white),),
         actions: [
           if (selectionMode)
             IconButton(
-              icon: const Icon(Icons.share),
-              color: Colors.white,
+              icon: const Icon(Icons.share,color: Colors.white,),
               onPressed: _shareSelected,
             ),
         ],
         leading: selectionMode
             ? IconButton(
-          icon: const Icon(Icons.close),
+          icon: const Icon(Icons.close,color: Colors.white,),
           onPressed: () {
             setState(() {
               selectionMode = false;
@@ -106,40 +105,36 @@ class _GalleryFolderScreenState extends State<GalleryFolderScreen> {
             : null,
       ),
 
+      // ================= BODY =================
       body: loading
           ? const Center(child: CircularProgressIndicator())
           : images.isEmpty
-          ? const Center(
-        child: Text(
-          'No photos yet',
-          style: TextStyle(color: Colors.white),
-        ),
-      )
+          ? _emptyView()
           : GridView.builder(
-        padding: const EdgeInsets.all(4),
+        padding: const EdgeInsets.all(6),
         gridDelegate:
         const SliverGridDelegateWithFixedCrossAxisCount(
           crossAxisCount: 3,
-          crossAxisSpacing: 4,
-          mainAxisSpacing: 4,
+          crossAxisSpacing: 6,
+          mainAxisSpacing: 6,
         ),
         itemCount: images.length,
         itemBuilder: (_, i) {
           final file = images[i];
+          final isSelected =
+          selectedImages.contains(file);
 
           return GestureDetector(
-            /// ✅ LONG PRESS → ENTER SELECTION MODE
             onLongPress: () {
               setState(() {
                 selectionMode = true;
                 selectedImages.add(file);
               });
             },
-            /// ✅ TAP
             onTap: () {
               if (selectionMode) {
                 setState(() {
-                  if (selectedImages.contains(file)) {
+                  if (isSelected) {
                     selectedImages.remove(file);
                   } else {
                     selectedImages.add(file);
@@ -150,7 +145,6 @@ class _GalleryFolderScreenState extends State<GalleryFolderScreen> {
                   }
                 });
               } else {
-                /// Open swipe viewer
                 Navigator.push(
                   context,
                   MaterialPageRoute(
@@ -163,37 +157,81 @@ class _GalleryFolderScreenState extends State<GalleryFolderScreen> {
               }
             },
 
-            child: Stack(
-              children: [
-                Positioned.fill(
-                  child: Image.file(
-                    file,
-                    fit: BoxFit.cover,
-                  ),
-                ),
-
-                /// ✅ Selected indicator
-                if (selectedImages.contains(file))
-                  Positioned(
-                    top: 6,
-                    right: 6,
-                    child: Container(
-                      decoration: const BoxDecoration(
-                        shape: BoxShape.circle,
-                        color: Colors.blue,
-                      ),
-                      padding: const EdgeInsets.all(4),
-                      child: const Icon(
-                        Icons.check,
-                        size: 16,
-                        color: Colors.white,
-                      ),
+            child: AnimatedContainer(
+              duration: const Duration(milliseconds: 150),
+              decoration: BoxDecoration(
+                borderRadius: BorderRadius.circular(12),
+                border: isSelected
+                    ? Border.all(
+                  color: Colors.blue,
+                  width: 2,
+                )
+                    : null,
+              ),
+              child: Stack(
+                children: [
+                  ClipRRect(
+                    borderRadius:
+                    BorderRadius.circular(10),
+                    child: Image.file(
+                      file,
+                      fit: BoxFit.cover,
+                      width: double.infinity,
+                      height: double.infinity,
                     ),
                   ),
-              ],
+
+                  /// Selection overlay
+                  if (isSelected)
+                    Container(
+                      decoration: BoxDecoration(
+                        borderRadius:
+                        BorderRadius.circular(10),
+                        color: Colors.black.withOpacity(0.35),
+                      ),
+                    ),
+
+                  /// Check icon
+                  if (isSelected)
+                    const Positioned(
+                      top: 6,
+                      right: 6,
+                      child: CircleAvatar(
+                        radius: 10,
+                        backgroundColor: Colors.blue,
+                        child: Icon(
+                          Icons.check,
+                          size: 14,
+                          color: Colors.white,
+                        ),
+                      ),
+                    ),
+                ],
+              ),
             ),
           );
         },
+      ),
+    );
+  }
+
+  /// ================= EMPTY VIEW =================
+  Widget _emptyView() {
+    return const Center(
+      child: Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          Icon(Icons.photo_library_outlined,
+              size: 64, color: Colors.white38),
+          SizedBox(height: 12),
+          Text(
+            "No photos yet",
+            style: TextStyle(
+              color: Colors.white54,
+              fontSize: 16,
+            ),
+          ),
+        ],
       ),
     );
   }
