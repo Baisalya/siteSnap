@@ -24,7 +24,7 @@ Future<File> drawOverlay(File file, OverlayData data) async {
   final text = '''
 ${data.dateTime}
 Latitude: ${data.latitude.toStringAsFixed(5)}, Longitude: ${data.longitude.toStringAsFixed(5)}
-Altitude: ${data.altitude.toStringAsFixed(1)} m | ${data.direction}
+Altitude: ${data.altitude.toStringAsFixed(1)} m |Dir: ${data.direction}(${data.heading.toStringAsFixed(0)}°)
 ${data.note}
 ''';
 

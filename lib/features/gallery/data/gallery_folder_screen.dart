@@ -135,7 +135,6 @@ class _GalleryFolderScreenState extends State<GalleryFolderScreen> {
                 selectedImages.add(file);
               });
             },
-
             /// ✅ TAP
             onTap: () {
               if (selectionMode) {
