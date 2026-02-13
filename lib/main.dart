@@ -7,10 +7,10 @@ import 'app.dart';
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
-  // ✅ Lock app UI to portrait
-  await SystemChrome.setPreferredOrientations([
+  SystemChrome.setPreferredOrientations([
     DeviceOrientation.portraitUp,
   ]);
+
 
   runApp(const ProviderScope(child: NoteCamApp()));
 }

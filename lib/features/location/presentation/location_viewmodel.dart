@@ -3,10 +3,17 @@ import 'package:geolocator/geolocator.dart';
 import '../../../core/di/providers.dart';
 
 /// =======================================================
-/// SINGLE LOCATION FETCH (USED WHEN NEEDED)
+/// SINGLE LOCATION FETCH
 /// =======================================================
 final locationViewModelProvider =
 FutureProvider<Position>((ref) async {
+
+  final serviceEnabled =
+  await Geolocator.isLocationServiceEnabled();
+
+  if (!serviceEnabled) {
+    throw Exception("Location services disabled");
+  }
 
   final permission = await Geolocator.checkPermission();
 
@@ -20,19 +27,20 @@ FutureProvider<Position>((ref) async {
 
 
 /// =======================================================
-/// LIVE LOCATION STREAM (FIXED VERSION)
+/// LIVE LOCATION STREAM (STABLE VERSION)
 /// =======================================================
 final locationStreamProvider =
 StreamProvider.autoDispose<Position>((ref) async* {
 
-  /// ✅ Check if location service (GPS) is enabled
-  final serviceEnabled = await Geolocator.isLocationServiceEnabled();
+  // ✅ Check service first
+  final serviceEnabled =
+  await Geolocator.isLocationServiceEnabled();
 
   if (!serviceEnabled) {
     throw Exception("Location services disabled");
   }
 
-  /// ✅ Check permission AFTER user grants it
+  // ✅ Check permission
   final permission = await Geolocator.checkPermission();
 
   if (permission == LocationPermission.denied ||
@@ -40,7 +48,7 @@ StreamProvider.autoDispose<Position>((ref) async* {
     throw Exception("Location permission denied");
   }
 
-  /// ✅ Start stream only when everything OK
+  // ✅ START STREAM IMMEDIATELY
   yield* Geolocator.getPositionStream(
     locationSettings: const LocationSettings(
       accuracy: LocationAccuracy.bestForNavigation,

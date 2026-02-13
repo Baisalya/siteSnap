@@ -4,6 +4,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../core/utils/gallery_saver.dart';
 import '../../overlay/presentation/overlay_viewmodel.dart';
+import '../../camera/presentation/camera_viewmodel.dart';
 import '../../camera/presentation/note_input_sheet.dart';
 
 class ImagePreviewScreen extends ConsumerStatefulWidget {
@@ -55,7 +56,7 @@ class _ImagePreviewScreenState
     }
   }
 
-  /// ✅ EDIT WATERMARK
+  /// ✅ EDIT WATERMARK (FIXED)
   Future<void> _editWatermark() async {
     await showModalBottomSheet(
       context: context,
@@ -64,10 +65,17 @@ class _ImagePreviewScreenState
       builder: (_) => const NoteInputSheet(),
     );
 
-    // regenerate watermark from original
+    /// ✅ Get frozen capture orientation
+    final cameraState =
+    ref.read(cameraViewModelProvider);
+
     final updated = await ref
         .read(overlayViewModelProvider.notifier)
-        .processImage(widget.originalFile);
+        .processImage(
+      widget.originalFile,
+      cameraState.captureOrientation ??
+          cameraState.orientation,
+    );
 
     setState(() {
       _currentFile = updated;
@@ -86,39 +94,25 @@ class _ImagePreviewScreenState
 
       body: Column(
         children: [
-          // ================= IMAGE PREVIEW =================
+          /// ================= IMAGE PREVIEW =================
           Expanded(
             child: InteractiveViewer(
               child: Image.file(
                 _currentFile,
+                fit: BoxFit.contain, // ✅ important
                 filterQuality: FilterQuality.high,
               ),
             ),
           ),
 
-          // ================= ACTION BAR =================
+          /// ================= ACTION BAR =================
           Container(
             padding: const EdgeInsets.all(16),
             color: Colors.black,
             child: Row(
               children: [
-                // EDIT BUTTON
-                /*Expanded(
-                  child: OutlinedButton.icon(
-                    icon: const Icon(Icons.edit),
-                    label: const Text("Edit"),
-                    style: OutlinedButton.styleFrom(
-                      foregroundColor: Colors.white,
-                      side:
-                      const BorderSide(color: Colors.white),
-                    ),
-                    onPressed: _editWatermark,
-                  ),
-                ),*/
-
                 const SizedBox(width: 16),
 
-                // SAVE BUTTON
                 Expanded(
                   child: ElevatedButton.icon(
                     icon: _saving

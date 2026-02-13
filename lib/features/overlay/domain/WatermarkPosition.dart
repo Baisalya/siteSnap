@@ -1,0 +1,4 @@
+enum WatermarkPosition {
+  bottomLeft,
+  bottomRight,
+}

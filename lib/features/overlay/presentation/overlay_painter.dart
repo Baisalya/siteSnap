@@ -1,59 +1,59 @@
 import 'dart:io';
-import 'package:image/image.dart' as img;
+import 'dart:ui' as ui;
+import 'package:flutter/material.dart';
+import 'package:native_device_orientation/native_device_orientation.dart';
+
 import '../domain/overlay_model.dart';
+import 'live_overlay_painter.dart';
 
-Future<File> drawOverlay(File file, OverlayData data) async {
+Future<File> drawOverlay(
+    File file,
+    OverlayData data,
+    NativeDeviceOrientation orientation,
+    ) async {
+
+  /// ===============================
+  /// 1️⃣ LOAD ORIGINAL IMAGE
+  /// ===============================
   final bytes = await file.readAsBytes();
-  var image = img.decodeImage(bytes);
-  if (image == null) throw Exception('Decode failed');
 
-  // ✅ Fix EXIF orientation
-  image = img.bakeOrientation(image);
+  final codec = await ui.instantiateImageCodec(bytes);
+  final frame = await codec.getNextFrame();
+  final uiImage = frame.image;
 
-  final bool isLandscape = image.width > image.height;
+  final width = uiImage.width.toDouble();
+  final height = uiImage.height.toDouble();
 
-  // 🔥 BIGGER, INTENTIONAL SIZES
-  final int padding = isLandscape ? 40 : 32;
-  final int boxHeight = isLandscape ? 260 : 300;
-  final int boxWidth =
-  isLandscape ? (image.width * 0.55).toInt() : image.width;
+  /// ===============================
+  /// 2️⃣ CREATE CANVAS
+  /// ===============================
+  final recorder = ui.PictureRecorder();
+  final canvas = Canvas(recorder);
 
-  final int startX = 0;
-  final int startY = image.height - boxHeight;
+  /// draw original image first
+  final paint = Paint();
+  canvas.drawImage(uiImage, Offset.zero, paint);
 
-  final text = '''
-${data.dateTime}
-Latitude: ${data.latitude.toStringAsFixed(5)}, Longitude: ${data.longitude.toStringAsFixed(5)}
-Altitude: ${data.altitude.toStringAsFixed(1)} m |Dir: ${data.direction}(${data.heading.toStringAsFixed(0)}°)
-${data.note}
-''';
+  /// ===============================
+  /// 3️⃣ DRAW SAME OVERLAY AS CAMERA
+  /// ===============================
+  final overlayPainter =
+  LiveOverlayPainter(data, orientation);
 
-  // 🔲 Background box
-  img.fillRect(
-    image,
-    x1: startX,
-    y1: startY,
-    x2: startX + boxWidth,
-    y2: image.height,
-    color: img.ColorRgba8(0, 0, 0, 170),
-  );
+  overlayPainter.paint(canvas, Size(width, height));
 
-  // 📝 Bigger readable text
-  img.drawString(
-    image,
-    text,
-    font: img.arial48, // 🔥 BIGGER FONT
-    x: startX + padding,
-    y: startY + padding,
-    color: img.ColorRgb8(255, 255, 255),
-  );
+  /// ===============================
+  /// 4️⃣ EXPORT TO IMAGE
+  /// ===============================
+  final picture = recorder.endRecording();
+  final finalImage =
+  await picture.toImage(uiImage.width, uiImage.height);
 
-  final outFile =
-  File(file.path.replaceFirst('.jpg', '_overlay.jpg'));
+  final byteData =
+  await finalImage.toByteData(format: ui.ImageByteFormat.png);
 
-  await outFile.writeAsBytes(
-    img.encodeJpg(image, quality: 100),
-  );
+  final newFile =
+  await file.writeAsBytes(byteData!.buffer.asUint8List());
 
-  return outFile;
+  return newFile;
 }

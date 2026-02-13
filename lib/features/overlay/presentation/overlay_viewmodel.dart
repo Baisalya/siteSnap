@@ -1,7 +1,8 @@
 import 'dart:io';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:image/image.dart' as img;
+import 'package:native_device_orientation/native_device_orientation.dart';
 
-import '../../../core/utils/exif_utils.dart';
 import '../domain/overlay_model.dart';
 import 'overlay_painter.dart';
 import 'overlay_preview_state.dart';
@@ -16,20 +17,41 @@ class OverlayViewModel extends StateNotifier<void> {
 
   OverlayViewModel(this.ref) : super(null);
 
-  /// Takes original camera image
-  /// Applies SAME overlay as live preview
-  /// Returns processed image file (watermark baked in)
-  Future<File> processImage(File original) async {
-    // 1️⃣ Get the SAME overlay data used in live preview
-    final overlay = ref.read(overlayPreviewProvider);
+  /// =======================================================
+  /// PROCESS IMAGE (FINAL STABLE VERSION)
+  /// =======================================================
+  Future<File> processImage(
+      File original,
+      NativeDeviceOrientation orientation,
+      ) async {
 
-    // 2️⃣ Draw watermark on the image
-    final processed = await drawOverlay(original, overlay);
+    /// ✅ 1️⃣ READ ORIGINAL IMAGE
+    final bytes = await original.readAsBytes();
 
-    // ❌ NOTHING ELSE HERE
-    // ❌ NO ExifUtils
-    // ❌ NO copying bytes
+    img.Image? image = img.decodeImage(bytes);
+    if (image == null) return original;
 
-    return processed;
+    /// ✅ 2️⃣ BAKE EXIF ORIENTATION INTO PIXELS
+    /// Camera saves rotation in EXIF.
+    /// When we re-encode image, EXIF is lost.
+    /// So we must apply rotation permanently here.
+    image = img.bakeOrientation(image);
+
+    /// ✅ 3️⃣ WRITE TEMP ORIENTED IMAGE
+    final orientedFile = await original.writeAsBytes(
+      img.encodeJpg(image, quality: 95),
+    );
+
+    /// ✅ 4️⃣ GET SAME OVERLAY DATA AS LIVE PREVIEW
+    final overlayData = ref.read(overlayPreviewProvider);
+
+    /// ✅ 5️⃣ DRAW OVERLAY USING SAME ORIENTATION
+    final processedFile = await drawOverlay(
+      orientedFile,
+      overlayData,
+      orientation,
+    );
+
+    return processedFile;
   }
 }

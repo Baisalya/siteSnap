@@ -1,18 +1,16 @@
+import 'WatermarkPosition.dart';
+
 class OverlayData {
   final String dateTime;
   final double latitude;
   final double longitude;
   final double altitude;
-
-  /// Compass
   final double heading;
   final String direction;
-
-  /// User note
   final String note;
-
-  /// Location warning (GPS off / permission denied etc.)
   final String? locationWarning;
+
+  final WatermarkPosition position; // ✅ NEW
 
   const OverlayData({
     required this.dateTime,
@@ -23,6 +21,7 @@ class OverlayData {
     required this.direction,
     required this.note,
     this.locationWarning,
+    this.position = WatermarkPosition.bottomLeft,
   });
 
   OverlayData copyWith({
@@ -34,6 +33,7 @@ class OverlayData {
     String? direction,
     String? note,
     String? locationWarning,
+    WatermarkPosition? position,
   }) {
     return OverlayData(
       dateTime: dateTime ?? this.dateTime,
@@ -43,8 +43,8 @@ class OverlayData {
       heading: heading ?? this.heading,
       direction: direction ?? this.direction,
       note: note ?? this.note,
-      locationWarning:
-      locationWarning ?? this.locationWarning,
+      locationWarning: locationWarning,
+      position: position ?? this.position,
     );
   }
 }

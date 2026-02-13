@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../overlay/domain/WatermarkPosition.dart';
 import '../../overlay/presentation/saved_notes_provider.dart';
 import '../../overlay/presentation/overlay_preview_state.dart';
 
@@ -57,6 +58,47 @@ class _NoteInputSheetState extends ConsumerState<NoteInputSheet> {
             ),
           ),
           const SizedBox(height: 16),
+          const SizedBox(height: 16),
+
+          const Text(
+            "Watermark Position",
+            style: TextStyle(color: Colors.grey),
+          ),
+
+          Row(
+            children: [
+              Expanded(
+                child: RadioListTile<WatermarkPosition>(
+                  value: WatermarkPosition.bottomLeft,
+                  groupValue:
+                  ref.watch(overlayPreviewProvider).position,
+                  title: const Text("Left",
+                      style: TextStyle(color: Colors.white)),
+                  onChanged: (value) {
+                    final overlay =
+                    ref.read(overlayPreviewProvider);
+                    ref.read(overlayPreviewProvider.notifier).state =
+                        overlay.copyWith(position: value);
+                  },
+                ),
+              ),
+              Expanded(
+                child: RadioListTile<WatermarkPosition>(
+                  value: WatermarkPosition.bottomRight,
+                  groupValue:
+                  ref.watch(overlayPreviewProvider).position,
+                  title: const Text("Right",
+                      style: TextStyle(color: Colors.white)),
+                  onChanged: (value) {
+                    final overlay =
+                    ref.read(overlayPreviewProvider);
+                    ref.read(overlayPreviewProvider.notifier).state =
+                        overlay.copyWith(position: value);
+                  },
+                ),
+              ),
+            ],
+          ),
 
           // ───── INPUT ─────
           TextField(

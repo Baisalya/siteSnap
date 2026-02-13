@@ -1,6 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import '../domain/WatermarkPosition.dart';
 import 'note_controller.dart';
+import 'overlay_preview_state.dart';
+
 
 class NoteEditSheet extends ConsumerWidget {
   const NoteEditSheet({super.key});
@@ -8,6 +11,7 @@ class NoteEditSheet extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final note = ref.watch(noteControllerProvider);
+    final overlay = ref.watch(overlayPreviewProvider);
 
     return Padding(
       padding: MediaQuery.of(context).viewInsets,
@@ -18,9 +22,17 @@ class NoteEditSheet extends ConsumerWidget {
           children: [
             const Text(
               'Edit Watermark Text',
-              style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+              style: TextStyle(
+                fontSize: 18,
+                fontWeight: FontWeight.bold,
+              ),
             ),
+
             const SizedBox(height: 12),
+
+            // ===========================
+            // NOTE TEXT FIELD
+            // ===========================
             TextField(
               maxLength: 120,
               autofocus: true,
@@ -33,8 +45,39 @@ class NoteEditSheet extends ConsumerWidget {
                   TextPosition(offset: note.length),
                 ),
               onChanged: (value) {
-                ref.read(noteControllerProvider.notifier).update(value);
+                ref
+                    .read(noteControllerProvider.notifier)
+                    .update(value);
               },
+            ),
+
+            const SizedBox(height: 10),
+
+            // ===========================
+            // POSITION SWITCH
+            // ===========================
+            Row(
+              mainAxisAlignment:
+              MainAxisAlignment.spaceBetween,
+              children: [
+                const Text(
+                  "Left Overlay Position",
+                  style: TextStyle(fontSize: 16),
+                ),
+                Switch(
+                  value: overlay.position ==
+                      WatermarkPosition.bottomLeft,
+                  onChanged: (value) {
+                    ref
+                        .read(overlayPreviewProvider.notifier)
+                        .state = overlay.copyWith(
+                      position: value
+                          ? WatermarkPosition.bottomLeft
+                          : WatermarkPosition.bottomRight,
+                    );
+                  },
+                ),
+              ],
             ),
           ],
         ),

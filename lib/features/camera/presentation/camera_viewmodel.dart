@@ -3,6 +3,7 @@ import 'package:camera/camera.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/widgets.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:native_device_orientation/native_device_orientation.dart';
 
 import '../../../core/di/providers.dart';
 import '../../../core/permissions/permission_service.dart';
@@ -10,6 +11,7 @@ import '../../gallery/presentation/image_preview_screen.dart';
 import '../../gallery/presentation/last_image_provider.dart';
 import '../../location/presentation/location_viewmodel.dart';
 import '../../overlay/presentation/overlay_viewmodel.dart';
+import '../data/CameraState.dart';
 import '../domain/camera_lens_type.dart';
 
 final cameraViewModelProvider =
@@ -17,44 +19,6 @@ StateNotifierProvider<CameraViewModel, CameraState>((ref) {
   return CameraViewModel(ref);
 });
 
-/// =======================================================
-/// ✅ CAMERA STATE
-/// =======================================================
-class CameraState {
-  final bool isReady;
-  final CameraController? controller;
-  final bool flashOn;
-  final CameraLensType currentLens;
-  final bool isCapturing;
-
-  const CameraState({
-    required this.isReady,
-    this.controller,
-    this.flashOn = false,
-    this.currentLens = CameraLensType.normal,
-    this.isCapturing = false,
-  });
-
-  CameraState copyWith({
-    bool? isReady,
-    CameraController? controller,
-    bool? flashOn,
-    CameraLensType? currentLens,
-    bool? isCapturing,
-  }) {
-    return CameraState(
-      isReady: isReady ?? this.isReady,
-      controller: controller ?? this.controller,
-      flashOn: flashOn ?? this.flashOn,
-      currentLens: currentLens ?? this.currentLens,
-      isCapturing: isCapturing ?? this.isCapturing,
-    );
-  }
-}
-
-/// =======================================================
-/// ✅ CAMERA VIEWMODEL (PRO STABLE VERSION)
-/// =======================================================
 class CameraViewModel extends StateNotifier<CameraState>
     with WidgetsBindingObserver {
 
@@ -67,7 +31,7 @@ class CameraViewModel extends StateNotifier<CameraState>
   }
 
   /// =======================================================
-  /// ✅ INITIALIZE CAMERA + PERMISSIONS
+  /// INIT CAMERA
   /// =======================================================
   Future<void> _init() async {
     try {
@@ -88,12 +52,21 @@ class CameraViewModel extends StateNotifier<CameraState>
   }
 
   /// =======================================================
-  /// ✅ APP LIFECYCLE HANDLING
+  /// UPDATE ORIENTATION FROM SENSOR
+  /// (Called from CameraScreen reader)
+  /// =======================================================
+  void updateOrientation(NativeDeviceOrientation orientation) {
+    if (state.orientation != orientation) {
+      state = state.copyWith(orientation: orientation);
+    }
+  }
+
+  /// =======================================================
+  /// APP LIFECYCLE
   /// =======================================================
   @override
   void didChangeAppLifecycleState(AppLifecycleState lifecycleState) {
     final controller = state.controller;
-
     if (controller == null) return;
 
     if (lifecycleState == AppLifecycleState.inactive ||
@@ -123,28 +96,21 @@ class CameraViewModel extends StateNotifier<CameraState>
   }
 
   /// =======================================================
-  /// ✅ PRO AUTOFOCUS + EXPOSURE PREPARATION
-  /// (PREVENTS BLUR + FLASH MISFIRE)
+  /// AUTO FOCUS PREP
   /// =======================================================
   Future<void> _prepareAutoFocus(CameraController controller) async {
     try {
       await controller.setFocusMode(FocusMode.auto);
       await controller.setExposureMode(ExposureMode.auto);
-
-      // allow focus to settle
       await Future.delayed(const Duration(milliseconds: 250));
-
-      // flash needs extra exposure calculation time
-      if (state.flashOn) {
-        await Future.delayed(const Duration(milliseconds: 200));
-      }
     } catch (_) {}
   }
 
   /// =======================================================
-  /// 📸 CAPTURE IMAGE (PRO VERSION)
+  /// CAPTURE IMAGE (FINAL STABLE VERSION)
   /// =======================================================
   Future<void> capture(BuildContext context) async {
+
     final controller = state.controller;
 
     if (!state.isReady ||
@@ -155,12 +121,15 @@ class CameraViewModel extends StateNotifier<CameraState>
       return;
     }
 
-    state = state.copyWith(isCapturing: true);
+    /// Freeze orientation at capture moment
+    state = state.copyWith(
+      isCapturing: true,
+      captureOrientation: state.orientation,
+    );
 
     try {
       final repo = ref.read(cameraRepositoryProvider);
 
-      // ✅ LOCK FOCUS BEFORE CAPTURE
       await _prepareAutoFocus(controller);
 
       final originalPath = await repo.takePicture();
@@ -168,7 +137,10 @@ class CameraViewModel extends StateNotifier<CameraState>
 
       final processedFile = await ref
           .read(overlayViewModelProvider.notifier)
-          .processImage(originalFile);
+          .processImage(
+        originalFile,
+        state.captureOrientation!,
+      );
 
       if (!context.mounted) return;
 
@@ -194,7 +166,7 @@ class CameraViewModel extends StateNotifier<CameraState>
   }
 
   /// =======================================================
-  /// 🔦 FLASH TOGGLE
+  /// FLASH
   /// =======================================================
   Future<void> toggleFlash() async {
     final controller = state.controller;
@@ -210,27 +182,7 @@ class CameraViewModel extends StateNotifier<CameraState>
   }
 
   /// =======================================================
-  /// 🔍 SWITCH LENS
-  /// =======================================================
-  Future<void> switchLens(CameraLensType type) async {
-    if (type == state.currentLens) return;
-
-    final repo = ref.read(cameraRepositoryProvider);
-
-    state.controller?.dispose();
-    state = state.copyWith(isReady: false);
-
-    await repo.initialize(type);
-
-    state = state.copyWith(
-      isReady: true,
-      controller: repo.controller,
-      currentLens: type,
-    );
-  }
-
-  /// =======================================================
-  /// 🎯 TAP TO FOCUS
+  /// TAP TO FOCUS
   /// =======================================================
   Future<void> setFocusPoint(
       Offset position, Size previewSize) async {
@@ -244,15 +196,9 @@ class CameraViewModel extends StateNotifier<CameraState>
 
       await controller.setFocusPoint(Offset(dx, dy));
       await controller.setExposurePoint(Offset(dx, dy));
-
-      await controller.setFocusMode(FocusMode.auto);
-      await controller.setExposureMode(ExposureMode.auto);
     } catch (_) {}
   }
 
-  /// =======================================================
-  /// CLEANUP
-  /// =======================================================
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);

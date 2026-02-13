@@ -1,21 +1,61 @@
+import 'dart:math';
 import 'package:flutter/material.dart';
+import 'package:native_device_orientation/native_device_orientation.dart';
+
 import '../domain/overlay_model.dart';
+import '../domain/WatermarkPosition.dart';
 
 class LiveOverlayPainter extends CustomPainter {
   final OverlayData data;
+  final NativeDeviceOrientation orientation;
 
-  LiveOverlayPainter(this.data);
+  LiveOverlayPainter(this.data, this.orientation);
 
   @override
   void paint(Canvas canvas, Size size) {
     if (size.width == 0 || size.height == 0) return;
 
+    canvas.save();
+
+    // ===============================
+    // ROTATE CANVAS (CORRECT TYPE)
+    // ===============================
+    if (orientation ==
+        NativeDeviceOrientation.landscapeLeft) {
+      canvas.translate(size.width, 0);
+      canvas.rotate(pi / 2);
+    } else if (orientation ==
+        NativeDeviceOrientation.landscapeRight) {
+      canvas.translate(0, size.height);
+      canvas.rotate(-pi / 2);
+    } else if (orientation ==
+        NativeDeviceOrientation.portraitDown) {
+      canvas.translate(size.width, size.height);
+      canvas.rotate(pi);
+    }
+
+    // ===============================
+    // DRAW SIZE FIX
+    // ===============================
+    double drawWidth = size.width;
+    double drawHeight = size.height;
+
+    if (orientation ==
+        NativeDeviceOrientation.landscapeLeft ||
+        orientation ==
+            NativeDeviceOrientation.landscapeRight) {
+      drawWidth = size.height;
+      drawHeight = size.width;
+    }
+
     // ===============================
     // TEXT STYLE
     // ===============================
+    final baseSize = min(drawWidth, drawHeight);
+
     final textStyle = TextStyle(
       color: Colors.white,
-      fontSize: size.width * 0.035, // ✅ responsive size
+      fontSize: baseSize * 0.035,
       height: 1.25,
       shadows: const [
         Shadow(
@@ -26,9 +66,6 @@ class LiveOverlayPainter extends CustomPainter {
       ],
     );
 
-    // ===============================
-    // WATERMARK TEXT
-    // ===============================
     final text = '''
 ${data.dateTime}
 Latitude: ${data.latitude.toStringAsFixed(5)}, Longitude: ${data.longitude.toStringAsFixed(5)}
@@ -44,28 +81,32 @@ ${data.note}
       ellipsis: '…',
     );
 
-    textPainter.layout(maxWidth: size.width * 0.9);
+    textPainter.layout(maxWidth: drawWidth * 0.9);
 
     // ===============================
-    // ✅ RELATIVE POSITIONING (FIX)
-    // Works in portrait + landscape
+    // POSITIONING
     // ===============================
-    final marginX = size.width * 0.03;
-    final marginY = size.height * 0.03;
+    final marginX = drawWidth * 0.03;
+    final marginY = drawHeight * 0.03;
 
-    final offset = Offset(
-      marginX,
-      size.height - textPainter.height - marginY,
-    );
+    final dx = data.position ==
+        WatermarkPosition.bottomLeft
+        ? marginX
+        : drawWidth - textPainter.width - marginX;
+
+    final dy =
+        drawHeight - textPainter.height - marginY;
+
+    final offset = Offset(dx, dy);
 
     // ===============================
-    // BACKGROUND BOX
+    // BACKGROUND
     // ===============================
     final bgRect = Rect.fromLTWH(
-      offset.dx - size.width * 0.01,
-      offset.dy - size.height * 0.01,
-      textPainter.width + size.width * 0.02,
-      textPainter.height + size.height * 0.02,
+      offset.dx - drawWidth * 0.01,
+      offset.dy - drawHeight * 0.01,
+      textPainter.width + drawWidth * 0.02,
+      textPainter.height + drawHeight * 0.02,
     );
 
     final bgPaint = Paint()
@@ -79,42 +120,14 @@ ${data.note}
       bgPaint,
     );
 
-    // ===============================
-    // DRAW TEXT
-    // ===============================
     textPainter.paint(canvas, offset);
 
-    // ===============================
-    // LOCATION WARNING (TOP LEFT)
-    // ===============================
-    if (data.locationWarning != null &&
-        data.locationWarning!.isNotEmpty) {
-      final warningPainter = TextPainter(
-        text: TextSpan(
-          text: data.locationWarning!,
-          style: TextStyle(
-            color: Colors.red,
-            fontSize: size.width * 0.032,
-            fontWeight: FontWeight.bold,
-          ),
-        ),
-        textDirection: TextDirection.ltr,
-      );
-
-      warningPainter.layout();
-
-      warningPainter.paint(
-        canvas,
-        Offset(
-          size.width * 0.03,
-          size.height * 0.05,
-        ),
-      );
-    }
+    canvas.restore();
   }
 
   @override
   bool shouldRepaint(covariant LiveOverlayPainter oldDelegate) {
-    return oldDelegate.data != data;
+    return oldDelegate.data != data ||
+        oldDelegate.orientation != orientation;
   }
 }
