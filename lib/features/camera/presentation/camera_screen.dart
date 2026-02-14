@@ -1,13 +1,12 @@
-import 'dart:async';
 import 'dart:io';
 import 'package:camera/camera.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:sensors_plus/sensors_plus.dart';
 
 import '../../../core/utils/datetime_utils.dart';
 import '../../../core/utils/developer_info_dialog.dart';
+import '../../../core/utils/device_orientation_provider.dart';
 import '../../../core/utils/direction_utils.dart';
 import '../../../core/utils/focus_point_provider.dart';
 import '../../compass/presentation/compass_provider.dart';
@@ -17,11 +16,8 @@ import '../../location/presentation/location_viewmodel.dart';
 import '../../overlay/presentation/live_overlay_painter.dart';
 import '../../overlay/presentation/overlay_preview_state.dart';
 import 'camera_viewmodel.dart';
+import 'capture_button.dart';
 import 'note_input_sheet.dart';
-
-final deviceOrientationProvider =
-StateProvider<DeviceOrientation>(
-        (ref) => DeviceOrientation.portraitUp);
 
 class CameraScreen extends ConsumerStatefulWidget {
   const CameraScreen({super.key});
@@ -33,46 +29,6 @@ class CameraScreen extends ConsumerStatefulWidget {
 
 class _CameraScreenState
     extends ConsumerState<CameraScreen> {
-
-  StreamSubscription? _sensorSub;
-
-  @override
-  void initState() {
-    super.initState();
-
-    _sensorSub = accelerometerEvents.listen((event) {
-      final x = event.x;
-      final y = event.y;
-
-      DeviceOrientation orientation;
-
-      // prevents jumping when device slightly tilted
-      const threshold = 6.0;
-
-      if (x.abs() > y.abs()) {
-        // LANDSCAPE
-        if (x > threshold) {
-          orientation = DeviceOrientation.landscapeRight;
-        } else if (x < -threshold) {
-          orientation = DeviceOrientation.landscapeLeft;
-        } else {
-          return;
-        }
-      } else {
-        // PORTRAIT
-        if (y > threshold) {
-          orientation = DeviceOrientation.portraitUp;
-        } else if (y < -threshold) {
-          orientation = DeviceOrientation.portraitDown;
-        } else {
-          return;
-        }
-      }
-
-      ref.read(deviceOrientationProvider.notifier).state =
-          orientation;
-    });
-  }
 
   String _orientationText(DeviceOrientation orientation) {
     switch (orientation) {
@@ -88,12 +44,6 @@ class _CameraScreenState
   }
 
   @override
-  void dispose() {
-    _sensorSub?.cancel();
-    super.dispose();
-  }
-
-  @override
   Widget build(BuildContext context) {
     final cameraState = ref.watch(cameraViewModelProvider);
     final cameraVM =
@@ -102,6 +52,8 @@ class _CameraScreenState
     final overlayData = ref.watch(overlayPreviewProvider);
     final lastImage = ref.watch(lastImageProvider);
     final focusPoint = ref.watch(focusPointProvider);
+
+    /// ✅ READ orientation ONLY from provider
     final deviceOrientation =
     ref.watch(deviceOrientationProvider);
     // ================= LOCATION LISTENER =================
@@ -111,7 +63,6 @@ class _CameraScreenState
         data: (position) {
           final current =
           ref.read(overlayPreviewProvider);
-          // ✅ UPDATE DATA + REMOVE WARNING
 
           ref
               .read(overlayPreviewProvider.notifier)
@@ -153,6 +104,8 @@ class _CameraScreenState
       );
     });
 
+    // ================= COMPASS LISTENER =================
+
     ref.listen(compassHeadingProvider, (_, next) {
       next.whenData((heading) {
         final current =
@@ -167,12 +120,16 @@ class _CameraScreenState
         );
       });
     });
+
+    // ================= ORIENTATION LISTENER =================
+
     ref.listen<DeviceOrientation>(
       deviceOrientationProvider,
           (_, next) {
         cameraVM.updateOrientation(next);
       },
     );
+
     if (!cameraState.isReady ||
         cameraState.controller == null) {
       return const Scaffold(
@@ -182,17 +139,16 @@ class _CameraScreenState
     }
 
     final controller = cameraState.controller!;
-
- /*   WidgetsBinding.instance.addPostFrameCallback((_) {
+/*   WidgetsBinding.instance.addPostFrameCallback((_) {
       cameraVM.updateOrientation(deviceOrientation);
     });*/
-
     return SafeArea(
       child: Scaffold(
         backgroundColor: Colors.black,
         body: Column(
           children: [
             // ================= CAMERA PREVIEW =================
+
             Expanded(
               child: LayoutBuilder(
                 builder: (context, constraints) {
@@ -209,9 +165,8 @@ class _CameraScreenState
                               details.localPosition;
 
                           ref
-                              .read(
-                              focusPointProvider
-                                  .notifier)
+                              .read(focusPointProvider
+                              .notifier)
                               .state = tapPosition;
 
                           cameraVM.setFocusPoint(
@@ -230,8 +185,7 @@ class _CameraScreenState
                             },
                           );
                         },
-                        child:
-                        CameraPreview(controller),
+                        child: CameraPreview(controller),
                       ),
 
                       Positioned.fill(
@@ -246,7 +200,6 @@ class _CameraScreenState
                         ),
                       ),
 
-                      // ORIENTATION TEXT
                       Positioned(
                         bottom: 20,
                         left: 16,
@@ -266,8 +219,7 @@ class _CameraScreenState
                           child: Text(
                             _orientationText(
                                 deviceOrientation),
-                            style:
-                            const TextStyle(
+                            style: const TextStyle(
                               color: Colors.white,
                               fontSize: 14,
                               fontWeight:
@@ -282,7 +234,7 @@ class _CameraScreenState
                         child: IconButton(
                           icon: const Icon(
                             Icons.info_outline,
-                            color: Colors.white,
+                            color: Colors.amberAccent,
                           ),
                           onPressed: () {
                             showDialog(
@@ -296,23 +248,18 @@ class _CameraScreenState
 
                       if (focusPoint != null)
                         Positioned(
-                          left:
-                          focusPoint.dx - 30,
-                          top:
-                          focusPoint.dy - 30,
+                          left: focusPoint.dx - 30,
+                          top: focusPoint.dy - 30,
                           child: Container(
                             width: 60,
                             height: 60,
-                            decoration:
-                            BoxDecoration(
+                            decoration: BoxDecoration(
                               border: Border.all(
-                                color:
-                                Colors.yellow,
+                                color: Colors.yellow,
                                 width: 2,
                               ),
                               borderRadius:
-                              BorderRadius
-                                  .circular(
+                              BorderRadius.circular(
                                   8),
                             ),
                           ),
@@ -328,11 +275,9 @@ class _CameraScreenState
                           onPressed: () {
                             showModalBottomSheet(
                               context: context,
-                              isScrollControlled:
-                              true,
+                              isScrollControlled: true,
                               backgroundColor:
-                              Colors
-                                  .transparent,
+                              Colors.transparent,
                               builder: (_) =>
                               const NoteInputSheet(),
                             );
@@ -345,7 +290,6 @@ class _CameraScreenState
               ),
             ),
 
-            // BOTTOM CONTROLS
             Container(
               height: 140,
               padding:
@@ -354,8 +298,7 @@ class _CameraScreenState
               color: Colors.black,
               child: Row(
                 mainAxisAlignment:
-                MainAxisAlignment
-                    .spaceBetween,
+                MainAxisAlignment.spaceBetween,
                 children: [
                   IconButton(
                     icon: Icon(
@@ -367,24 +310,10 @@ class _CameraScreenState
                     onPressed:
                     cameraVM.toggleFlash,
                   ),
-                  GestureDetector(
-                    onTap: () =>
-                        cameraVM.capture(context),
-                    child: Container(
-                      height: 72,
-                      width: 72,
-                      decoration:
-                      BoxDecoration(
-                        shape:
-                        BoxShape.circle,
-                        color: Colors.white,
-                        border: Border.all(
-                          color:
-                          Colors.grey.shade400,
-                          width: 4,
-                        ),
-                      ),
-                    ),
+                  CaptureButton(
+                    onCapture: () {
+                      cameraVM.capture(context);
+                    },
                   ),
                   GestureDetector(
                     onTap: () {
@@ -402,15 +331,11 @@ class _CameraScreenState
                       Colors.grey.shade800,
                       backgroundImage:
                       lastImage != null
-                          ? FileImage(
-                          lastImage)
+                          ? FileImage(lastImage)
                           : null,
-                      child: lastImage ==
-                          null
-                          ? const Icon(
-                          Icons.image,
-                          color:
-                          Colors.white)
+                      child: lastImage == null
+                          ? const Icon(Icons.image,
+                          color: Colors.white)
                           : null,
                     ),
                   ),
