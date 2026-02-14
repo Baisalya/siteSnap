@@ -1,5 +1,5 @@
 import 'package:camera/camera.dart';
-import 'package:native_device_orientation/native_device_orientation.dart';
+import 'package:flutter/services.dart';
 
 import '../domain/camera_lens_type.dart';
 
@@ -14,10 +14,11 @@ class CameraState {
   final bool isCapturing;
 
   /// live orientation from sensor (changes continuously)
-  final NativeDeviceOrientation orientation;
+  final DeviceOrientation
+ orientation;
 
   /// frozen orientation at capture moment
-  final NativeDeviceOrientation? captureOrientation;
+  final DeviceOrientation? captureOrientation;
 
   const CameraState({
     required this.isReady,
@@ -25,7 +26,8 @@ class CameraState {
     this.flashOn = false,
     this.currentLens = CameraLensType.normal,
     this.isCapturing = false,
-    this.orientation = NativeDeviceOrientation.portraitUp,
+    this.orientation = DeviceOrientation
+.portraitUp,
     this.captureOrientation,
   });
 
@@ -35,8 +37,8 @@ class CameraState {
     bool? flashOn,
     CameraLensType? currentLens,
     bool? isCapturing,
-    NativeDeviceOrientation? orientation,
-    NativeDeviceOrientation? captureOrientation,
+    DeviceOrientation? orientation,
+    DeviceOrientation? captureOrientation,
   }) {
     return CameraState(
       isReady: isReady ?? this.isReady,

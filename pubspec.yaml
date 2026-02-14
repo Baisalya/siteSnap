@@ -60,7 +60,7 @@ dependencies:
   url_launcher: ^6.2.5
   share_plus: ^7.2.1
   sensors_plus: ^4.0.2
-  native_device_orientation: ^2.0.3
+
 
   exif: ^3.1.4
 dev_dependencies:

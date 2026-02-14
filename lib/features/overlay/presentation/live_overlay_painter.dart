@@ -1,13 +1,13 @@
 import 'dart:math';
 import 'package:flutter/material.dart';
-import 'package:native_device_orientation/native_device_orientation.dart';
+import 'package:flutter/services.dart';
 
 import '../domain/overlay_model.dart';
 import '../domain/WatermarkPosition.dart';
 
 class LiveOverlayPainter extends CustomPainter {
   final OverlayData data;
-  final NativeDeviceOrientation orientation;
+  final DeviceOrientation orientation;
 
   LiveOverlayPainter(this.data, this.orientation);
 
@@ -18,21 +18,36 @@ class LiveOverlayPainter extends CustomPainter {
     canvas.save();
 
     // ===============================
-    // ROTATE CANVAS (CORRECT TYPE)
+// ROTATE CANVAS (FIXED)
+// ===============================
     // ===============================
-    if (orientation ==
-        NativeDeviceOrientation.landscapeLeft) {
-      canvas.translate(size.width, 0);
-      canvas.rotate(pi / 2);
-    } else if (orientation ==
-        NativeDeviceOrientation.landscapeRight) {
-      canvas.translate(0, size.height);
-      canvas.rotate(-pi / 2);
-    } else if (orientation ==
-        NativeDeviceOrientation.portraitDown) {
-      canvas.translate(size.width, size.height);
-      canvas.rotate(pi);
+// ROTATE CANVAS (LANDSCAPE FIX)
+// ===============================
+    switch (orientation) {
+
+      case DeviceOrientation.portraitUp:
+      // no rotation
+        break;
+
+      case DeviceOrientation.portraitDown:
+        canvas.translate(size.width, size.height);
+        canvas.rotate(pi);
+        break;
+
+    // FIXED (swapped rotations)
+      case DeviceOrientation.landscapeLeft:
+        canvas.translate(0, size.height);
+        canvas.rotate(-pi / 2);
+        break;
+
+      case DeviceOrientation.landscapeRight:
+        canvas.translate(size.width, 0);
+        canvas.rotate(pi / 2);
+        break;
     }
+
+
+    // portraitUp → no rotation
 
     // ===============================
     // DRAW SIZE FIX
@@ -40,10 +55,8 @@ class LiveOverlayPainter extends CustomPainter {
     double drawWidth = size.width;
     double drawHeight = size.height;
 
-    if (orientation ==
-        NativeDeviceOrientation.landscapeLeft ||
-        orientation ==
-            NativeDeviceOrientation.landscapeRight) {
+    if (orientation == DeviceOrientation.landscapeLeft ||
+        orientation == DeviceOrientation.landscapeRight) {
       drawWidth = size.height;
       drawHeight = size.width;
     }
@@ -84,16 +97,16 @@ ${data.note}
     textPainter.layout(maxWidth: drawWidth * 0.9);
 
     // ===============================
-    // POSITIONING
+    // POSITIONING (NO ORIENTATION CHECK)
     // ===============================
     final marginX = drawWidth * 0.03;
     final marginY = drawHeight * 0.03;
 
-    final dx = data.position ==
-        WatermarkPosition.bottomLeft
+    final dx = data.position == WatermarkPosition.bottomLeft
         ? marginX
         : drawWidth - textPainter.width - marginX;
 
+    // ALWAYS draw at bottom
     final dy =
         drawHeight - textPainter.height - marginY;
 

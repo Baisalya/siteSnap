@@ -2,7 +2,7 @@ import 'dart:io';
 import 'dart:math';
 import 'dart:ui' as ui;
 import 'package:flutter/material.dart';
-import 'package:native_device_orientation/native_device_orientation.dart';
+import 'package:flutter/services.dart';
 
 import '../domain/overlay_model.dart';
 import 'live_overlay_painter.dart';
@@ -10,9 +10,8 @@ import 'live_overlay_painter.dart';
 Future<File> drawOverlay(
     File file,
     OverlayData data,
-    NativeDeviceOrientation orientation,
+    DeviceOrientation orientation,
     ) async {
-
   /// ===============================
   /// 1️⃣ LOAD IMAGE
   /// ===============================
@@ -28,13 +27,12 @@ Future<File> drawOverlay(
   double dstW = srcW;
   double dstH = srcH;
 
-  /// swap size for landscape output
-  if (orientation == NativeDeviceOrientation.landscapeLeft ||
-      orientation == NativeDeviceOrientation.landscapeRight) {
+  // landscape ke liye size swap
+  if (orientation == DeviceOrientation.landscapeLeft ||
+      orientation == DeviceOrientation.landscapeRight) {
     dstW = srcH;
     dstH = srcW;
   }
-
   /// ===============================
   /// 2️⃣ CREATE CANVAS
   /// ===============================
@@ -44,52 +42,59 @@ Future<File> drawOverlay(
   canvas.save();
 
   /// ===============================
-  /// 3️⃣ ROTATE CANVAS
+  /// ROTATE IMAGE LIKE REAL CAMERA
   /// ===============================
-  if (orientation == NativeDeviceOrientation.landscapeLeft) {
-    canvas.translate(0, dstH);
-    canvas.rotate(-pi / 2);
-  }
-  else if (orientation == NativeDeviceOrientation.landscapeRight) {
-    canvas.translate(dstW, 0);
-    canvas.rotate(pi / 2);
-  }
-  else if (orientation == NativeDeviceOrientation.portraitDown) {
-    canvas.translate(dstW, dstH);
-    canvas.rotate(pi);
+  switch (orientation) {
+
+    case DeviceOrientation.portraitUp:
+    // no rotation
+      break;
+
+    case DeviceOrientation.portraitDown:
+      canvas.translate(dstW, dstH);
+      canvas.rotate(pi);
+      break;
+
+  // ✅ FIXED (SWAPPED)
+    case DeviceOrientation.landscapeLeft:
+      canvas.translate(dstW, 0);
+      canvas.rotate(pi / 2);
+      break;
+
+    case DeviceOrientation.landscapeRight:
+      canvas.translate(0, dstH);
+      canvas.rotate(-pi / 2);
+      break;
   }
 
 
-  /// ===============================
-  /// 4️⃣ DRAW IMAGE (NO CROPPING)
-  /// ===============================
-  canvas.drawImageRect(
+  /// DRAW IMAGE
+  canvas.drawImage(
     uiImage,
-    Rect.fromLTWH(0, 0, srcW, srcH),
-    Rect.fromLTWH(0, 0, srcW, srcH),
+    Offset.zero,
     Paint(),
   );
 
-  /// ===============================
-  /// 5️⃣ DRAW OVERLAY
-  /// ===============================
+  /// DRAW OVERLAY
   final overlayPainter =
   LiveOverlayPainter(data, orientation);
 
-  overlayPainter.paint(canvas, Size(srcW, srcH));
+  overlayPainter.paint(
+    canvas,
+    Size(srcW, srcH),
+  );
 
   canvas.restore();
 
-  /// ===============================
-  /// 6️⃣ EXPORT IMAGE
-  /// ===============================
   final picture = recorder.endRecording();
 
   final finalImage =
   await picture.toImage(dstW.toInt(), dstH.toInt());
 
   final byteData =
-  await finalImage.toByteData(format: ui.ImageByteFormat.png);
+  await finalImage.toByteData(
+    format: ui.ImageByteFormat.png,
+  );
 
   final newFile =
   await file.writeAsBytes(byteData!.buffer.asUint8List());

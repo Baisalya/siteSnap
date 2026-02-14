@@ -1,12 +1,13 @@
 import 'dart:io';
 import 'package:camera/camera.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter/widgets.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:native_device_orientation/native_device_orientation.dart';
 
 import '../../../core/di/providers.dart';
 import '../../../core/permissions/permission_service.dart';
+import '../../../core/utils/device_orientation_provider.dart';
 import '../../gallery/presentation/image_preview_screen.dart';
 import '../../gallery/presentation/last_image_provider.dart';
 import '../../location/presentation/location_viewmodel.dart';
@@ -21,7 +22,6 @@ StateNotifierProvider<CameraViewModel, CameraState>((ref) {
 
 class CameraViewModel extends StateNotifier<CameraState>
     with WidgetsBindingObserver {
-
   final Ref ref;
 
   CameraViewModel(this.ref)
@@ -29,7 +29,6 @@ class CameraViewModel extends StateNotifier<CameraState>
     WidgetsBinding.instance.addObserver(this);
     _init();
   }
-
   /// =======================================================
   /// INIT CAMERA
   /// =======================================================
@@ -41,26 +40,34 @@ class CameraViewModel extends StateNotifier<CameraState>
       final repo = ref.read(cameraRepositoryProvider);
       await repo.initialize(CameraLensType.normal);
 
+      final controller = repo.controller;
+
+      if (controller != null) {
+        final min = await controller.getMinExposureOffset();
+        final max = await controller.getMaxExposureOffset();
+
+        final exposure = (min + max) / 6;
+        await controller.setExposureOffset(exposure);
+      }
+
       state = state.copyWith(
         isReady: true,
-        controller: repo.controller,
+        controller: controller,
         currentLens: CameraLensType.normal,
       );
     } catch (e) {
       debugPrint('Init error: $e');
     }
   }
-
   /// =======================================================
   /// UPDATE ORIENTATION FROM SENSOR
   /// (Called from CameraScreen reader)
   /// =======================================================
-  void updateOrientation(NativeDeviceOrientation orientation) {
+  void updateOrientation(DeviceOrientation orientation) {
     if (state.orientation != orientation) {
       state = state.copyWith(orientation: orientation);
     }
   }
-
   /// =======================================================
   /// APP LIFECYCLE
   /// =======================================================
@@ -95,22 +102,20 @@ class CameraViewModel extends StateNotifier<CameraState>
     }
   }
 
-  /// =======================================================
-  /// AUTO FOCUS PREP
-  /// =======================================================
   Future<void> _prepareAutoFocus(CameraController controller) async {
     try {
       await controller.setFocusMode(FocusMode.auto);
       await controller.setExposureMode(ExposureMode.auto);
-      await Future.delayed(const Duration(milliseconds: 250));
+
+      await Future.delayed(const Duration(milliseconds: 300));
+
+      await controller.setExposureMode(ExposureMode.locked);
     } catch (_) {}
   }
-
   /// =======================================================
   /// CAPTURE IMAGE (FINAL STABLE VERSION)
   /// =======================================================
   Future<void> capture(BuildContext context) async {
-
     final controller = state.controller;
 
     if (!state.isReady ||
@@ -121,10 +126,12 @@ class CameraViewModel extends StateNotifier<CameraState>
       return;
     }
 
-    /// Freeze orientation at capture moment
+    final deviceOrientation =
+    ref.read(deviceOrientationProvider);
+
     state = state.copyWith(
       isCapturing: true,
-      captureOrientation: state.orientation,
+      captureOrientation: deviceOrientation,
     );
 
     try {
@@ -157,14 +164,12 @@ class CameraViewModel extends StateNotifier<CameraState>
       if (result != null) {
         ref.read(lastImageProvider.notifier).state = result;
       }
-
     } catch (e) {
       debugPrint('Capture error: $e');
     } finally {
       state = state.copyWith(isCapturing: false);
     }
   }
-
   /// =======================================================
   /// FLASH
   /// =======================================================
@@ -180,13 +185,11 @@ class CameraViewModel extends StateNotifier<CameraState>
 
     state = state.copyWith(flashOn: newFlashState);
   }
-
   /// =======================================================
   /// TAP TO FOCUS
   /// =======================================================
   Future<void> setFocusPoint(
       Offset position, Size previewSize) async {
-
     final controller = state.controller;
     if (controller == null) return;
 

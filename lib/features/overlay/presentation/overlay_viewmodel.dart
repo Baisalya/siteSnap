@@ -1,7 +1,7 @@
 import 'dart:io';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:image/image.dart' as img;
-import 'package:native_device_orientation/native_device_orientation.dart';
 
 import '../domain/overlay_model.dart';
 import 'overlay_painter.dart';
@@ -22,7 +22,7 @@ class OverlayViewModel extends StateNotifier<void> {
   /// =======================================================
   Future<File> processImage(
       File original,
-      NativeDeviceOrientation orientation,
+      DeviceOrientation orientation,
       ) async {
 
     /// ✅ 1️⃣ READ ORIGINAL IMAGE
@@ -39,7 +39,7 @@ class OverlayViewModel extends StateNotifier<void> {
 
     /// ✅ 3️⃣ WRITE TEMP ORIENTED IMAGE
     final orientedFile = await original.writeAsBytes(
-      img.encodeJpg(image, quality: 95),
+      img.encodeJpg(image, quality: 100),
     );
 
     /// ✅ 4️⃣ GET SAME OVERLAY DATA AS LIVE PREVIEW
