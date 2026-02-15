@@ -68,7 +68,7 @@ class LiveOverlayPainter extends CustomPainter {
 
     final textStyle = TextStyle(
       color: Colors.white,
-      fontSize: baseSize * 0.035,
+      fontSize: baseSize * 0.045,
       height: 1.25,
       shadows: const [
         Shadow(
@@ -116,10 +116,11 @@ ${data.note}
     // BACKGROUND
     // ===============================
     final bgRect = Rect.fromLTWH(
-      offset.dx - drawWidth * 0.01,
-      offset.dy - drawHeight * 0.01,
-      textPainter.width + drawWidth * 0.02,
-      textPainter.height + drawHeight * 0.02,
+      offset.dx - drawWidth * 0.015,
+      offset.dy - drawHeight * 0.015,
+      textPainter.width + drawWidth * 0.03,
+      textPainter.height + drawHeight * 0.03,
+
     );
 
     final bgPaint = Paint()

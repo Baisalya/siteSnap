@@ -27,8 +27,9 @@ class CameraScreen extends ConsumerStatefulWidget {
       _CameraScreenState();
 }
 
-class _CameraScreenState
-    extends ConsumerState<CameraScreen> {
+class _CameraScreenState extends ConsumerState<CameraScreen> {
+
+  bool _showExposure = false;
 
   String _orientationText(DeviceOrientation orientation) {
     switch (orientation) {
@@ -45,6 +46,7 @@ class _CameraScreenState
 
   @override
   Widget build(BuildContext context) {
+
     final cameraState = ref.watch(cameraViewModelProvider);
     final cameraVM =
     ref.read(cameraViewModelProvider.notifier);
@@ -52,11 +54,12 @@ class _CameraScreenState
     final overlayData = ref.watch(overlayPreviewProvider);
     final lastImage = ref.watch(lastImageProvider);
     final focusPoint = ref.watch(focusPointProvider);
-
-    /// ✅ READ orientation ONLY from provider
     final deviceOrientation =
     ref.watch(deviceOrientationProvider);
-    // ================= LOCATION LISTENER =================
+
+    /// IMPORTANT: freeze controller reference for this build
+    final CameraController? controller =
+        cameraState.controller;
 
     ref.listen(locationStreamProvider, (_, next) {
       next.when(
@@ -64,64 +67,33 @@ class _CameraScreenState
           final current =
           ref.read(overlayPreviewProvider);
 
-          ref
-              .read(overlayPreviewProvider.notifier)
-              .state = current.copyWith(
-            dateTime: DateTimeUtils.formattedNow(),
-            latitude: position.latitude,
-            longitude: position.longitude,
-            altitude: position.altitude,
-            locationWarning: null,
-          );
+          ref.read(overlayPreviewProvider.notifier).state =
+              current.copyWith(
+                dateTime: DateTimeUtils.formattedNow(),
+                latitude: position.latitude,
+                longitude: position.longitude,
+                altitude: position.altitude,
+                locationWarning: null,
+              );
         },
-        loading: () {
-          final current =
-          ref.read(overlayPreviewProvider);
-
-          if (current.latitude == 0 &&
-              current.longitude == 0) {
-            ref
-                .read(overlayPreviewProvider.notifier)
-                .state = current.copyWith(
-              locationWarning: "Fetching location...",
-            );
-          }
-        },
-        error: (_, __) {
-          final current =
-          ref.read(overlayPreviewProvider);
-          // ✅ ONLY show error if location really missing
-
-          if (current.latitude == 0 &&
-              current.longitude == 0) {
-            ref
-                .read(overlayPreviewProvider.notifier)
-                .state = current.copyWith(
-              locationWarning: "Location unavailable",
-            );
-          }
-        },
+        loading: () {},
+        error: (_, __) {},
       );
     });
-
-    // ================= COMPASS LISTENER =================
 
     ref.listen(compassHeadingProvider, (_, next) {
       next.whenData((heading) {
         final current =
         ref.read(overlayPreviewProvider);
 
-        ref
-            .read(overlayPreviewProvider.notifier)
-            .state = current.copyWith(
-          heading: heading,
-          direction:
-          DirectionUtils.toCardinal(heading),
-        );
+        ref.read(overlayPreviewProvider.notifier).state =
+            current.copyWith(
+              heading: heading,
+              direction:
+              DirectionUtils.toCardinal(heading),
+            );
       });
     });
-
-    // ================= ORIENTATION LISTENER =================
 
     ref.listen<DeviceOrientation>(
       deviceOrientationProvider,
@@ -130,28 +102,15 @@ class _CameraScreenState
       },
     );
 
-    if (!cameraState.isReady ||
-        cameraState.controller == null) {
-      return const Scaffold(
-        body:
-        Center(child: CircularProgressIndicator()),
-      );
-    }
-
-    final controller = cameraState.controller!;
-/*   WidgetsBinding.instance.addPostFrameCallback((_) {
-      cameraVM.updateOrientation(deviceOrientation);
-    });*/
     return SafeArea(
       child: Scaffold(
         backgroundColor: Colors.black,
         body: Column(
           children: [
-            // ================= CAMERA PREVIEW =================
-
             Expanded(
               child: LayoutBuilder(
                 builder: (context, constraints) {
+
                   final previewSize = Size(
                     constraints.maxWidth,
                     constraints.maxHeight,
@@ -159,40 +118,122 @@ class _CameraScreenState
 
                   return Stack(
                     children: [
+
+                      /// CAMERA PREVIEW
                       GestureDetector(
                         onTapDown: (details) {
+
+                          if (!cameraState.isReady ||
+                              controller == null ||
+                              !controller.value.isInitialized) {
+                            return;
+                          }
+
                           final tapPosition =
                               details.localPosition;
 
                           ref
-                              .read(focusPointProvider
-                              .notifier)
+                              .read(focusPointProvider.notifier)
                               .state = tapPosition;
 
                           cameraVM.setFocusPoint(
-                            tapPosition,
-                            previewSize,
-                          );
+                              tapPosition, previewSize);
+
+                          setState(() {
+                            _showExposure = true;
+                          });
 
                           Future.delayed(
-                            const Duration(seconds: 1),
-                                () {
-                              ref
-                                  .read(
-                                  focusPointProvider
-                                      .notifier)
-                                  .state = null;
-                            },
-                          );
+                              const Duration(milliseconds: 1500),
+                                  () {
+                                if (!mounted) return;
+                                ref
+                                    .read(focusPointProvider.notifier)
+                                    .state = null;
+
+                                setState(() {
+                                  _showExposure = false;
+                                });
+                              });
                         },
-                        child: CameraPreview(controller),
+                        onPanUpdate: (details) {
+                          if (controller == null ||
+                              !controller.value.isInitialized) return;
+
+                          final verticalDelta =
+                          -details.delta.dy;
+                          final horizontalDelta =
+                              details.delta.dx;
+
+                          final delta =
+                              (verticalDelta + horizontalDelta) *
+                                  0.03;
+
+                          cameraVM.changeExposure(delta);
+                        },
+                        child: Stack(
+                          children: [
+
+                            /// FULL SCREEN CAMERA PREVIEW (SAFE)
+                            if (controller != null &&
+                                controller.value.isInitialized &&
+                                cameraState.isReady)
+                              LayoutBuilder(
+                                builder: (context, constraints) {
+
+                                  final preview =
+                                  controller.value.previewSize!;
+
+                                  return ClipRect(
+                                    child: OverflowBox(
+                                      alignment: Alignment.center,
+                                      child: FittedBox(
+                                        fit: BoxFit.cover,
+                                        child: SizedBox(
+                                          width: preview.height,
+                                          height: preview.width,
+                                          child: CameraPreview(controller),
+                                        ),
+                                      ),
+                                    ),
+                                  );
+                                },
+                              )
+                            else
+                              const SizedBox.expand(
+                                child: ColoredBox(
+                                  color: Colors.black,
+                                ),
+                              ),
+
+                            /// LOADING OVERLAY
+                            AnimatedOpacity(
+                              opacity: (cameraState.isReady &&
+                                  controller != null)
+                                  ? 0
+                                  : 1,
+                              duration:
+                              const Duration(milliseconds: 250),
+                              child: Container(
+                                color: Colors.black,
+                                child: const Center(
+                                  child: Icon(
+                                    Icons.camera_alt,
+                                    color: Colors.white24,
+                                    size: 50,
+                                  ),
+                                ),
+                              ),
+                            ),
+                          ],
+                        ),
                       ),
 
+                      /// OVERLAY PAINTER
                       Positioned.fill(
                         child: IgnorePointer(
                           child: CustomPaint(
-                            painter:
-                            LiveOverlayPainter(
+                            painter: LiveOverlayPainter(
                               overlayData,
                               deviceOrientation,
                             ),
@@ -200,6 +241,83 @@ class _CameraScreenState
                         ),
                       ),
 
+                      /// FOCUS + EXPOSURE UI
+                      if (focusPoint != null)
+                        Positioned.fill(
+                          child: Stack(
+                            children: [
+                              Positioned(
+                                left: (focusPoint.dx - 30)
+                                    .clamp(
+                                    8.0,
+                                    MediaQuery.of(context)
+                                        .size
+                                        .width -
+                                        120),
+                                top: (focusPoint.dy - 30)
+                                    .clamp(
+                                    8.0,
+                                    MediaQuery.of(context)
+                                        .size
+                                        .height -
+                                        200),
+                                child: Row(
+                                  children: [
+                                    Container(
+                                      width: 60,
+                                      height: 60,
+                                      decoration: BoxDecoration(
+                                        border: Border.all(
+                                          color: Colors.yellow,
+                                          width: 2,
+                                        ),
+                                        borderRadius:
+                                        BorderRadius.circular(8),
+                                      ),
+                                    ),
+
+                                    if (_showExposure)
+                                      const SizedBox(width: 8),
+
+                                    if (_showExposure)
+                                      Column(
+                                        children: [
+                                          const Icon(
+                                            Icons.wb_sunny,
+                                            color: Colors.white,
+                                            size: 18,
+                                          ),
+                                          const SizedBox(height: 4),
+                                          Text(
+                                            cameraVM.exposureValue
+                                                .toStringAsFixed(1),
+                                            style:
+                                            const TextStyle(
+                                              color: Colors.white,
+                                              fontSize: 12,
+                                            ),
+                                          ),
+                                          const SizedBox(height: 4),
+                                          Container(
+                                            width: 3,
+                                            height: 80,
+                                            decoration:
+                                            BoxDecoration(
+                                              color: Colors.white24,
+                                              borderRadius:
+                                              BorderRadius.circular(2),
+                                            ),
+                                          ),
+                                        ],
+                                      ),
+                                  ],
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+
+                      /// ORIENTATION LABEL
                       Positioned(
                         bottom: 20,
                         left: 16,
@@ -213,8 +331,7 @@ class _CameraScreenState
                             color: Colors.black
                                 .withOpacity(0.6),
                             borderRadius:
-                            BorderRadius.circular(
-                                8),
+                            BorderRadius.circular(8),
                           ),
                           child: Text(
                             _orientationText(
@@ -246,25 +363,6 @@ class _CameraScreenState
                         ),
                       ),
 
-                      if (focusPoint != null)
-                        Positioned(
-                          left: focusPoint.dx - 30,
-                          top: focusPoint.dy - 30,
-                          child: Container(
-                            width: 60,
-                            height: 60,
-                            decoration: BoxDecoration(
-                              border: Border.all(
-                                color: Colors.yellow,
-                                width: 2,
-                              ),
-                              borderRadius:
-                              BorderRadius.circular(
-                                  8),
-                            ),
-                          ),
-                        ),
-
                       Positioned(
                         right: 16,
                         child: IconButton(
@@ -290,11 +388,11 @@ class _CameraScreenState
               ),
             ),
 
+            /// BOTTOM CONTROLS
             Container(
               height: 140,
               padding:
-              const EdgeInsets.symmetric(
-                  horizontal: 24),
+              const EdgeInsets.symmetric(horizontal: 24),
               color: Colors.black,
               child: Row(
                 mainAxisAlignment:
@@ -307,12 +405,13 @@ class _CameraScreenState
                           : Icons.flash_off,
                       color: Colors.white,
                     ),
-                    onPressed:
-                    cameraVM.toggleFlash,
+                    onPressed: cameraVM.toggleFlash,
                   ),
                   CaptureButton(
                     onCapture: () {
-                      cameraVM.capture(context);
+                      if (cameraState.isReady) {
+                        cameraVM.capture(context);
+                      }
                     },
                   ),
                   GestureDetector(
@@ -329,8 +428,7 @@ class _CameraScreenState
                       radius: 22,
                       backgroundColor:
                       Colors.grey.shade800,
-                      backgroundImage:
-                      lastImage != null
+                      backgroundImage: lastImage != null
                           ? FileImage(lastImage)
                           : null,
                       child: lastImage == null
