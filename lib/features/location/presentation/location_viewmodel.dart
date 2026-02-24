@@ -30,29 +30,49 @@ FutureProvider<Position>((ref) async {
 /// LIVE LOCATION STREAM (STABLE VERSION)
 /// =======================================================
 final locationStreamProvider =
-StreamProvider.autoDispose<Position>((ref) async* {
+StreamProvider.autoDispose<Position?>((ref) async* {
 
-  // ✅ Check service first
-  final serviceEnabled =
-  await Geolocator.isLocationServiceEnabled();
+  while (true) {
 
-  if (!serviceEnabled) {
-    throw Exception("Location services disabled");
+    /// CHECK LOCATION SERVICE
+    final serviceEnabled =
+    await Geolocator.isLocationServiceEnabled();
+
+    if (!serviceEnabled) {
+      yield null;
+      await Future.delayed(const Duration(seconds: 2));
+      continue;
+    }
+
+    /// CHECK PERMISSION
+    final permission =
+    await Geolocator.checkPermission();
+
+    if (permission == LocationPermission.denied ||
+        permission == LocationPermission.deniedForever) {
+      yield null;
+      await Future.delayed(const Duration(seconds: 2));
+      continue;
+    }
+
+    /// START GPS STREAM
+    yield* Geolocator.getPositionStream(
+      locationSettings: const LocationSettings(
+        accuracy: LocationAccuracy.high,
+        distanceFilter: 5,
+      ),
+    ).map((position) {
+
+      if (position.latitude == 0 ||
+          position.longitude == 0) {
+        return null;
+      }
+
+      return position;
+    });
   }
-
-  // ✅ Check permission
-  final permission = await Geolocator.checkPermission();
-
-  if (permission == LocationPermission.denied ||
-      permission == LocationPermission.deniedForever) {
-    throw Exception("Location permission denied");
-  }
-
-  // ✅ START STREAM IMMEDIATELY
-  yield* Geolocator.getPositionStream(
-    locationSettings: const LocationSettings(
-      accuracy: LocationAccuracy.bestForNavigation,
-      distanceFilter: 2,
-    ),
-  );
 });
+
+
+
+

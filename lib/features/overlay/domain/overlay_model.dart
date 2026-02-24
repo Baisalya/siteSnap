@@ -10,7 +10,7 @@ class OverlayData {
   final String note;
   final String? locationWarning;
 
-  final WatermarkPosition position; // ✅ NEW
+  final WatermarkPosition position;
 
   const OverlayData({
     required this.dateTime,
@@ -33,6 +33,7 @@ class OverlayData {
     String? direction,
     String? note,
     String? locationWarning,
+    bool clearLocationWarning = false,
     WatermarkPosition? position,
   }) {
     return OverlayData(
@@ -43,7 +44,12 @@ class OverlayData {
       heading: heading ?? this.heading,
       direction: direction ?? this.direction,
       note: note ?? this.note,
-      locationWarning: locationWarning,
+
+      /// ✅ IMPORTANT FIX
+      locationWarning: clearLocationWarning
+          ? null
+          : (locationWarning ?? this.locationWarning),
+
       position: position ?? this.position,
     );
   }

@@ -18,15 +18,10 @@ class LiveOverlayPainter extends CustomPainter {
     canvas.save();
 
     // ===============================
-// ROTATE CANVAS (FIXED)
-// ===============================
+    // ROTATE CANVAS
     // ===============================
-// ROTATE CANVAS (LANDSCAPE FIX)
-// ===============================
     switch (orientation) {
-
       case DeviceOrientation.portraitUp:
-      // no rotation
         break;
 
       case DeviceOrientation.portraitDown:
@@ -34,7 +29,6 @@ class LiveOverlayPainter extends CustomPainter {
         canvas.rotate(pi);
         break;
 
-    // FIXED (swapped rotations)
       case DeviceOrientation.landscapeLeft:
         canvas.translate(0, size.height);
         canvas.rotate(-pi / 2);
@@ -45,9 +39,6 @@ class LiveOverlayPainter extends CustomPainter {
         canvas.rotate(pi / 2);
         break;
     }
-
-
-    // portraitUp → no rotation
 
     // ===============================
     // DRAW SIZE FIX
@@ -67,7 +58,9 @@ class LiveOverlayPainter extends CustomPainter {
     final baseSize = min(drawWidth, drawHeight);
 
     final textStyle = TextStyle(
-      color: Colors.white,
+      color: data.locationWarning != null
+          ? Colors.redAccent
+          : Colors.white,
       fontSize: baseSize * 0.045,
       height: 1.25,
       shadows: const [
@@ -79,13 +72,42 @@ class LiveOverlayPainter extends CustomPainter {
       ],
     );
 
-    final text = '''
-${data.dateTime}
-Latitude: ${data.latitude.toStringAsFixed(5)}, Longitude: ${data.longitude.toStringAsFixed(5)}
-Altitude: ${data.altitude.toStringAsFixed(1)} m
-Dir: ${data.direction} (${data.heading.toStringAsFixed(0)}°)
-${data.note}
-''';
+    // ===============================
+    // SAFE TEXT BUILDING
+    // ===============================
+    final buffer = StringBuffer();
+
+    /// DATE TIME (always first)
+    if (data.dateTime.isNotEmpty) {
+      buffer.writeln(data.dateTime);
+    }
+
+    /// LOCATION OR WARNING
+    if (data.locationWarning != null) {
+      buffer.writeln(data.locationWarning);
+    } else {
+      buffer.writeln(
+        "Latitude: ${data.latitude.toStringAsFixed(5)}, "
+            "Longitude: ${data.longitude.toStringAsFixed(5)}",
+      );
+    }
+
+    /// ALTITUDE
+    buffer.writeln(
+      "Altitude: ${data.altitude.toStringAsFixed(1)} m",
+    );
+
+    /// DIRECTION
+    buffer.writeln(
+      "Dir: ${data.direction} (${data.heading.toStringAsFixed(0)}°)",
+    );
+
+    /// NOTE
+    if (data.note.isNotEmpty) {
+      buffer.writeln(data.note);
+    }
+
+    final text = buffer.toString();
 
     final textPainter = TextPainter(
       text: TextSpan(text: text, style: textStyle),
@@ -97,7 +119,7 @@ ${data.note}
     textPainter.layout(maxWidth: drawWidth * 0.9);
 
     // ===============================
-    // POSITIONING (NO ORIENTATION CHECK)
+    // POSITIONING
     // ===============================
     final marginX = drawWidth * 0.03;
     final marginY = drawHeight * 0.03;
@@ -106,7 +128,6 @@ ${data.note}
         ? marginX
         : drawWidth - textPainter.width - marginX;
 
-    // ALWAYS draw at bottom
     final dy =
         drawHeight - textPainter.height - marginY;
 
@@ -120,7 +141,6 @@ ${data.note}
       offset.dy - drawHeight * 0.015,
       textPainter.width + drawWidth * 0.03,
       textPainter.height + drawHeight * 0.03,
-
     );
 
     final bgPaint = Paint()

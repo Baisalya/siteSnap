@@ -1,8 +1,10 @@
+import 'dart:async';
 import 'dart:io';
 import 'package:camera/camera.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:geolocator/geolocator.dart';
 
 import '../../../core/utils/datetime_utils.dart';
 import '../../../core/utils/developer_info_dialog.dart';
@@ -30,6 +32,7 @@ class CameraScreen extends ConsumerStatefulWidget {
 class _CameraScreenState extends ConsumerState<CameraScreen> {
 
   bool _showExposure = false;
+  Timer? _dateTimer;
 
   String _orientationText(DeviceOrientation orientation) {
     switch (orientation) {
@@ -45,6 +48,31 @@ class _CameraScreenState extends ConsumerState<CameraScreen> {
   }
 
   @override
+  void initState() {
+    super.initState();
+
+    /// DATE TIME UPDATE TIMER
+    _dateTimer = Timer.periodic(
+      const Duration(seconds: 1),
+          (_) {
+        final current =
+        ref.read(overlayPreviewProvider);
+
+        ref.read(overlayPreviewProvider.notifier).state =
+            current.copyWith(
+              dateTime: DateTimeUtils.formattedNow(),
+            );
+      },
+    );
+  }
+
+  @override
+  void dispose() {
+    _dateTimer?.cancel();
+    super.dispose();
+  }
+
+  @override
   Widget build(BuildContext context) {
 
     final cameraState = ref.watch(cameraViewModelProvider);
@@ -57,40 +85,83 @@ class _CameraScreenState extends ConsumerState<CameraScreen> {
     final deviceOrientation =
     ref.watch(deviceOrientationProvider);
 
-    /// IMPORTANT: freeze controller reference for this build
     final CameraController? controller =
         cameraState.controller;
 
-    ref.listen(locationStreamProvider, (_, next) {
-      next.when(
-        data: (position) {
-          final current =
-          ref.read(overlayPreviewProvider);
+    /// ===============================
+    /// LISTENERS (CORRECT PLACE)
+    /// ===============================
 
+    ref.listen(locationStreamProvider, (_, next) async {
+      next.whenData((position) async {
+
+        final current =
+        ref.read(overlayPreviewProvider);
+
+        final serviceEnabled =
+        await Geolocator.isLocationServiceEnabled();
+
+        final permission =
+        await Geolocator.checkPermission();
+
+        /// GPS OFF
+        if (!serviceEnabled) {
           ref.read(overlayPreviewProvider.notifier).state =
               current.copyWith(
-                dateTime: DateTimeUtils.formattedNow(),
-                latitude: position.latitude,
-                longitude: position.longitude,
-                altitude: position.altitude,
-                locationWarning: null,
+                latitude: 0,
+                longitude: 0,
+                altitude: 0,
+                locationWarning: "GPS turned off",
               );
-        },
-        loading: () {},
-        error: (_, __) {},
-      );
+          return;
+        }
+
+        /// PERMISSION DENIED
+        if (permission == LocationPermission.denied ||
+            permission == LocationPermission.deniedForever) {
+          ref.read(overlayPreviewProvider.notifier).state =
+              current.copyWith(
+                latitude: 0,
+                longitude: 0,
+                altitude: 0,
+                locationWarning: "Give location permission",
+              );
+          return;
+        }
+
+        /// GPS SEARCHING
+        if (position == null) {
+          ref.read(overlayPreviewProvider.notifier).state =
+              current.copyWith(
+                latitude: 0,
+                longitude: 0,
+                altitude: 0,
+                locationWarning: "Fetching location...",
+              );
+          return;
+        }
+
+        /// LOCATION READY
+        ref.read(overlayPreviewProvider.notifier).state =
+            current.copyWith(
+              latitude: position.latitude,
+              longitude: position.longitude,
+              altitude: position.altitude,
+              clearLocationWarning: true,
+            );
+      });
     });
 
     ref.listen(compassHeadingProvider, (_, next) {
       next.whenData((heading) {
+
         final current =
         ref.read(overlayPreviewProvider);
 
         ref.read(overlayPreviewProvider.notifier).state =
             current.copyWith(
               heading: heading,
-              direction:
-              DirectionUtils.toCardinal(heading),
+              direction: DirectionUtils.toCardinal(heading),
             );
       });
     });
@@ -144,17 +215,18 @@ class _CameraScreenState extends ConsumerState<CameraScreen> {
                           });
 
                           Future.delayed(
-                              const Duration(milliseconds: 1500),
-                                  () {
-                                if (!mounted) return;
-                                ref
-                                    .read(focusPointProvider.notifier)
-                                    .state = null;
+                            const Duration(milliseconds: 1500),
+                                () {
+                              if (!mounted) return;
+                              ref
+                                  .read(focusPointProvider.notifier)
+                                  .state = null;
 
-                                setState(() {
-                                  _showExposure = false;
-                                });
+                              setState(() {
+                                _showExposure = false;
                               });
+                            },
+                          );
                         },
                         onPanUpdate: (details) {
                           if (controller == null ||
@@ -174,7 +246,6 @@ class _CameraScreenState extends ConsumerState<CameraScreen> {
                         child: Stack(
                           children: [
 
-                            /// FULL SCREEN CAMERA PREVIEW (SAFE)
                             if (controller != null &&
                                 controller.value.isInitialized &&
                                 cameraState.isReady)
@@ -206,7 +277,6 @@ class _CameraScreenState extends ConsumerState<CameraScreen> {
                                 ),
                               ),
 
-                            /// LOADING OVERLAY
                             AnimatedOpacity(
                               opacity: (cameraState.isReady &&
                                   controller != null)
@@ -229,7 +299,7 @@ class _CameraScreenState extends ConsumerState<CameraScreen> {
                         ),
                       ),
 
-                      /// OVERLAY PAINTER
+                      /// OVERLAY
                       Positioned.fill(
                         child: IgnorePointer(
                           child: CustomPaint(
@@ -275,10 +345,8 @@ class _CameraScreenState extends ConsumerState<CameraScreen> {
                                         BorderRadius.circular(8),
                                       ),
                                     ),
-
                                     if (_showExposure)
                                       const SizedBox(width: 8),
-
                                     if (_showExposure)
                                       Column(
                                         children: [
@@ -316,8 +384,8 @@ class _CameraScreenState extends ConsumerState<CameraScreen> {
                             ],
                           ),
                         ),
-
                       /// ORIENTATION LABEL
+/*
                       Positioned(
                         bottom: 20,
                         left: 16,
@@ -345,6 +413,7 @@ class _CameraScreenState extends ConsumerState<CameraScreen> {
                           ),
                         ),
                       ),
+*/
 
                       Positioned(
                         left: 16,
