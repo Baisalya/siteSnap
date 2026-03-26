@@ -357,8 +357,7 @@ class _CameraScreenState extends ConsumerState<CameraScreen> {
                                           ),
                                           const SizedBox(height: 4),
                                           Text(
-                                            cameraVM.exposureValue
-                                                .toStringAsFixed(1),
+                                          cameraState.exposure.toStringAsFixed(1),
                                             style:
                                             const TextStyle(
                                               color: Colors.white,

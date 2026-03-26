@@ -29,17 +29,25 @@ class CameraViewModel extends StateNotifier<CameraState>
   double _minExposure = 0.0;
   double _maxExposure = 0.0;
 
+  bool _isCameraStable = false;
+  bool _isInitializing = false;
+  bool _isRestarting = false;
+
+  bool get isCameraStable => _isCameraStable;
+  double get exposureValue => _currentExposure;
+
   CameraViewModel(this.ref)
       : super(const CameraState(isReady: false)) {
     WidgetsBinding.instance.addObserver(this);
     _init();
   }
 
-  double get exposureValue => _currentExposure;
-
   // ================= INIT =================
 
   Future<void> _init() async {
+    if (_isInitializing) return;
+    _isInitializing = true;
+
     try {
       await PermissionService.requestCameraAndLocation();
       ref.invalidate(locationStreamProvider);
@@ -48,31 +56,41 @@ class CameraViewModel extends StateNotifier<CameraState>
       await repo.initialize(CameraLensType.normal);
 
       final controller = repo.controller;
+      if (controller == null) return;
 
-      if (controller != null) {
+      /// Basic setup
+      await controller.setFocusMode(FocusMode.auto);
+      await controller.setExposureMode(ExposureMode.auto);
 
-        await controller.setFocusPoint(const Offset(0.5, 0.5));
-        await controller.setExposurePoint(const Offset(0.5, 0.5));
+      await controller.setFocusPoint(const Offset(0.5, 0.5));
+      await controller.setExposurePoint(const Offset(0.5, 0.5));
 
-        _minExposure = await controller.getMinExposureOffset();
-        _maxExposure = await controller.getMaxExposureOffset();
+      /// 🔥 IMPORTANT: let camera settle
+      await Future.delayed(const Duration(milliseconds: 600));
 
-        _currentExposure =
-            ((_minExposure + _maxExposure) / 4)
-                .clamp(_minExposure, _maxExposure);
+      /// Get exposure range AFTER settle
+      _minExposure = await controller.getMinExposureOffset();
+      _maxExposure = await controller.getMaxExposureOffset();
 
-        /// IMPORTANT: lock exposure for manual control
-        await controller.setExposureMode(ExposureMode.locked);
-        await controller.setExposureOffset(_currentExposure);
-      }
+      _currentExposure =
+          ((_minExposure + _maxExposure) / 2)
+              .clamp(_minExposure, _maxExposure);
+
+      /// 🔥 DO NOT lock exposure (device bug fix)
+      await controller.setExposureOffset(_currentExposure);
+
+      _isCameraStable = true;
 
       state = state.copyWith(
         isReady: true,
         controller: controller,
-        currentLens: CameraLensType.normal,
+        exposure: _currentExposure,
       );
+
     } catch (e) {
       debugPrint('Init error: $e');
+    } finally {
+      _isInitializing = false;
     }
   }
 
@@ -89,16 +107,26 @@ class CameraViewModel extends StateNotifier<CameraState>
   @override
   void didChangeAppLifecycleState(AppLifecycleState lifecycleState) async {
 
+    /// 🚫 prevent race condition
+    if (_isInitializing) return;
+
     if (lifecycleState == AppLifecycleState.inactive ||
         lifecycleState == AppLifecycleState.paused) {
-
       try {
         await state.controller?.pausePreview();
       } catch (_) {}
     }
 
     if (lifecycleState == AppLifecycleState.resumed) {
-      await _restartCamera();
+
+      if (_isRestarting) return;
+
+      _isRestarting = true;
+      try {
+        await _restartCamera();
+      } finally {
+        _isRestarting = false;
+      }
     }
   }
 
@@ -122,15 +150,20 @@ class CameraViewModel extends StateNotifier<CameraState>
       final repo = ref.read(cameraRepositoryProvider);
       await repo.initialize(state.currentLens);
 
-      final newController = repo.controller;
+      final controller = repo.controller;
 
-      if (newController != null) {
-        await newController.setExposureMode(ExposureMode.locked);
-        await newController.setExposureOffset(_currentExposure);
+      if (controller != null) {
+        await controller.setFocusMode(FocusMode.auto);
+        await controller.setExposureMode(ExposureMode.auto);
+
+        await Future.delayed(const Duration(milliseconds: 400));
+
+        /// reapply exposure safely
+        await controller.setExposureOffset(_currentExposure);
       }
 
       state = state.copyWith(
-        controller: newController,
+        controller: controller,
         isReady: true,
       );
 
@@ -141,20 +174,16 @@ class CameraViewModel extends StateNotifier<CameraState>
 
   // ================= AUTO FOCUS =================
 
-  Future<void> _prepareAutoFocus(
-      CameraController controller) async {
+  Future<void> _prepareAutoFocus(CameraController controller) async {
     try {
+      if (!controller.value.isInitialized) return;
+
       await controller.setFocusMode(FocusMode.auto);
+      await Future.delayed(const Duration(milliseconds: 250));
 
-      /// temporarily allow auto exposure
-      await controller.setExposureMode(ExposureMode.auto);
-
-      await Future.delayed(const Duration(milliseconds: 350));
-
-      /// lock again for manual exposure control
-      await controller.setExposureMode(ExposureMode.locked);
-      await controller.setExposureOffset(_currentExposure);
-    } catch (_) {}
+    } catch (e) {
+      debugPrint("AutoFocus error: $e");
+    }
   }
 
   // ================= CAPTURE =================
@@ -170,8 +199,7 @@ class CameraViewModel extends StateNotifier<CameraState>
       return;
     }
 
-    final deviceOrientation =
-    ref.read(deviceOrientationProvider);
+    final deviceOrientation = ref.read(deviceOrientationProvider);
 
     state = state.copyWith(
       isCapturing: true,
@@ -209,6 +237,7 @@ class CameraViewModel extends StateNotifier<CameraState>
       if (result != null) {
         ref.read(lastImageProvider.notifier).state = result;
       }
+
     } catch (e) {
       debugPrint('Capture error: $e');
     } finally {
@@ -251,6 +280,7 @@ class CameraViewModel extends StateNotifier<CameraState>
 
   Future<void> changeExposure(double delta) async {
     final controller = state.controller;
+
     if (controller == null ||
         !controller.value.isInitialized) return;
 
@@ -259,11 +289,16 @@ class CameraViewModel extends StateNotifier<CameraState>
           (_currentExposure + delta)
               .clamp(_minExposure, _maxExposure);
 
-      await controller.setExposureMode(ExposureMode.locked);
+      /// 🔥 DO NOT lock exposure (important fix)
       await controller.setExposureOffset(_currentExposure);
 
-      state = state.copyWith();
-    } catch (_) {}
+      state = state.copyWith(
+        exposure: _currentExposure,
+      );
+
+    } catch (e) {
+      debugPrint("Exposure error: $e");
+    }
   }
 
   // ================= DISPOSE =================

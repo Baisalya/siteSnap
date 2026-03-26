@@ -52,57 +52,47 @@ class LiveOverlayPainter extends CustomPainter {
       drawHeight = size.width;
     }
 
-    // ===============================
-    // TEXT STYLE
-    // ===============================
     final baseSize = min(drawWidth, drawHeight);
 
+    // ===============================
+    // PROFESSIONAL TEXT STYLE
+    // ===============================
     final textStyle = TextStyle(
       color: data.locationWarning != null
           ? Colors.redAccent
-          : Colors.white,
-      fontSize: baseSize * 0.045,
+          : Colors.black87,
+      fontSize: baseSize * 0.038, // slightly larger
+      fontWeight: FontWeight.w500,
       height: 1.25,
+      letterSpacing: 0.3,
       shadows: const [
         Shadow(
-          offset: Offset(1.5, 1.5),
-          blurRadius: 4,
-          color: Colors.black,
+          offset: Offset(0.5, 0.5),
+          blurRadius: 2,
+          color: Colors.white60,
         ),
       ],
     );
 
     // ===============================
-    // SAFE TEXT BUILDING
+    // BUILD TEXT
     // ===============================
     final buffer = StringBuffer();
 
-    /// DATE TIME (always first)
     if (data.dateTime.isNotEmpty) {
       buffer.writeln(data.dateTime);
     }
 
-    /// LOCATION OR WARNING
     if (data.locationWarning != null) {
       buffer.writeln(data.locationWarning);
     } else {
       buffer.writeln(
-        "Latitude: ${data.latitude.toStringAsFixed(5)}, "
-            "Longitude: ${data.longitude.toStringAsFixed(5)}",
-      );
+          "Lat ${data.latitude.toStringAsFixed(5)}  |  Lon ${data.longitude.toStringAsFixed(5)}");
     }
 
-    /// ALTITUDE
     buffer.writeln(
-      "Altitude: ${data.altitude.toStringAsFixed(1)} m",
-    );
+        "Alt ${data.altitude.toStringAsFixed(1)} m  |  ${data.direction} ${data.heading.toStringAsFixed(0)}°");
 
-    /// DIRECTION
-    buffer.writeln(
-      "Dir: ${data.direction} (${data.heading.toStringAsFixed(0)}°)",
-    );
-
-    /// NOTE
     if (data.note.isNotEmpty) {
       buffer.writeln(data.note);
     }
@@ -116,10 +106,10 @@ class LiveOverlayPainter extends CustomPainter {
       ellipsis: '…',
     );
 
-    textPainter.layout(maxWidth: drawWidth * 0.9);
+    textPainter.layout(maxWidth: drawWidth * 0.82);
 
     // ===============================
-    // POSITIONING
+    // POSITION
     // ===============================
     final marginX = drawWidth * 0.03;
     final marginY = drawHeight * 0.03;
@@ -128,32 +118,42 @@ class LiveOverlayPainter extends CustomPainter {
         ? marginX
         : drawWidth - textPainter.width - marginX;
 
-    final dy =
-        drawHeight - textPainter.height - marginY;
+    final dy = drawHeight - textPainter.height - marginY;
 
     final offset = Offset(dx, dy);
 
     // ===============================
-    // BACKGROUND
+    // PROFESSIONAL BACKGROUND CARD
     // ===============================
     final bgRect = Rect.fromLTWH(
-      offset.dx - drawWidth * 0.015,
-      offset.dy - drawHeight * 0.015,
-      textPainter.width + drawWidth * 0.03,
-      textPainter.height + drawHeight * 0.03,
+      offset.dx - drawWidth * 0.018,
+      offset.dy - drawHeight * 0.018,
+      textPainter.width + drawWidth * 0.036,
+      textPainter.height + drawHeight * 0.036,
     );
 
     final bgPaint = Paint()
-      ..color = Colors.black.withOpacity(0.45);
+      ..color = Colors.white.withOpacity(0.40);
+
+    // soft shadow
+    canvas.drawShadow(
+      Path()..addRRect(RRect.fromRectAndRadius(bgRect, const Radius.circular(10))),
+      Colors.black.withOpacity(0.35),
+      6,
+      false,
+    );
 
     canvas.drawRRect(
       RRect.fromRectAndRadius(
         bgRect,
-        const Radius.circular(8),
+        const Radius.circular(10),
       ),
       bgPaint,
     );
 
+    // ===============================
+    // DRAW TEXT
+    // ===============================
     textPainter.paint(canvas, offset);
 
     canvas.restore();

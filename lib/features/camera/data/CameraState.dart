@@ -13,9 +13,11 @@ class CameraState {
   final CameraLensType currentLens;
   final bool isCapturing;
 
-  /// live orientation from sensor (changes continuously)
-  final DeviceOrientation
- orientation;
+  /// 🔥 ADD THIS
+  final double exposure;
+
+  /// live orientation from sensor
+  final DeviceOrientation orientation;
 
   /// frozen orientation at capture moment
   final DeviceOrientation? captureOrientation;
@@ -26,8 +28,11 @@ class CameraState {
     this.flashOn = false,
     this.currentLens = CameraLensType.normal,
     this.isCapturing = false,
-    this.orientation = DeviceOrientation
-.portraitUp,
+
+    /// 🔥 DEFAULT
+    this.exposure = 0.0,
+
+    this.orientation = DeviceOrientation.portraitUp,
     this.captureOrientation,
   });
 
@@ -37,6 +42,10 @@ class CameraState {
     bool? flashOn,
     CameraLensType? currentLens,
     bool? isCapturing,
+
+    /// 🔥 ADD THIS
+    double? exposure,
+
     DeviceOrientation? orientation,
     DeviceOrientation? captureOrientation,
   }) {
@@ -46,6 +55,10 @@ class CameraState {
       flashOn: flashOn ?? this.flashOn,
       currentLens: currentLens ?? this.currentLens,
       isCapturing: isCapturing ?? this.isCapturing,
+
+      /// 🔥 APPLY
+      exposure: exposure ?? this.exposure,
+
       orientation: orientation ?? this.orientation,
       captureOrientation:
       captureOrientation ?? this.captureOrientation,
