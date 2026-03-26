@@ -58,17 +58,14 @@ class CameraViewModel extends StateNotifier<CameraState>
       final controller = repo.controller;
       if (controller == null) return;
 
-      /// Basic setup
       await controller.setFocusMode(FocusMode.auto);
       await controller.setExposureMode(ExposureMode.auto);
 
       await controller.setFocusPoint(const Offset(0.5, 0.5));
       await controller.setExposurePoint(const Offset(0.5, 0.5));
 
-      /// 🔥 IMPORTANT: let camera settle
       await Future.delayed(const Duration(milliseconds: 600));
 
-      /// Get exposure range AFTER settle
       _minExposure = await controller.getMinExposureOffset();
       _maxExposure = await controller.getMaxExposureOffset();
 
@@ -76,7 +73,6 @@ class CameraViewModel extends StateNotifier<CameraState>
           ((_minExposure + _maxExposure) / 2)
               .clamp(_minExposure, _maxExposure);
 
-      /// 🔥 DO NOT lock exposure (device bug fix)
       await controller.setExposureOffset(_currentExposure);
 
       _isCameraStable = true;
@@ -106,8 +102,6 @@ class CameraViewModel extends StateNotifier<CameraState>
 
   @override
   void didChangeAppLifecycleState(AppLifecycleState lifecycleState) async {
-
-    /// 🚫 prevent race condition
     if (_isInitializing) return;
 
     if (lifecycleState == AppLifecycleState.inactive ||
@@ -118,7 +112,6 @@ class CameraViewModel extends StateNotifier<CameraState>
     }
 
     if (lifecycleState == AppLifecycleState.resumed) {
-
       if (_isRestarting) return;
 
       _isRestarting = true;
@@ -130,22 +123,16 @@ class CameraViewModel extends StateNotifier<CameraState>
     }
   }
 
-  // ================= RESTART CAMERA =================
+  // ================= RESTART =================
 
   Future<void> _restartCamera() async {
     try {
       final oldController = state.controller;
 
-      state = state.copyWith(
-        controller: null,
-        isReady: false,
-      );
+      state = state.copyWith(controller: null, isReady: false);
 
       await Future.delayed(const Duration(milliseconds: 50));
-
-      try {
-        await oldController?.dispose();
-      } catch (_) {}
+      await oldController?.dispose();
 
       final repo = ref.read(cameraRepositoryProvider);
       await repo.initialize(state.currentLens);
@@ -158,32 +145,105 @@ class CameraViewModel extends StateNotifier<CameraState>
 
         await Future.delayed(const Duration(milliseconds: 400));
 
-        /// reapply exposure safely
         await controller.setExposureOffset(_currentExposure);
       }
 
-      state = state.copyWith(
-        controller: controller,
-        isReady: true,
-      );
+      state = state.copyWith(controller: controller, isReady: true);
 
     } catch (e) {
-      debugPrint("Camera restart failed: $e");
+      debugPrint("Restart error: $e");
     }
   }
-
   // ================= AUTO FOCUS =================
-
   Future<void> _prepareAutoFocus(CameraController controller) async {
     try {
       if (!controller.value.isInitialized) return;
 
+      /// reset focus + exposure for accurate metering
       await controller.setFocusMode(FocusMode.auto);
+      await controller.setExposureMode(ExposureMode.auto);
+
+      /// give sensor time to settle
       await Future.delayed(const Duration(milliseconds: 250));
 
     } catch (e) {
       debugPrint("AutoFocus error: $e");
     }
+  }
+  // ================= FOCUS =================
+
+  Future<void> setFocusPoint(
+      Offset position, Size previewSize) async {
+    final controller = state.controller;
+    if (controller == null) return;
+
+    try {
+      final dx = position.dx / previewSize.width;
+      final dy = position.dy / previewSize.height;
+
+      await controller.setFocusMode(FocusMode.auto);
+      await controller.setExposureMode(ExposureMode.auto);
+
+      await controller.setFocusPoint(Offset(dx, dy));
+      await controller.setExposurePoint(Offset(dx, dy));
+    } catch (_) {}
+  }
+
+  // ================= EXPOSURE =================
+
+  Future<void> changeExposure(double delta) async {
+    final controller = state.controller;
+    if (controller == null || !controller.value.isInitialized) return;
+
+    try {
+      _currentExposure =
+          (_currentExposure + delta)
+              .clamp(_minExposure, _maxExposure);
+
+      await controller.setExposureOffset(_currentExposure);
+
+      state = state.copyWith(exposure: _currentExposure);
+
+    } catch (e) {
+      debugPrint("Exposure error: $e");
+    }
+  }
+  Future<void> _adjustExposureForCapture(CameraController controller) async {
+    try {
+      double adjustedExposure = _currentExposure;
+
+      /// 🔥 If flash ON → reduce exposure
+      if (state.flashOn) {
+        adjustedExposure -= 0.5; // tweak value if needed
+      }
+
+      /// 🌙 If scene is dark (user already increased exposure)
+      if (_currentExposure < (_minExposure + _maxExposure) / 4) {
+        adjustedExposure += 0.3;
+      }
+
+      adjustedExposure =
+          adjustedExposure.clamp(_minExposure, _maxExposure);
+
+      await controller.setExposureOffset(adjustedExposure);
+
+    } catch (e) {
+      debugPrint("Smart exposure error: $e");
+    }
+  }
+  // ================= FLASH =================
+
+  Future<void> toggleFlash() async {
+    final controller = state.controller;
+    if (controller == null) return;
+
+    final newFlashState = !state.flashOn;
+
+    await controller.setFlashMode(
+      newFlashState ? FlashMode.torch : FlashMode.off,
+    );
+
+    state = state.copyWith(flashOn: newFlashState);
   }
 
   // ================= CAPTURE =================
@@ -209,11 +269,21 @@ class CameraViewModel extends StateNotifier<CameraState>
     try {
       final repo = ref.read(cameraRepositoryProvider);
 
+      /// autofocus
       await _prepareAutoFocus(controller);
+   /*   await controller.setFocusMode(FocusMode.auto);
+      await Future.delayed(const Duration(milliseconds: 200));*/
+      /// ✅ Smart exposure adjust BEFORE locking
+      await _adjustExposureForCapture(controller);
+      /// 🔥 lock exposure before capture
+      await controller.setExposureMode(ExposureMode.locked);
       await Future.delayed(const Duration(milliseconds: 120));
 
-      final originalPath = await repo.takePicture();
-      final originalFile = File(originalPath);
+      final path = await repo.takePicture();
+      final originalFile = File(path);
+
+      /// restore exposure
+      await controller.setExposureMode(ExposureMode.auto);
 
       final processedFile = await ref
           .read(overlayViewModelProvider.notifier)
@@ -245,70 +315,12 @@ class CameraViewModel extends StateNotifier<CameraState>
     }
   }
 
-  // ================= FLASH =================
-
-  Future<void> toggleFlash() async {
-    final controller = state.controller;
-    if (controller == null) return;
-
-    final newFlashState = !state.flashOn;
-
-    await controller.setFlashMode(
-      newFlashState ? FlashMode.auto : FlashMode.off,
-    );
-
-    state = state.copyWith(flashOn: newFlashState);
-  }
-
-  // ================= FOCUS =================
-
-  Future<void> setFocusPoint(
-      Offset position, Size previewSize) async {
-    final controller = state.controller;
-    if (controller == null) return;
-
-    try {
-      final dx = position.dx / previewSize.width;
-      final dy = position.dy / previewSize.height;
-
-      await controller.setFocusPoint(Offset(dx, dy));
-      await controller.setExposurePoint(Offset(dx, dy));
-    } catch (_) {}
-  }
-
-  // ================= EXPOSURE =================
-
-  Future<void> changeExposure(double delta) async {
-    final controller = state.controller;
-
-    if (controller == null ||
-        !controller.value.isInitialized) return;
-
-    try {
-      _currentExposure =
-          (_currentExposure + delta)
-              .clamp(_minExposure, _maxExposure);
-
-      /// 🔥 DO NOT lock exposure (important fix)
-      await controller.setExposureOffset(_currentExposure);
-
-      state = state.copyWith(
-        exposure: _currentExposure,
-      );
-
-    } catch (e) {
-      debugPrint("Exposure error: $e");
-    }
-  }
-
   // ================= DISPOSE =================
 
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
-    try {
-      state.controller?.dispose();
-    } catch (_) {}
+    state.controller?.dispose();
     super.dispose();
   }
 }

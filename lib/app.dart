@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:sitesnap/RootScreen.dart';
 import 'core/theme/app_theme.dart';
 import 'features/camera/presentation/camera_screen.dart';
 
@@ -11,7 +12,7 @@ class NoteCamApp extends StatelessWidget {
       title: 'NoteCam Pro',
       theme: AppTheme.light,
       darkTheme: AppTheme.dark,
-      home: const CameraScreen(),
+      home: const RootScreen(),
     );
   }
 }
