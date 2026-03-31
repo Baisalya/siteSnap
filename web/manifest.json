@@ -1,6 +1,6 @@
 {
-    "name": "sitesnap",
-    "short_name": "sitesnap",
+    "name": "survaycam",
+    "short_name": "survaycam",
     "start_url": ".",
     "display": "standalone",
     "background_color": "#0175C2",

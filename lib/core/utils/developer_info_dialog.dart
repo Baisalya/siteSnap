@@ -18,7 +18,7 @@ class DeveloperInfoDialog extends StatelessWidget {
   /// OPEN UPI PAYMENT
   Future<void> _openUPI() async {
     final Uri upiUri = Uri.parse(
-      "upi://pay?pa=baishalya1999@oksbi&pn=SiteSnap&cu=INR",
+      "upi://pay?pa=baishalya1999@oksbi&pn=survaycam&cu=INR",
     );
 
     if (!await launchUrl(
@@ -47,7 +47,7 @@ class DeveloperInfoDialog extends StatelessWidget {
             const SizedBox(height: 12),
 
             const Text(
-              "SiteSnap",
+              "survaycam",
               style: TextStyle(
                 color: Colors.white,
                 fontSize: 20,
@@ -118,7 +118,7 @@ class DeveloperInfoDialog extends StatelessWidget {
             const SizedBox(height: 6),
 
             const Text(
-              "SiteSnap is free. Support helps future updates.",
+              "survaycam is free. Support helps future updates.",
               style: TextStyle(
                 color: Colors.grey,
                 fontSize: 12,

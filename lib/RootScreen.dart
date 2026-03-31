@@ -1,8 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:sitesnap/features/camera/presentation/camera_screen.dart';
-import 'package:sitesnap/privacypolicy/PrivacyDialog.dart';
-import 'package:sitesnap/privacypolicy/privacyProvider.dart';
+import 'package:survaycam/features/camera/presentation/camera_screen.dart';
+import 'package:survaycam/privacypolicy/PrivacyDialog.dart';
+import 'package:survaycam/privacypolicy/privacyProvider.dart';
 
 class RootScreen extends ConsumerWidget {
   const RootScreen({super.key});

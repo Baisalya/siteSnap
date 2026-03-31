@@ -1,18 +1,18 @@
 import 'dart:io';
 import 'package:path_provider/path_provider.dart';
 
-class SiteSnapGalleryRepository {
+class survaycamGalleryRepository {
   Future<List<File>> loadImages() async {
     Directory? directory;
 
     if (Platform.isAndroid) {
-      // ✅ ONLY SiteSnap folder
+      // ✅ ONLY survaycam folder
       directory =
-          Directory('/storage/emulated/0/Pictures/SiteSnap');
+          Directory('/storage/emulated/0/Pictures/survaycam');
     } else if (Platform.isIOS) {
       // ✅ iOS app documents folder
       final docDir = await getApplicationDocumentsDirectory();
-      directory = Directory('${docDir.path}/SiteSnap');
+      directory = Directory('${docDir.path}/survaycam');
     }
 
     if (directory == null || !await directory.exists()) {

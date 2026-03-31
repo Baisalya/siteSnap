@@ -2,8 +2,8 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:share_plus/share_plus.dart';
+import 'package:survaycam/features/gallery/data/sitesnap_gallery_repository.dart';
 
-import '../../gallery/data/sitesnap_gallery_repository.dart';
 import '../presentation/gallery_image_viewer.dart';
 
 class GalleryFolderScreen extends StatefulWidget {
@@ -21,7 +21,7 @@ class _GalleryFolderScreenState extends State<GalleryFolderScreen> {
   Set<File> selectedImages = {};
   bool selectionMode = false;
 
-  final repo = SiteSnapGalleryRepository();
+  final repo = survaycamGalleryRepository();
 
   @override
   void initState() {
@@ -84,7 +84,7 @@ class _GalleryFolderScreenState extends State<GalleryFolderScreen> {
             style: const TextStyle(fontSize: 16,color: Colors.white),
           ),
         )
-            : const Text("SiteSnap Photos",style: TextStyle(color: Colors.white),),
+            : const Text("survaycam Photos",style: TextStyle(color: Colors.white),),
         actions: [
           if (selectionMode)
             IconButton(

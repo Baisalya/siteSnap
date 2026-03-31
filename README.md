@@ -1,16 +1,48 @@
-# sitesnap
+# 📸 SurveyCam
 
-A new Flutter project.
+SurveyCam is a powerful Flutter-based mobile application designed for capturing **proof-based photos** with **location, date, and time overlays**. It is ideal for surveys, fieldwork, inspections, and documentation purposes.
 
-## Getting Started
+---
 
-This project is a starting point for a Flutter application.
+## 🚀 Features
 
-A few resources to get you started if this is your first Flutter project:
+- 📷 Capture high-quality images using device camera
+- 📍 Auto geo-tagging (Latitude, Longitude, Address)
+- 🕒 Date & Time stamp on photos
+- 🗂️ Organized local storage (no cloud upload)
+- 🔒 100% privacy-focused (no data collection)
+- 🎯 Simple and clean UI for fast usage
 
-- [Lab: Write your first Flutter app](https://docs.flutter.dev/get-started/codelab)
-- [Cookbook: Useful Flutter samples](https://docs.flutter.dev/cookbook)
+---
 
-For help getting started with Flutter development, view the
-[online documentation](https://docs.flutter.dev/), which offers tutorials,
-samples, guidance on mobile development, and a full API reference.
+## 📱 Use Cases
+
+- Field surveys
+- Site inspections
+- Work proof documentation
+- Delivery verification
+- Personal records with location proof
+
+---
+
+## 🛠️ Built With
+
+- Flutter (Dart)
+- Camera API
+- Location Services (GPS)
+- Local Storage
+
+---
+
+## 🔐 Privacy First
+
+SurveyCam does **not collect or store any user data on external servers**.  
+All photos and information remain securely on your device.
+
+---
+
+## 📦 Installation
+
+1. Clone the repository:
+   ```bash
+   git clone https://github.com/your-username/surveycam.git

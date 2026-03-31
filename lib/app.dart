@@ -1,5 +1,5 @@
 import 'package:flutter/material.dart';
-import 'package:sitesnap/RootScreen.dart';
+import 'package:survaycam/RootScreen.dart';
 import 'core/theme/app_theme.dart';
 import 'features/camera/presentation/camera_screen.dart';
 

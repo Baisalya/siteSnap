@@ -63,7 +63,7 @@ class _GalleryImageViewerState extends State<GalleryImageViewer> {
     final file = widget.images[currentIndex];
     await Share.shareXFiles(
       [XFile(file.path)],
-      text: "Shared from SiteSnap",
+      text: "Shared from survaycam",
     );
   }
 

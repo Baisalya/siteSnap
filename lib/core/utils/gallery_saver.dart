@@ -7,9 +7,9 @@ class GallerySaver {
     late File savedFile;
 
     if (Platform.isAndroid) {
-      // ✅ Public Pictures/SiteSnap folder
+      // ✅ Public Pictures/survaycam folder
       final directory =
-      Directory('/storage/emulated/0/Pictures/SiteSnap');
+      Directory('/storage/emulated/0/Pictures/survaycam');
 
       // Create folder if not exists
       if (!directory.existsSync()) {
@@ -17,9 +17,9 @@ class GallerySaver {
       }
 
       final newPath =
-          '${directory.path}/SiteSnap_${DateTime.now().millisecondsSinceEpoch}.jpg';
+          '${directory.path}/survaycam_${DateTime.now().millisecondsSinceEpoch}.jpg';
 
-      // Copy file to SiteSnap folder
+      // Copy file to survaycam folder
       savedFile = await file.copy(newPath);
 
       // ✅ Notify Android gallery
@@ -28,7 +28,7 @@ class GallerySaver {
       // ✅ iOS save directly to Photos
       final result = await ImageGallerySaver.saveFile(
         file.path,
-        name: "SiteSnap_${DateTime.now().millisecondsSinceEpoch}",
+        name: "survaycam_${DateTime.now().millisecondsSinceEpoch}",
       );
 
       if (result == null || result['isSuccess'] != true) {
