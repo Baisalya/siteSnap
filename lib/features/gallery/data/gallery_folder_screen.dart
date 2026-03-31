@@ -3,7 +3,6 @@ import 'package:flutter/material.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:share_plus/share_plus.dart';
 import 'package:survaycam/features/gallery/data/sitesnap_gallery_repository.dart';
-
 import '../presentation/gallery_image_viewer.dart';
 
 class GalleryFolderScreen extends StatefulWidget {
@@ -29,20 +28,28 @@ class _GalleryFolderScreenState extends State<GalleryFolderScreen> {
     _initGallery();
   }
 
+  /// ================= INIT =================
   Future<void> _initGallery() async {
-    await _requestPermission();
+    final granted = await _requestPermission();
+    if (!granted) return;
+
     await _loadImages();
   }
 
-  Future<void> _requestPermission() async {
-    if (Platform.isAndroid) {
-      await Permission.photos.request();
-      await Permission.storage.request();
-    } else {
-      await Permission.photos.request();
+  /// ================= PERMISSION =================
+  Future<bool> _requestPermission() async {
+    final status = await Permission.photos.request();
+
+    if (status.isGranted) return true;
+
+    if (status.isPermanentlyDenied) {
+      openAppSettings();
     }
+
+    return false;
   }
 
+  /// ================= LOAD =================
   Future<void> _loadImages() async {
     final result = await repo.loadImages();
 
@@ -54,60 +61,88 @@ class _GalleryFolderScreenState extends State<GalleryFolderScreen> {
     });
   }
 
+  /// ================= SHARE =================
   void _shareSelected() {
     if (selectedImages.isEmpty) return;
 
     Share.shareXFiles(
       selectedImages.map((f) => XFile(f.path)).toList(),
+      text: "Shared from SurveyCam 📷",
     );
   }
 
+  /// ================= SELECT =================
+  void _toggleSelection(File file) {
+    setState(() {
+      if (selectedImages.contains(file)) {
+        selectedImages.remove(file);
+      } else {
+        selectedImages.add(file);
+      }
+
+      selectionMode = selectedImages.isNotEmpty;
+    });
+  }
+
+  void _selectAll() {
+    setState(() {
+      selectedImages = images.toSet();
+      selectionMode = true;
+    });
+  }
+
+  void _clearSelection() {
+    setState(() {
+      selectedImages.clear();
+      selectionMode = false;
+    });
+  }
+
+  /// ================= BUILD =================
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: Colors.black,
 
-      // ================= APPBAR =================
+      /// ================= APPBAR =================
       appBar: AppBar(
         elevation: 0,
         backgroundColor: Colors.black,
-        title: selectionMode
-            ? Container(
-          padding:
-          const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-          decoration: BoxDecoration(
-            color: Colors.white12,
-            borderRadius: BorderRadius.circular(20),
-          ),
-          child: Text(
-            "${selectedImages.length} selected",
-            style: const TextStyle(fontSize: 16,color: Colors.white),
-          ),
-        )
-            : const Text("survaycam Photos",style: TextStyle(color: Colors.white),),
-        actions: [
-          if (selectionMode)
-            IconButton(
-              icon: const Icon(Icons.share,color: Colors.white,),
-              onPressed: _shareSelected,
-            ),
-        ],
+
         leading: selectionMode
             ? IconButton(
-          icon: const Icon(Icons.close,color: Colors.white,),
-          onPressed: () {
-            setState(() {
-              selectionMode = false;
-              selectedImages.clear();
-            });
-          },
+          icon: const Icon(Icons.close, color: Colors.white),
+          onPressed: _clearSelection,
         )
             : null,
+
+        title: selectionMode
+            ? Text(
+          "${selectedImages.length} selected",
+          style: const TextStyle(color: Colors.white),
+        )
+            : const Text(
+          "SurveyCam Photos",
+          style: TextStyle(color: Colors.white),
+        ),
+
+        actions: [
+          if (selectionMode) ...[
+            IconButton(
+              icon: const Icon(Icons.select_all, color: Colors.white),
+              onPressed: _selectAll,
+            ),
+            IconButton(
+              icon: const Icon(Icons.share, color: Colors.white),
+              onPressed: _shareSelected,
+            ),
+          ],
+        ],
       ),
 
-      // ================= BODY =================
+      /// ================= BODY =================
       body: loading
-          ? const Center(child: CircularProgressIndicator())
+          ? _loadingView()
           : images.isEmpty
           ? _emptyView()
           : GridView.builder(
@@ -121,101 +156,122 @@ class _GalleryFolderScreenState extends State<GalleryFolderScreen> {
         itemCount: images.length,
         itemBuilder: (_, i) {
           final file = images[i];
-          final isSelected =
-          selectedImages.contains(file);
+          final isSelected = selectedImages.contains(file);
 
-          return GestureDetector(
-            onLongPress: () {
-              setState(() {
-                selectionMode = true;
-                selectedImages.add(file);
-              });
-            },
-            onTap: () {
-              if (selectionMode) {
-                setState(() {
-                  if (isSelected) {
-                    selectedImages.remove(file);
-                  } else {
-                    selectedImages.add(file);
-                  }
-
-                  if (selectedImages.isEmpty) {
-                    selectionMode = false;
-                  }
-                });
-              } else {
-                Navigator.push(
-                  context,
-                  MaterialPageRoute(
-                    builder: (_) => GalleryImageViewer(
-                      images: images,
-                      initialIndex: i,
-                    ),
-                  ),
-                );
-              }
-            },
-
-            child: AnimatedContainer(
-              duration: const Duration(milliseconds: 150),
-              decoration: BoxDecoration(
-                borderRadius: BorderRadius.circular(12),
-                border: isSelected
-                    ? Border.all(
-                  color: Colors.blue,
-                  width: 2,
-                )
-                    : null,
-              ),
-              child: Stack(
-                children: [
-                  ClipRRect(
-                    borderRadius:
-                    BorderRadius.circular(10),
-                    child: Image.file(
-                      file,
-                      fit: BoxFit.cover,
-                      width: double.infinity,
-                      height: double.infinity,
-                    ),
-                  ),
-
-                  /// Selection overlay
-                  if (isSelected)
-                    Container(
-                      decoration: BoxDecoration(
-                        borderRadius:
-                        BorderRadius.circular(10),
-                        color: Colors.black.withOpacity(0.35),
-                      ),
-                    ),
-
-                  /// Check icon
-                  if (isSelected)
-                    const Positioned(
-                      top: 6,
-                      right: 6,
-                      child: CircleAvatar(
-                        radius: 10,
-                        backgroundColor: Colors.blue,
-                        child: Icon(
-                          Icons.check,
-                          size: 14,
-                          color: Colors.white,
-                        ),
-                      ),
-                    ),
-                ],
-              ),
-            ),
-          );
+          return _buildGridItem(file, i, isSelected);
         },
       ),
     );
   }
 
-  /// ================= EMPTY VIEW =================
+  /// ================= GRID ITEM =================
+  Widget _buildGridItem(File file, int index, bool isSelected) {
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        borderRadius: BorderRadius.circular(12),
+
+        onLongPress: () {
+          setState(() {
+            selectionMode = true;
+            selectedImages.add(file);
+          });
+        },
+
+        onTap: () {
+          if (selectionMode) {
+            _toggleSelection(file);
+          } else {
+            Navigator.push(
+              context,
+              MaterialPageRoute(
+                builder: (_) => GalleryImageViewer(
+                  images: images,
+                  initialIndex: index,
+                ),
+              ),
+            );
+          }
+        },
+
+        child: AnimatedContainer(
+          duration: const Duration(milliseconds: 200),
+          curve: Curves.easeInOut,
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(12),
+            border: isSelected
+                ? Border.all(color: Colors.blue, width: 2)
+                : null,
+          ),
+          child: Stack(
+            children: [
+
+              /// 🔥 HERO IMAGE
+              ClipRRect(
+                borderRadius: BorderRadius.circular(10),
+                child: Hero(
+                  tag: file.path,
+                  child: Image.file(
+                    file,
+                    fit: BoxFit.cover,
+                    width: double.infinity,
+                    height: double.infinity,
+
+                    /// 🚀 PERFORMANCE BOOST
+                    cacheWidth: 300,
+                  ),
+                ),
+              ),
+
+              /// overlay
+              if (isSelected)
+                Container(
+                  decoration: BoxDecoration(
+                    borderRadius: BorderRadius.circular(10),
+                    color: Colors.black.withOpacity(0.4),
+                  ),
+                ),
+
+              /// check icon
+              if (isSelected)
+                const Positioned(
+                  top: 6,
+                  right: 6,
+                  child: CircleAvatar(
+                    radius: 10,
+                    backgroundColor: Colors.blue,
+                    child: Icon(
+                      Icons.check,
+                      size: 14,
+                      color: Colors.white,
+                    ),
+                  ),
+                ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  /// ================= LOADING =================
+  Widget _loadingView() {
+    return const Center(
+      child: Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          CircularProgressIndicator(color: Colors.white),
+          SizedBox(height: 12),
+          Text(
+            "Loading photos...",
+            style: TextStyle(color: Colors.white54),
+          ),
+        ],
+      ),
+    );
+  }
+
+  /// ================= EMPTY =================
   Widget _emptyView() {
     return const Center(
       child: Column(
@@ -226,10 +282,12 @@ class _GalleryFolderScreenState extends State<GalleryFolderScreen> {
           SizedBox(height: 12),
           Text(
             "No photos yet",
-            style: TextStyle(
-              color: Colors.white54,
-              fontSize: 16,
-            ),
+            style: TextStyle(color: Colors.white54, fontSize: 16),
+          ),
+          SizedBox(height: 6),
+          Text(
+            "Capture photos to see them here",
+            style: TextStyle(color: Colors.white38),
           ),
         ],
       ),

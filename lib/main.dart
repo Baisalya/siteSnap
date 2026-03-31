@@ -12,5 +12,5 @@ void main() async {
   ]);
 
 
-  runApp(const ProviderScope(child: NoteCamApp()));
+  runApp(const ProviderScope(child: SurveyCamApp()));
 }

@@ -18,7 +18,7 @@ dependencies:
   image: ^4.1.7
   path_provider: ^2.1.2
   gallery_saver: ^2.3.2
-
+  photo_view: ^0.14.0
   # Location & Sensors
   geolocator: ^10.1.0
   flutter_compass: ^0.8.0

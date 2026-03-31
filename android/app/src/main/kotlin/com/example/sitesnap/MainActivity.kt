@@ -1,4 +1,4 @@
-package com.example.survaycam
+package com.baishalya.surveycam
 
 import io.flutter.embedding.android.FlutterActivity
 

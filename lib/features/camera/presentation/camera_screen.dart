@@ -11,6 +11,7 @@ import '../../../core/utils/developer_info_dialog.dart';
 import '../../../core/utils/device_orientation_provider.dart';
 import '../../../core/utils/direction_utils.dart';
 import '../../../core/utils/focus_point_provider.dart';
+import '../../../privacypolicy/privacyProvider.dart';
 import '../../compass/presentation/compass_provider.dart';
 import '../../gallery/data/gallery_folder_screen.dart';
 import '../../gallery/presentation/last_image_provider.dart';
@@ -74,7 +75,7 @@ class _CameraScreenState extends ConsumerState<CameraScreen> {
 
   @override
   Widget build(BuildContext context) {
-
+    final privacyAccepted = ref.watch(privacyProvider);
     final cameraState = ref.watch(cameraViewModelProvider);
     final cameraVM =
     ref.read(cameraViewModelProvider.notifier);
@@ -92,66 +93,61 @@ class _CameraScreenState extends ConsumerState<CameraScreen> {
     /// LISTENERS (CORRECT PLACE)
     /// ===============================
 
-    ref.listen(locationStreamProvider, (_, next) async {
-      next.whenData((position) async {
+    if (privacyAccepted == true) {
+      ref.listen(locationStreamProvider, (_, next) async {
+        next.whenData((position) async {
+          final current = ref.read(overlayPreviewProvider);
 
-        final current =
-        ref.read(overlayPreviewProvider);
+          final serviceEnabled =
+          await Geolocator.isLocationServiceEnabled();
 
-        final serviceEnabled =
-        await Geolocator.isLocationServiceEnabled();
+          final permission =
+          await Geolocator.checkPermission();
 
-        final permission =
-        await Geolocator.checkPermission();
+          if (!serviceEnabled) {
+            ref.read(overlayPreviewProvider.notifier).state =
+                current.copyWith(
+                  latitude: 0,
+                  longitude: 0,
+                  altitude: 0,
+                  locationWarning: "GPS turned off",
+                );
+            return;
+          }
 
-        /// GPS OFF
-        if (!serviceEnabled) {
+          if (permission == LocationPermission.denied ||
+              permission == LocationPermission.deniedForever) {
+            ref.read(overlayPreviewProvider.notifier).state =
+                current.copyWith(
+                  latitude: 0,
+                  longitude: 0,
+                  altitude: 0,
+                  locationWarning: "Give location permission",
+                );
+            return;
+          }
+
+          if (position == null) {
+            ref.read(overlayPreviewProvider.notifier).state =
+                current.copyWith(
+                  latitude: 0,
+                  longitude: 0,
+                  altitude: 0,
+                  locationWarning: "Fetching location...",
+                );
+            return;
+          }
+
           ref.read(overlayPreviewProvider.notifier).state =
               current.copyWith(
-                latitude: 0,
-                longitude: 0,
-                altitude: 0,
-                locationWarning: "GPS turned off",
+                latitude: position.latitude,
+                longitude: position.longitude,
+                altitude: position.altitude,
+                clearLocationWarning: true,
               );
-          return;
-        }
-
-        /// PERMISSION DENIED
-        if (permission == LocationPermission.denied ||
-            permission == LocationPermission.deniedForever) {
-          ref.read(overlayPreviewProvider.notifier).state =
-              current.copyWith(
-                latitude: 0,
-                longitude: 0,
-                altitude: 0,
-                locationWarning: "Give location permission",
-              );
-          return;
-        }
-
-        /// GPS SEARCHING
-        if (position == null) {
-          ref.read(overlayPreviewProvider.notifier).state =
-              current.copyWith(
-                latitude: 0,
-                longitude: 0,
-                altitude: 0,
-                locationWarning: "Fetching location...",
-              );
-          return;
-        }
-
-        /// LOCATION READY
-        ref.read(overlayPreviewProvider.notifier).state =
-            current.copyWith(
-              latitude: position.latitude,
-              longitude: position.longitude,
-              altitude: position.altitude,
-              clearLocationWarning: true,
-            );
+        });
       });
-    });
-
+    }
     ref.listen(compassHeadingProvider, (_, next) {
       next.whenData((heading) {
 

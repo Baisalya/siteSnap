@@ -1,35 +1,33 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:survaycam/features/camera/presentation/camera_screen.dart';
-import 'package:survaycam/privacypolicy/PrivacyDialog.dart';
+import 'package:survaycam/privacypolicy/SplashScreen.dart';
 import 'package:survaycam/privacypolicy/privacyProvider.dart';
 
-class RootScreen extends ConsumerWidget {
-  const RootScreen({super.key});
+import 'features/camera/presentation/camera_screen.dart';
+
+class AppLauncher extends ConsumerWidget {
+  const AppLauncher({super.key});
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final status = ref.watch(privacyProvider);
 
-    // ⏳ LOADING
+    /// ⏳ Still loading → show NOTHING (or minimal loader)
     if (status == null) {
       return const Scaffold(
-        body: Center(child: CircularProgressIndicator()),
+        backgroundColor: Colors.black,
+        body: Center(
+          child: SizedBox.shrink(), // 👈 no fake UI flash
+        ),
       );
     }
 
-    // 🚨 NOT ACCEPTED → show dialog ONCE
+    /// ❌ Not accepted
     if (status == false) {
-      Future.microtask(() {
-        showDialog(
-          context: context,
-          barrierDismissible: false,
-          builder: (_) => const PrivacyDialog(),
-        );
-      });
+      return const SplashScreen(); // this shows dialog
     }
 
-    // ✅ MAIN APP
+    /// ✅ Accepted → DIRECT CAMERA
     return const CameraScreen();
   }
 }
