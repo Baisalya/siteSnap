@@ -1,11 +1,14 @@
 import 'dart:io';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../core/utils/gallery_saver.dart';
+import '../../overlay/presentation/overlay_preview_state.dart';
 import '../../overlay/presentation/overlay_viewmodel.dart';
 import '../../camera/presentation/camera_viewmodel.dart';
 import '../../camera/presentation/note_input_sheet.dart';
+import '../../overlay/presentation/preview_overlay_painter.dart';
 
 class ImagePreviewScreen extends ConsumerStatefulWidget {
   final File originalFile;
@@ -25,38 +28,52 @@ class ImagePreviewScreen extends ConsumerStatefulWidget {
 class _ImagePreviewScreenState
     extends ConsumerState<ImagePreviewScreen> {
 
-  late File _currentFile;
   bool _saving = false;
+  bool _hideUI = false;
 
-  @override
-  void initState() {
-    super.initState();
-    _currentFile = widget.processedFile;
-  }
+  bool _showOverlay = true;
+  bool _showTextWatermark = true;
 
-  /// ✅ SAVE IMAGE
+  /// ================= SAVE =================
   Future<void> _saveImage() async {
     if (_saving) return;
 
-    setState(() => _saving = true);
+    setState(() {
+      _saving = true;
+      _hideUI = true;
+    });
 
     try {
+      final cameraState = ref.read(cameraViewModelProvider);
+
+      final finalFile = await ref
+          .read(overlayViewModelProvider.notifier)
+          .processImage(
+        widget.originalFile,
+        cameraState.captureOrientation ??
+            cameraState.orientation,
+        showOverlay: _showOverlay,
+        showWatermark: _showTextWatermark,
+      );
+
       final savedFile =
-      await GallerySaver.saveImage(_currentFile);
+      await GallerySaver.saveImage(finalFile);
 
       if (mounted) {
         Navigator.pop(context, savedFile);
       }
     } catch (e) {
       debugPrint("Save failed: $e");
-    } finally {
       if (mounted) {
-        setState(() => _saving = false);
+        setState(() {
+          _saving = false;
+          _hideUI = false;
+        });
       }
     }
   }
 
-  /// ✅ EDIT WATERMARK (FIXED)
+  /// ================= EDIT =================
   Future<void> _editWatermark() async {
     await showModalBottomSheet(
       context: context,
@@ -65,80 +82,186 @@ class _ImagePreviewScreenState
       builder: (_) => const NoteInputSheet(),
     );
 
-    /// ✅ Get frozen capture orientation
-    final cameraState =
-    ref.read(cameraViewModelProvider);
+    if (!mounted) return;
 
-    final updated = await ref
-        .read(overlayViewModelProvider.notifier)
-        .processImage(
-      widget.originalFile,
-      cameraState.captureOrientation ??
-          cameraState.orientation,
-    );
-
-    setState(() {
-      _currentFile = updated;
-    });
+    setState(() {});
   }
 
+  /// ================= UI =================
   @override
   Widget build(BuildContext context) {
+    final overlayData = ref.watch(overlayPreviewProvider);
+    final cameraState = ref.watch(cameraViewModelProvider);
+
     return Scaffold(
       backgroundColor: Colors.black,
 
-      appBar: AppBar(
+      appBar: _hideUI
+          ? null
+          : AppBar(
         backgroundColor: Colors.black,
         title: const Text("Preview"),
       ),
 
       body: Column(
         children: [
-          /// ================= IMAGE PREVIEW =================
+
+          /// IMAGE + OVERLAY
           Expanded(
             child: InteractiveViewer(
-              child: Image.file(
-                _currentFile,
-                fit: BoxFit.contain, // ✅ important
-                filterQuality: FilterQuality.high,
+              child: Stack(
+                children: [
+                  Image.file(
+                    widget.originalFile,
+                    fit: BoxFit.contain,
+                    width: double.infinity,
+                  ),
+                  Positioned.fill(
+                    child: IgnorePointer(
+                      child: CustomPaint(
+                        painter: PreviewOverlayPainter(
+                          data: overlayData,
+                          showOverlay: _showOverlay,
+                          showWatermark: _showTextWatermark,
+                          orientation:
+                          cameraState.captureOrientation ??
+                              cameraState.orientation,
+                        ),
+                      ),
+                    ),
+                  ),
+                ],
               ),
             ),
           ),
 
-          /// ================= ACTION BAR =================
-          Container(
-            padding: const EdgeInsets.all(16),
-            color: Colors.black,
-            child: Row(
-              children: [
-                const SizedBox(width: 16),
-
-                Expanded(
-                  child: ElevatedButton.icon(
-                    icon: _saving
-                        ? const SizedBox(
-                      width: 18,
-                      height: 18,
-                      child:
-                      CircularProgressIndicator(
-                        strokeWidth: 2,
-                        color: Colors.black,
-                      ),
-                    )
-                        : const Icon(Icons.check),
-                    label: const Text("Save"),
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: Colors.white,
-                      foregroundColor: Colors.black,
-                    ),
-                    onPressed:
-                    _saving ? null : _saveImage,
-                  ),
+          /// ACTION BAR
+          AnimatedOpacity(
+            duration: const Duration(milliseconds: 300),
+            opacity: _hideUI ? 0 : 1,
+            child: AnimatedSlide(
+              duration: const Duration(milliseconds: 300),
+              offset:
+              _hideUI ? const Offset(0, 1) : Offset.zero,
+              child: Container(
+                margin: const EdgeInsets.all(16),
+                padding: const EdgeInsets.symmetric(
+                    horizontal: 12, vertical: 10),
+                decoration: BoxDecoration(
+                  color: Colors.black.withOpacity(0.7),
+                  borderRadius: BorderRadius.circular(20),
                 ),
-              ],
+                child: Row(
+                  children: [
+
+                    _buildToggleButton(
+                      icon: Icons.location_on,
+                      label: "Overlay",
+                      active: _showOverlay,
+                      onTap: () {
+                        setState(() =>
+                        _showOverlay = !_showOverlay);
+                      },
+                    ),
+
+                    const SizedBox(width: 8),
+
+                    _buildToggleButton(
+                      icon: Icons.text_fields,
+                      label: "Text",
+                      active: _showTextWatermark,
+                      onTap: () {
+                        setState(() =>
+                        _showTextWatermark =
+                        !_showTextWatermark);
+                      },
+                    ),
+
+                    const SizedBox(width: 8),
+
+                    _buildToggleButton(
+                      icon: Icons.tune,
+                      label: "Edit",
+                      active: false,
+                      onTap: _editWatermark,
+                    ),
+
+                    const Spacer(),
+
+                    ElevatedButton.icon(
+                      onPressed:
+                      _saving ? null : _saveImage,
+                      icon: _saving
+                          ? const SizedBox(
+                        width: 16,
+                        height: 16,
+                        child:
+                        CircularProgressIndicator(
+                          strokeWidth: 2,
+                          color: Colors.black,
+                        ),
+                      )
+                          : const Icon(Icons.download),
+                      label: const Text("Save"),
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: Colors.white,
+                        foregroundColor: Colors.black,
+                        shape: RoundedRectangleBorder(
+                          borderRadius:
+                          BorderRadius.circular(14),
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
             ),
           ),
         ],
+      ),
+    );
+  }
+
+  /// ================= TOGGLE BUTTON =================
+  Widget _buildToggleButton({
+    required IconData icon,
+    required String label,
+    required bool active,
+    required VoidCallback onTap,
+  }) {
+    return GestureDetector(
+      onTap: onTap,
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 200),
+        padding: const EdgeInsets.symmetric(
+            horizontal: 10, vertical: 6),
+        decoration: BoxDecoration(
+          color: active
+              ? Colors.white
+              : Colors.white.withOpacity(0.15),
+          borderRadius: BorderRadius.circular(12),
+        ),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(
+              icon,
+              size: 20,
+              color:
+              active ? Colors.black : Colors.white,
+            ),
+            const SizedBox(height: 2),
+            Text(
+              label,
+              style: TextStyle(
+                fontSize: 10,
+                color: active
+                    ? Colors.black
+                    : Colors.white,
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }

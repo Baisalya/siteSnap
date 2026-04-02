@@ -269,41 +269,63 @@ class CameraViewModel extends StateNotifier<CameraState>
     try {
       final repo = ref.read(cameraRepositoryProvider);
 
-      /// autofocus
+      /// ===============================
+      /// 📸 PREPARE CAMERA
+      /// ===============================
       await _prepareAutoFocus(controller);
-   /*   await controller.setFocusMode(FocusMode.auto);
-      await Future.delayed(const Duration(milliseconds: 200));*/
-      /// ✅ Smart exposure adjust BEFORE locking
       await _adjustExposureForCapture(controller);
-      /// 🔥 lock exposure before capture
+
+      /// 🔒 lock exposure
       await controller.setExposureMode(ExposureMode.locked);
       await Future.delayed(const Duration(milliseconds: 120));
 
+      /// ===============================
+      /// 📷 CAPTURE IMAGE
+      /// ===============================
       final path = await repo.takePicture();
+
+      /// ✅ ORIGINAL (CLEAN IMAGE)
       final originalFile = File(path);
+
+      /// ===============================
+      /// 🧠 IMPORTANT FIX: CREATE COPY
+      /// ===============================
+      final processedPath =
+      path.replaceFirst('.jpg', '_processed.jpg');
+
+      final copiedFile = await originalFile.copy(processedPath);
+
+      /// ===============================
+      /// 🎨 PROCESS ONLY COPY
+      /// ===============================
+      final processedFile = await ref
+          .read(overlayViewModelProvider.notifier)
+          .processImage(
+        copiedFile,
+        state.captureOrientation!,
+      );
 
       /// restore exposure
       await controller.setExposureMode(ExposureMode.auto);
 
-      final processedFile = await ref
-          .read(overlayViewModelProvider.notifier)
-          .processImage(
-        originalFile,
-        state.captureOrientation!,
-      );
-
       if (!context.mounted) return;
 
+      /// ===============================
+      /// 🖼 PREVIEW SCREEN
+      /// ===============================
       final result = await Navigator.push<File>(
         context,
         MaterialPageRoute(
           builder: (_) => ImagePreviewScreen(
-            originalFile: originalFile,
-            processedFile: processedFile,
+            originalFile: originalFile,   // ✅ CLEAN
+            processedFile: processedFile, // ✅ WITH WATERMARK
           ),
         ),
       );
 
+      /// ===============================
+      /// 💾 SAVE TO LAST IMAGE
+      /// ===============================
       if (result != null) {
         ref.read(lastImageProvider.notifier).state = result;
       }
@@ -314,7 +336,6 @@ class CameraViewModel extends StateNotifier<CameraState>
       state = state.copyWith(isCapturing: false);
     }
   }
-
   // ================= DISPOSE =================
 
   @override

@@ -10,7 +10,9 @@ import 'live_overlay_painter.dart';
 Future<File> drawOverlay(
     File file,
     OverlayData data,
-    DeviceOrientation orientation,
+    DeviceOrientation orientation, {
+      bool showOverlay = true,
+      bool showWatermark = true,}
     ) async {
   /// ===============================
   /// LOAD IMAGE
@@ -66,8 +68,9 @@ Future<File> drawOverlay(
 
   /// DRAW MAIN OVERLAY
   final overlayPainter = LiveOverlayPainter(data, orientation);
-  overlayPainter.paint(canvas, Size(srcW, srcH));
-
+  if (showOverlay) {
+    overlayPainter.paint(canvas, Size(srcW, srcH));
+  }
   /// ===============================
   /// WATERMARK (AUTO SAME SIDE)
   /// ===============================
@@ -184,9 +187,9 @@ Future<File> drawOverlay(
       );
     }
   }
-
-  textPainter.paint(canvas, offset);
-
+  if (showOverlay && showWatermark) {
+    textPainter.paint(canvas, offset);
+  }
   canvas.restore();
 
   /// ===============================
