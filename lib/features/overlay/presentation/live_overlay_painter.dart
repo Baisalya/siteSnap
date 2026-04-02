@@ -87,7 +87,7 @@ class LiveOverlayPainter extends CustomPainter {
       buffer.writeln(data.locationWarning);
     } else {
       buffer.writeln(
-          "Lat ${data.latitude.toStringAsFixed(5)}  |  Lon ${data.longitude.toStringAsFixed(5)}");
+          "Lat: ${data.latitude.toStringAsFixed(5)}  |  Lon: ${data.longitude.toStringAsFixed(5)}");
     }
 
     buffer.writeln(
