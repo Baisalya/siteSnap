@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:io';
 import 'package:camera/camera.dart';
 import 'package:flutter/material.dart';
@@ -269,70 +270,72 @@ class CameraViewModel extends StateNotifier<CameraState>
     try {
       final repo = ref.read(cameraRepositoryProvider);
 
-      /// ===============================
-      /// 📸 PREPARE CAMERA
-      /// ===============================
-      await _prepareAutoFocus(controller);
-      await _adjustExposureForCapture(controller);
+      /// 📸 QUICK PREP (reduced delay)
+      await controller.setFocusMode(FocusMode.auto);
+      await controller.setExposureMode(ExposureMode.auto);
 
-      /// 🔒 lock exposure
-      await controller.setExposureMode(ExposureMode.locked);
-      await Future.delayed(const Duration(milliseconds: 120));
-
-      /// ===============================
-      /// 📷 CAPTURE IMAGE
-      /// ===============================
+      /// ⚡ CAPTURE ASAP (no heavy delay)
       final path = await repo.takePicture();
 
-      /// ✅ ORIGINAL (CLEAN IMAGE)
+      /// 🔥 restore exposure immediately
+      await controller.setExposureMode(ExposureMode.auto);
+
+      /// 🚀 PROCESS IN BACKGROUND
+      unawaited(_handlePostCapture(
+        path,
+        context,
+        deviceOrientation,
+      ));
+
+    } catch (e) {
+      debugPrint('Capture error: $e');
+      state = state.copyWith(isCapturing: false);
+    }
+  }
+  Future<void> _handlePostCapture(
+      String path,
+      BuildContext context,
+      DeviceOrientation orientation,
+      ) async {
+    try {
       final originalFile = File(path);
 
-      /// ===============================
-      /// 🧠 IMPORTANT FIX: CREATE COPY
-      /// ===============================
+      /// 📂 create processed copy
       final processedPath =
       path.replaceFirst('.jpg', '_processed.jpg');
 
       final copiedFile = await originalFile.copy(processedPath);
 
-      /// ===============================
-      /// 🎨 PROCESS ONLY COPY
-      /// ===============================
+      /// 🎨 heavy processing (background)
       final processedFile = await ref
           .read(overlayViewModelProvider.notifier)
           .processImage(
         copiedFile,
-        state.captureOrientation!,
+        orientation,
       );
-
-      /// restore exposure
-      await controller.setExposureMode(ExposureMode.auto);
 
       if (!context.mounted) return;
 
-      /// ===============================
-      /// 🖼 PREVIEW SCREEN
-      /// ===============================
+      /// 🖼 open preview AFTER processing
       final result = await Navigator.push<File>(
         context,
         MaterialPageRoute(
           builder: (_) => ImagePreviewScreen(
-            originalFile: originalFile,   // ✅ CLEAN
-            processedFile: processedFile, // ✅ WITH WATERMARK
+            originalFile: originalFile,
+            processedFile: processedFile,
           ),
         ),
       );
 
-      /// ===============================
-      /// 💾 SAVE TO LAST IMAGE
-      /// ===============================
+      /// 💾 update last image
       if (result != null) {
         ref.read(lastImageProvider.notifier).state = result;
       }
 
     } catch (e) {
-      debugPrint('Capture error: $e');
+      debugPrint("Post capture error: $e");
     } finally {
+      /// 🔓 unlock capture state AFTER everything
       state = state.copyWith(isCapturing: false);
     }
   }

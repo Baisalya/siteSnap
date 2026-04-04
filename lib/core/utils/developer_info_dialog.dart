@@ -47,7 +47,7 @@ class DeveloperInfoDialog extends StatelessWidget {
             const SizedBox(height: 12),
 
             const Text(
-              "survaycam",
+              "SurveyCam",
               style: TextStyle(
                 color: Colors.white,
                 fontSize: 20,
@@ -82,26 +82,33 @@ class DeveloperInfoDialog extends StatelessWidget {
 
             const SizedBox(height: 10),
 
-            /// BUY ME A COFFEE
-            /*SizedBox(
+            /// PRIVACY POLICY ✅
+            SizedBox(
               width: double.infinity,
-              child: ElevatedButton.icon(
-                icon: const Icon(Icons.coffee),
-                label: const Text("Buy me a Coffee"),
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: Colors.white,
-                  foregroundColor: Colors.black,
-                ),
+              child: OutlinedButton(
                 onPressed: () {
                   _openLink(
-                      "https://buymeacoffee.com/baisalya");
+                    "https://baisalya.github.io/surveycam-privacy-policy/",
+                  );
                 },
+                style: OutlinedButton.styleFrom(
+                  foregroundColor: Colors.white,
+                  side: const BorderSide(color: Colors.white),
+                ),
+                child: const Row(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    Icon(Icons.privacy_tip, size: 18),
+                    SizedBox(width: 6),
+                    Text("Privacy Policy"),
+                  ],
+                ),
               ),
-            ),*/
+            ),
 
             const SizedBox(height: 10),
 
-            /// UPI SUPPORT BUTTON (NEW)
+            /// UPI SUPPORT BUTTON
             SizedBox(
               width: double.infinity,
               child: ElevatedButton.icon(
@@ -118,7 +125,7 @@ class DeveloperInfoDialog extends StatelessWidget {
             const SizedBox(height: 6),
 
             const Text(
-              "survaycam is free. Support helps future updates.",
+              "SurveyCam is free. Support helps future updates.",
               style: TextStyle(
                 color: Colors.grey,
                 fontSize: 12,

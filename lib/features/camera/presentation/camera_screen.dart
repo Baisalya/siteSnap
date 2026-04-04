@@ -34,7 +34,7 @@ class _CameraScreenState extends ConsumerState<CameraScreen> {
 
   bool _showExposure = false;
   Timer? _dateTimer;
-
+  bool _isCapturing = false;
   String _orientationText(DeviceOrientation orientation) {
     switch (orientation) {
       case DeviceOrientation.portraitUp:
@@ -185,110 +185,124 @@ class _CameraScreenState extends ConsumerState<CameraScreen> {
 
                   return Stack(
                     children: [
-
+                      if (_isCapturing)
+                        Positioned.fill(
+                          child: AnimatedOpacity(
+                            opacity: 0.9,
+                            duration: const Duration(milliseconds: 100),
+                            child: Container(color: Colors.white),
+                          ),
+                        ),
                       /// CAMERA PREVIEW
-                      GestureDetector(
-                        onTapDown: (details) {
-
-                          if (!cameraState.isReady ||
-                              controller == null ||
-                              !controller.value.isInitialized) {
-                            return;
-                          }
-
-                          final tapPosition =
-                              details.localPosition;
-
-                          ref
-                              .read(focusPointProvider.notifier)
-                              .state = tapPosition;
-
-                          cameraVM.setFocusPoint(
-                              tapPosition, previewSize);
-
-                          setState(() {
-                            _showExposure = true;
-                          });
-
-                          Future.delayed(
-                            const Duration(milliseconds: 1500),
-                                () {
-                              if (!mounted) return;
-                              ref
-                                  .read(focusPointProvider.notifier)
-                                  .state = null;
-
-                              setState(() {
-                                _showExposure = false;
-                              });
-                            },
-                          );
-                        },
-                        onPanUpdate: (details) {
-                          if (controller == null ||
-                              !controller.value.isInitialized) return;
-
-                          final verticalDelta =
-                          -details.delta.dy;
-                          final horizontalDelta =
-                              details.delta.dx;
-
-                          final delta =
-                              (verticalDelta + horizontalDelta) *
-                                  0.03;
-
-                          cameraVM.changeExposure(delta);
-                        },
+                      IgnorePointer(
+                        ignoring: _isCapturing,
                         child: Stack(
                           children: [
+                            GestureDetector(
+                              onTapDown: (details) {
 
-                            if (controller != null &&
-                                controller.value.isInitialized &&
-                                cameraState.isReady)
-                              LayoutBuilder(
-                                builder: (context, constraints) {
+                                if (!cameraState.isReady ||
+                                    controller == null ||
+                                    !controller.value.isInitialized) {
+                                  return;
+                                }
 
-                                  final preview =
-                                  controller.value.previewSize!;
+                                final tapPosition =
+                                    details.localPosition;
 
-                                  return ClipRect(
-                                    child: OverflowBox(
-                                      alignment: Alignment.center,
-                                      child: FittedBox(
-                                        fit: BoxFit.cover,
-                                        child: SizedBox(
-                                          width: preview.height,
-                                          height: preview.width,
-                                          child: CameraPreview(controller),
+                                ref
+                                    .read(focusPointProvider.notifier)
+                                    .state = tapPosition;
+
+                                cameraVM.setFocusPoint(
+                                    tapPosition, previewSize);
+
+                                setState(() {
+                                  _showExposure = true;
+                                });
+
+                                Future.delayed(
+                                  const Duration(milliseconds: 1500),
+                                      () {
+                                    if (!mounted) return;
+                                    ref
+                                        .read(focusPointProvider.notifier)
+                                        .state = null;
+
+                                    setState(() {
+                                      _showExposure = false;
+                                    });
+                                  },
+                                );
+                              },
+                              onPanUpdate: (details) {
+                                if (controller == null ||
+                                    !controller.value.isInitialized) return;
+
+                                final verticalDelta =
+                                -details.delta.dy;
+                                final horizontalDelta =
+                                    details.delta.dx;
+
+                                final delta =
+                                    (verticalDelta + horizontalDelta) *
+                                        0.03;
+
+                                cameraVM.changeExposure(delta);
+                              },
+                              child: Stack(
+                                children: [
+
+                                  if (controller != null &&
+                                      controller.value.isInitialized &&
+                                      cameraState.isReady)
+                                    LayoutBuilder(
+                                      builder: (context, constraints) {
+
+                                        final preview =
+                                        controller.value.previewSize!;
+
+                                        return ClipRect(
+                                          child: OverflowBox(
+                                            alignment: Alignment.center,
+                                            child: FittedBox(
+                                              fit: BoxFit.cover,
+                                              child: SizedBox(
+                                                width: preview.height,
+                                                height: preview.width,
+                                                child: CameraPreview(controller),
+                                              ),
+                                            ),
+                                          ),
+                                        );
+                                      },
+                                    )
+                                  else
+                                    const SizedBox.expand(
+                                      child: ColoredBox(
+                                        color: Colors.black,
+                                      ),
+                                    ),
+
+                                  AnimatedOpacity(
+                                    opacity: (cameraState.isReady &&
+                                        controller != null)
+                                        ? 0
+                                        : 1,
+                                    duration:
+                                    const Duration(milliseconds: 250),
+                                    child: Container(
+                                      color: Colors.black,
+                                      child: const Center(
+                                        child: Icon(
+                                          Icons.camera_alt,
+                                          color: Colors.white24,
+                                          size: 50,
                                         ),
                                       ),
                                     ),
-                                  );
-                                },
-                              )
-                            else
-                              const SizedBox.expand(
-                                child: ColoredBox(
-                                  color: Colors.black,
-                                ),
-                              ),
-
-                            AnimatedOpacity(
-                              opacity: (cameraState.isReady &&
-                                  controller != null)
-                                  ? 0
-                                  : 1,
-                              duration:
-                              const Duration(milliseconds: 250),
-                              child: Container(
-                                color: Colors.black,
-                                child: const Center(
-                                  child: Icon(
-                                    Icons.camera_alt,
-                                    color: Colors.white24,
-                                    size: 50,
                                   ),
-                                ),
+                                ],
                               ),
                             ),
                           ],
@@ -472,9 +486,22 @@ class _CameraScreenState extends ConsumerState<CameraScreen> {
                     onPressed: cameraVM.toggleFlash,
                   ),
                   CaptureButton(
-                    onCapture: () {
-                      if (cameraState.isReady) {
-                        cameraVM.capture(context);
+                    onCapture: () async {
+                      if (!cameraState.isReady || _isCapturing) return;
+
+                      setState(() => _isCapturing = true);
+
+                      // 🔊 shutter sound
+                      SystemSound.play(SystemSoundType.click);
+
+                      try {
+                        await cameraVM.capture(context);
+                      } catch (e) {
+                        debugPrint("Capture error: $e");
+                      }
+
+                      if (mounted) {
+                        setState(() => _isCapturing = false);
                       }
                     },
                   ),

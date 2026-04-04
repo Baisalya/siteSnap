@@ -10,6 +10,7 @@ class SurveyCamApp extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
+      debugShowCheckedModeBanner: false, // ✅ THIS LINE
       title: 'SurveyCam',
       theme: AppTheme.light,
       darkTheme: AppTheme.dark,

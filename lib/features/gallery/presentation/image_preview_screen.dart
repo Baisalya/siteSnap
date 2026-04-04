@@ -83,7 +83,6 @@ class _ImagePreviewScreenState
     );
 
     if (!mounted) return;
-
     setState(() {});
   }
 
@@ -135,93 +134,125 @@ class _ImagePreviewScreenState
             ),
           ),
 
-          /// ACTION BAR
-          AnimatedOpacity(
-            duration: const Duration(milliseconds: 300),
-            opacity: _hideUI ? 0 : 1,
-            child: AnimatedSlide(
+          /// 🔥 ANIMATED SWITCH (KEY PART)
+          // 🔥 FIXED HEIGHT (adjust if needed)
+            AnimatedSwitcher(
               duration: const Duration(milliseconds: 300),
-              offset:
-              _hideUI ? const Offset(0, 1) : Offset.zero,
-              child: Container(
-                margin: const EdgeInsets.all(16),
-                padding: const EdgeInsets.symmetric(
-                    horizontal: 12, vertical: 10),
-                decoration: BoxDecoration(
-                  color: Colors.black.withOpacity(0.7),
-                  borderRadius: BorderRadius.circular(20),
-                ),
-                child: Row(
-                  children: [
-
-                    _buildToggleButton(
-                      icon: Icons.location_on,
-                      label: "Overlay",
-                      active: _showOverlay,
-                      onTap: () {
-                        setState(() =>
-                        _showOverlay = !_showOverlay);
-                      },
-                    ),
-
-                    const SizedBox(width: 8),
-
-                    _buildToggleButton(
-                      icon: Icons.text_fields,
-                      label: "Text",
-                      active: _showTextWatermark,
-                      onTap: () {
-                        setState(() =>
-                        _showTextWatermark =
-                        !_showTextWatermark);
-                      },
-                    ),
-
-                    const SizedBox(width: 8),
-
-                    _buildToggleButton(
-                      icon: Icons.tune,
-                      label: "Edit",
-                      active: false,
-                      onTap: _editWatermark,
-                    ),
-
-                    const Spacer(),
-
-                    ElevatedButton.icon(
-                      onPressed:
-                      _saving ? null : _saveImage,
-                      icon: _saving
-                          ? const SizedBox(
-                        width: 16,
-                        height: 16,
-                        child:
-                        CircularProgressIndicator(
-                          strokeWidth: 2,
-                          color: Colors.black,
-                        ),
-                      )
-                          : const Icon(Icons.download),
-                      label: const Text("Save"),
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: Colors.white,
-                        foregroundColor: Colors.black,
-                        shape: RoundedRectangleBorder(
-                          borderRadius:
-                          BorderRadius.circular(14),
-                        ),
-                      ),
-                    ),
-                  ],
-                ),
-              ),
+              transitionBuilder: (child, animation) {
+                return SlideTransition(
+                  position: Tween<Offset>(
+                    begin: const Offset(0, 1),
+                    end: Offset.zero,
+                  ).animate(animation),
+                  child: FadeTransition(
+                    opacity: animation,
+                    child: child,
+                  ),
+                );
+              },
+              child: _hideUI
+                  ? _buildSavingBar()
+                  : _buildActionBar(),
             ),
+                ],
+      ),
+    );
+  }
+
+  /// ================= ACTION BAR =================
+  Widget _buildActionBar() {
+    return Container(
+      key: const ValueKey("actionBar"),
+      margin: const EdgeInsets.all(16),
+      padding: const EdgeInsets.symmetric(
+        horizontal: 12,
+        vertical: 14, // ✅ SAME as saving bar
+      ),
+      decoration: BoxDecoration(
+        color: Colors.black.withOpacity(0.7),
+        borderRadius: BorderRadius.circular(20),
+      ),
+      child: Row(
+        children: [
+          _buildToggleButton(
+            icon: Icons.location_on,
+            label: "Overlay",
+            active: _showOverlay,
+            onTap: () {
+              setState(() => _showOverlay = !_showOverlay);
+            },
+          ),
+          const SizedBox(width: 8),
+          _buildToggleButton(
+            icon: Icons.text_fields,
+            label: "Text",
+            active: _showTextWatermark,
+            onTap: () {
+              setState(() =>
+              _showTextWatermark = !_showTextWatermark);
+            },
+          ),
+          const SizedBox(width: 8),
+          _buildToggleButton(
+            icon: Icons.tune,
+            label: "Edit",
+            active: false,
+            onTap: _editWatermark,
+          ),
+          const Spacer(),
+          ElevatedButton.icon(
+            onPressed: _saving ? null : _saveImage,
+            icon: _saving
+                ? const SizedBox(
+              width: 16,
+              height: 16,
+              child: CircularProgressIndicator(
+                strokeWidth: 2,
+                color: Colors.black,
+              ),
+            )
+                : const Icon(Icons.download),
+            label: const Text("Save"),
           ),
         ],
       ),
     );
   }
-
+  /// ================= SAVING BAR =================
+  Widget _buildSavingBar() {
+    return Container(
+      key: const ValueKey("savingBar"),
+      margin: const EdgeInsets.all(16),
+      padding: const EdgeInsets.symmetric(
+        horizontal: 16,
+        vertical: 14, // ✅ SAME HEIGHT
+      ),
+      decoration: BoxDecoration(
+        color: Colors.black.withOpacity(0.75),
+        borderRadius: BorderRadius.circular(20),
+      ),
+      child: Row(
+        children: [
+          const SizedBox(
+            width: 18,
+            height: 18,
+            child: CircularProgressIndicator(
+              strokeWidth: 2,
+              color: Colors.white,
+            ),
+          ),
+          const SizedBox(width: 12),
+          const Text(
+            "Saving...",
+            style: TextStyle(color: Colors.white),
+          ),
+          const Spacer(),
+          const Icon(Icons.check_circle_outline,
+              color: Colors.white54),
+        ],
+      ),
+    );
+  }
   /// ================= TOGGLE BUTTON =================
   Widget _buildToggleButton({
     required IconData icon,
@@ -234,33 +265,34 @@ class _ImagePreviewScreenState
       child: AnimatedContainer(
         duration: const Duration(milliseconds: 200),
         padding: const EdgeInsets.symmetric(
-            horizontal: 10, vertical: 6),
+            horizontal: 12, vertical: 6),
         decoration: BoxDecoration(
           color: active
               ? Colors.white
               : Colors.white.withOpacity(0.15),
           borderRadius: BorderRadius.circular(12),
         ),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Icon(
-              icon,
-              size: 20,
-              color:
-              active ? Colors.black : Colors.white,
-            ),
-            const SizedBox(height: 2),
-            Text(
-              label,
-              style: TextStyle(
-                fontSize: 10,
-                color: active
-                    ? Colors.black
-                    : Colors.white,
+        child: Center( // 🔥 IMPORTANT FIX
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            mainAxisAlignment: MainAxisAlignment.center, // ✅ FIX
+            children: [
+              Icon(
+                icon,
+                size: 20,
+                color: active ? Colors.black : Colors.white,
               ),
-            ),
-          ],
+              const SizedBox(height: 2),
+              Text(
+                label,
+                style: TextStyle(
+                  fontSize: 10,
+                  color:
+                  active ? Colors.black : Colors.white,
+                ),
+              ),
+            ],
+          ),
         ),
       ),
     );
