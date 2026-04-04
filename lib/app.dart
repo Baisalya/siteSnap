@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
-import 'package:survaycam/RootScreen.dart';
-import 'package:survaycam/privacypolicy/SplashScreen.dart';
+
+import 'RootScreen.dart';
 import 'core/theme/app_theme.dart';
 import 'features/camera/presentation/camera_screen.dart';
 

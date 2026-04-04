@@ -24,6 +24,7 @@ class OverlayViewModel extends StateNotifier<void> {
   Future<File> processImage(
       File original,
       DeviceOrientation orientation, {
+        required OverlayData overlayData, // 🔥 ADD THIS
         bool showOverlay = true,
         bool showWatermark = true,
       }) async {
@@ -68,7 +69,9 @@ class OverlayViewModel extends StateNotifier<void> {
       /// ===============================
       /// 4️⃣ OVERLAY DATA
       /// ===============================
+/*
       final overlayData = ref.read(overlayPreviewProvider);
+*/
 
       /// ===============================
       /// 5️⃣ DRAW OVERLAY SAFELY

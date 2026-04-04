@@ -1,7 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:survaycam/privacypolicy/SplashScreen.dart';
-import 'package:survaycam/privacypolicy/privacyProvider.dart';
+
+import 'package:surveycam/privacypolicy/SplashScreen.dart';
+import 'package:surveycam/privacypolicy/privacyProvider.dart';
 
 import 'features/camera/presentation/camera_screen.dart';
 

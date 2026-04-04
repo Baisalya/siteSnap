@@ -4,6 +4,7 @@ import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../core/utils/gallery_saver.dart';
+import '../../overlay/presentation/captured_overlay_provider.dart';
 import '../../overlay/presentation/overlay_preview_state.dart';
 import '../../overlay/presentation/overlay_viewmodel.dart';
 import '../../camera/presentation/camera_viewmodel.dart';
@@ -45,6 +46,13 @@ class _ImagePreviewScreenState
 
     try {
       final cameraState = ref.read(cameraViewModelProvider);
+      final captured = ref.read(capturedOverlayProvider);
+      final live = ref.read(overlayPreviewProvider);
+
+      final overlayData = (captured ?? live).copyWith(
+        note: live.note,
+        position: live.position,
+      );
 
       final finalFile = await ref
           .read(overlayViewModelProvider.notifier)
@@ -52,10 +60,10 @@ class _ImagePreviewScreenState
         widget.originalFile,
         cameraState.captureOrientation ??
             cameraState.orientation,
+        overlayData: overlayData, // ✅ now defined
         showOverlay: _showOverlay,
         showWatermark: _showTextWatermark,
       );
-
       final savedFile =
       await GallerySaver.saveImage(finalFile);
 
@@ -89,7 +97,14 @@ class _ImagePreviewScreenState
   /// ================= UI =================
   @override
   Widget build(BuildContext context) {
-    final overlayData = ref.watch(overlayPreviewProvider);
+    final captured = ref.watch(capturedOverlayProvider);
+    final live = ref.watch(overlayPreviewProvider);
+
+    final overlayData = (captured ?? live).copyWith(
+      note: live.note,
+      position: live.position,// 🔄 always latest note
+    );
+
     final cameraState = ref.watch(cameraViewModelProvider);
 
     return Scaffold(

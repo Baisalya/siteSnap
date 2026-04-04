@@ -1,5 +1,5 @@
-name: survaycam
-description: "A new Flutter project."
+name: surveycam
+description: "A camera app for capturing photos with location and geo-tagging features."
 publish_to: 'none'
 
 version: 1.0.0+1

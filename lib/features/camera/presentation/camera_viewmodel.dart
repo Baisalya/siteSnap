@@ -12,6 +12,8 @@ import '../../../core/utils/device_orientation_provider.dart';
 import '../../gallery/presentation/image_preview_screen.dart';
 import '../../gallery/presentation/last_image_provider.dart';
 import '../../location/presentation/location_viewmodel.dart';
+import '../../overlay/presentation/captured_overlay_provider.dart';
+import '../../overlay/presentation/overlay_preview_state.dart';
 import '../../overlay/presentation/overlay_viewmodel.dart';
 import '../data/CameraState.dart';
 import '../domain/camera_lens_type.dart';
@@ -259,7 +261,10 @@ class CameraViewModel extends StateNotifier<CameraState>
         state.isCapturing) {
       return;
     }
+    final overlayData = ref.read(overlayPreviewProvider);
 
+// 🔥 FREEZE SNAPSHOT HERE
+    ref.read(capturedOverlayProvider.notifier).state = overlayData;
     final deviceOrientation = ref.read(deviceOrientationProvider);
 
     state = state.copyWith(
@@ -307,11 +312,19 @@ class CameraViewModel extends StateNotifier<CameraState>
       final copiedFile = await originalFile.copy(processedPath);
 
       /// 🎨 heavy processing (background)
+      final captured = ref.read(capturedOverlayProvider);
+      final live = ref.read(overlayPreviewProvider);
+
+      final overlayData = (captured ?? live).copyWith(
+        note: live.note,
+      );
+
       final processedFile = await ref
           .read(overlayViewModelProvider.notifier)
           .processImage(
         copiedFile,
         orientation,
+        overlayData: overlayData, // ✅ FIX
       );
 
       if (!context.mounted) return;

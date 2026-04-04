@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:survaycam/privacypolicy/privacyProvider.dart';
+import 'package:surveycam/privacypolicy/privacyProvider.dart';
 
 class PrivacyDialog extends ConsumerWidget {
   const PrivacyDialog({super.key});

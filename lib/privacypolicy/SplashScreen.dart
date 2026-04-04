@@ -1,8 +1,10 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:survaycam/features/camera/presentation/camera_screen.dart';
-import 'package:survaycam/privacypolicy/privacyProvider.dart';
-import 'package:survaycam/privacypolicy/PrivacyDialog.dart';
+
+import 'package:surveycam/privacypolicy/privacyProvider.dart';
+
+import '../features/camera/presentation/camera_screen.dart';
+import 'PrivacyDialog.dart';
 
 class SplashScreen extends ConsumerStatefulWidget {
   const SplashScreen({super.key});
