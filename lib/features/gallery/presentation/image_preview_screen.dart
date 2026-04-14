@@ -1,6 +1,5 @@
 import 'dart:io';
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../core/utils/gallery_saver.dart';
@@ -30,7 +29,6 @@ class _ImagePreviewScreenState
     extends ConsumerState<ImagePreviewScreen> {
 
   bool _saving = false;
-  bool _hideUI = false;
 
   bool _showOverlay = true;
   bool _showTextWatermark = true;
@@ -40,8 +38,7 @@ class _ImagePreviewScreenState
     if (_saving) return;
 
     setState(() {
-      _saving = true;
-      _hideUI = true;
+      _saving = true; // ✅ ONLY THIS (no _hideUI)
     });
 
     try {
@@ -60,10 +57,11 @@ class _ImagePreviewScreenState
         widget.originalFile,
         cameraState.captureOrientation ??
             cameraState.orientation,
-        overlayData: overlayData, // ✅ now defined
+        overlayData: overlayData,
         showOverlay: _showOverlay,
         showWatermark: _showTextWatermark,
       );
+
       final savedFile =
       await GallerySaver.saveImage(finalFile);
 
@@ -75,7 +73,6 @@ class _ImagePreviewScreenState
       if (mounted) {
         setState(() {
           _saving = false;
-          _hideUI = false;
         });
       }
     }
@@ -99,20 +96,16 @@ class _ImagePreviewScreenState
   Widget build(BuildContext context) {
     final captured = ref.watch(capturedOverlayProvider);
     final live = ref.watch(overlayPreviewProvider);
+    final cameraState = ref.watch(cameraViewModelProvider);
 
     final overlayData = (captured ?? live).copyWith(
       note: live.note,
-      position: live.position,// 🔄 always latest note
+      position: live.position,
     );
-
-    final cameraState = ref.watch(cameraViewModelProvider);
 
     return Scaffold(
       backgroundColor: Colors.black,
-
-      appBar: _hideUI
-          ? null
-          : AppBar(
+      appBar: AppBar(
         backgroundColor: Colors.black,
         title: const Text("Preview"),
       ),
@@ -120,7 +113,7 @@ class _ImagePreviewScreenState
       body: Column(
         children: [
 
-          /// IMAGE + OVERLAY
+          /// ✅ IMAGE (NOW WILL NEVER SHIFT)
           Expanded(
             child: InteractiveViewer(
               child: Stack(
@@ -149,27 +142,17 @@ class _ImagePreviewScreenState
             ),
           ),
 
-          /// 🔥 ANIMATED SWITCH (KEY PART)
-          // 🔥 FIXED HEIGHT (adjust if needed)
-            AnimatedSwitcher(
-              duration: const Duration(milliseconds: 300),
-              transitionBuilder: (child, animation) {
-                return SlideTransition(
-                  position: Tween<Offset>(
-                    begin: const Offset(0, 1),
-                    end: Offset.zero,
-                  ).animate(animation),
-                  child: FadeTransition(
-                    opacity: animation,
-                    child: child,
-                  ),
-                );
-              },
-              child: _hideUI
+          /// ✅ FIXED HEIGHT BOTTOM (NO JUMP)
+          SizedBox(
+            height: 100, // 🔥 IMPORTANT
+            child: AnimatedSwitcher(
+              duration: const Duration(milliseconds: 250),
+              child: _saving
                   ? _buildSavingBar()
                   : _buildActionBar(),
             ),
-                ],
+          ),
+        ],
       ),
     );
   }
@@ -181,7 +164,7 @@ class _ImagePreviewScreenState
       margin: const EdgeInsets.all(16),
       padding: const EdgeInsets.symmetric(
         horizontal: 12,
-        vertical: 14, // ✅ SAME as saving bar
+        vertical: 14,
       ),
       decoration: BoxDecoration(
         color: Colors.black.withOpacity(0.7),
@@ -217,22 +200,14 @@ class _ImagePreviewScreenState
           const Spacer(),
           ElevatedButton.icon(
             onPressed: _saving ? null : _saveImage,
-            icon: _saving
-                ? const SizedBox(
-              width: 16,
-              height: 16,
-              child: CircularProgressIndicator(
-                strokeWidth: 2,
-                color: Colors.black,
-              ),
-            )
-                : const Icon(Icons.download),
+            icon: const Icon(Icons.download),
             label: const Text("Save"),
           ),
         ],
       ),
     );
   }
+
   /// ================= SAVING BAR =================
   Widget _buildSavingBar() {
     return Container(
@@ -240,15 +215,15 @@ class _ImagePreviewScreenState
       margin: const EdgeInsets.all(16),
       padding: const EdgeInsets.symmetric(
         horizontal: 16,
-        vertical: 14, // ✅ SAME HEIGHT
+        vertical: 14,
       ),
       decoration: BoxDecoration(
         color: Colors.black.withOpacity(0.75),
         borderRadius: BorderRadius.circular(20),
       ),
-      child: Row(
+      child: const Row(
         children: [
-          const SizedBox(
+          SizedBox(
             width: 18,
             height: 18,
             child: CircularProgressIndicator(
@@ -256,18 +231,19 @@ class _ImagePreviewScreenState
               color: Colors.white,
             ),
           ),
-          const SizedBox(width: 12),
-          const Text(
+          SizedBox(width: 12),
+          Text(
             "Saving...",
             style: TextStyle(color: Colors.white),
           ),
-          const Spacer(),
-          const Icon(Icons.check_circle_outline,
+          Spacer(),
+          Icon(Icons.check_circle_outline,
               color: Colors.white54),
         ],
       ),
     );
   }
+
   /// ================= TOGGLE BUTTON =================
   Widget _buildToggleButton({
     required IconData icon,
@@ -280,17 +256,19 @@ class _ImagePreviewScreenState
       child: AnimatedContainer(
         duration: const Duration(milliseconds: 200),
         padding: const EdgeInsets.symmetric(
-            horizontal: 12, vertical: 6),
+          horizontal: 12,
+          vertical: 6,
+        ),
         decoration: BoxDecoration(
           color: active
               ? Colors.white
               : Colors.white.withOpacity(0.15),
           borderRadius: BorderRadius.circular(12),
         ),
-        child: Center( // 🔥 IMPORTANT FIX
+        child: FittedBox( // ✅ FIX
+          fit: BoxFit.scaleDown,
           child: Column(
             mainAxisSize: MainAxisSize.min,
-            mainAxisAlignment: MainAxisAlignment.center, // ✅ FIX
             children: [
               Icon(
                 icon,
@@ -302,8 +280,7 @@ class _ImagePreviewScreenState
                 label,
                 style: TextStyle(
                   fontSize: 10,
-                  color:
-                  active ? Colors.black : Colors.white,
+                  color: active ? Colors.black : Colors.white,
                 ),
               ),
             ],

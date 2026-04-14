@@ -185,14 +185,7 @@ class _CameraScreenState extends ConsumerState<CameraScreen> {
 
                   return Stack(
                     children: [
-                      if (_isCapturing)
-                        Positioned.fill(
-                          child: AnimatedOpacity(
-                            opacity: 0.9,
-                            duration: const Duration(milliseconds: 100),
-                            child: Container(color: Colors.white),
-                          ),
-                        ),
+
                       /// CAMERA PREVIEW
                       IgnorePointer(
                         ignoring: _isCapturing,
@@ -252,30 +245,18 @@ class _CameraScreenState extends ConsumerState<CameraScreen> {
                               },
                               child: Stack(
                                 children: [
-
                                   if (controller != null &&
                                       controller.value.isInitialized &&
                                       cameraState.isReady)
-                                    LayoutBuilder(
-                                      builder: (context, constraints) {
-
-                                        final preview =
-                                        controller.value.previewSize!;
-
-                                        return ClipRect(
-                                          child: OverflowBox(
-                                            alignment: Alignment.center,
-                                            child: FittedBox(
-                                              fit: BoxFit.cover,
-                                              child: SizedBox(
-                                                width: preview.height,
-                                                height: preview.width,
-                                                child: CameraPreview(controller),
-                                              ),
-                                            ),
-                                          ),
-                                        );
-                                      },
+                                    SizedBox.expand(
+                                      child: FittedBox(
+                                        fit: BoxFit.cover,
+                                        child: SizedBox(
+                                          width: controller.value.previewSize!.height,
+                                          height: controller.value.previewSize!.width,
+                                          child: CameraPreview(controller),
+                                        ),
+                                      ),
                                     )
                                   else
                                     const SizedBox.expand(
@@ -285,19 +266,32 @@ class _CameraScreenState extends ConsumerState<CameraScreen> {
                                     ),
 
                                   AnimatedOpacity(
-                                    opacity: (cameraState.isReady &&
-                                        controller != null)
-                                        ? 0
-                                        : 1,
-                                    duration:
-                                    const Duration(milliseconds: 250),
+                                    opacity: (cameraState.isReady && controller != null && cameraState.error == null) ? 0 : 1,
+                                    duration: const Duration(milliseconds: 250),
                                     child: Container(
                                       color: Colors.black,
-                                      child: const Center(
-                                        child: Icon(
-                                          Icons.camera_alt,
-                                          color: Colors.white24,
-                                          size: 50,
+                                      child: Center(
+                                        child: Column(
+                                          mainAxisSize: MainAxisSize.min,
+                                          children: [
+                                            const Icon(
+                                              Icons.camera_alt,
+                                              color: Colors.white24,
+                                              size: 50,
+                                            ),
+                                            if (cameraState.error != null) ...[
+                                              const SizedBox(height: 16),
+                                              Text(
+                                                "Camera Error: ${cameraState.error}",
+                                                style: const TextStyle(color: Colors.white70),
+                                                textAlign: TextAlign.center,
+                                              ),
+                                              TextButton(
+                                                onPressed: () => ref.read(cameraViewModelProvider.notifier).initialize(),
+                                                child: const Text("Retry"),
+                                              ),
+                                            ],
+                                          ],
                                         ),
                                       ),
                                     ),
@@ -320,7 +314,17 @@ class _CameraScreenState extends ConsumerState<CameraScreen> {
                           ),
                         ),
                       ),
-
+                      ///capture flash
+                      if (_isCapturing)
+                        Positioned.fill(
+                          child: IgnorePointer(
+                            child: AnimatedOpacity(
+                              opacity: 0.2, // 🔥 subtle professional effect
+                              duration: const Duration(milliseconds: 80),
+                              child: Container(color: Colors.black),
+                            ),
+                          ),
+                        ),
                       /// FOCUS + EXPOSURE UI
                       if (focusPoint != null)
                         Positioned.fill(
@@ -367,7 +371,7 @@ class _CameraScreenState extends ConsumerState<CameraScreen> {
                                           ),
                                           const SizedBox(height: 4),
                                           Text(
-                                          cameraState.exposure.toStringAsFixed(1),
+                                            cameraState.exposure.toStringAsFixed(1),
                                             style:
                                             const TextStyle(
                                               color: Colors.white,
@@ -489,16 +493,23 @@ class _CameraScreenState extends ConsumerState<CameraScreen> {
                     onCapture: () async {
                       if (!cameraState.isReady || _isCapturing) return;
 
+                      // 🔥 Start subtle UI feedback
                       setState(() => _isCapturing = true);
 
                       // 🔊 shutter sound
                       SystemSound.play(SystemSoundType.click);
+
+                      // 📳 haptic (feels premium)
+                      HapticFeedback.mediumImpact();
 
                       try {
                         await cameraVM.capture(context);
                       } catch (e) {
                         debugPrint("Capture error: $e");
                       }
+
+                      // 🔥 very quick reset (no long flash delay)
+                      await Future.delayed(const Duration(milliseconds: 80));
 
                       if (mounted) {
                         setState(() => _isCapturing = false);

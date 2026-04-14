@@ -22,12 +22,15 @@ class CameraState {
   /// frozen orientation at capture moment
   final DeviceOrientation? captureOrientation;
 
+  final String? error;
+
   const CameraState({
     required this.isReady,
     this.controller,
     this.flashOn = false,
     this.currentLens = CameraLensType.normal,
     this.isCapturing = false,
+    this.error,
 
     /// 🔥 DEFAULT
     this.exposure = 0.0,
@@ -42,6 +45,7 @@ class CameraState {
     bool? flashOn,
     CameraLensType? currentLens,
     bool? isCapturing,
+    String? error,
 
     /// 🔥 ADD THIS
     double? exposure,
@@ -55,6 +59,7 @@ class CameraState {
       flashOn: flashOn ?? this.flashOn,
       currentLens: currentLens ?? this.currentLens,
       isCapturing: isCapturing ?? this.isCapturing,
+      error: error ?? this.error,
 
       /// 🔥 APPLY
       exposure: exposure ?? this.exposure,

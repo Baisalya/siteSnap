@@ -42,12 +42,12 @@ class CameraViewModel extends StateNotifier<CameraState>
   CameraViewModel(this.ref)
       : super(const CameraState(isReady: false)) {
     WidgetsBinding.instance.addObserver(this);
-    _init();
+    initialize();
   }
 
   // ================= INIT =================
 
-  Future<void> _init() async {
+  Future<void> initialize() async {
     if (_isInitializing) return;
     _isInitializing = true;
 
@@ -59,7 +59,15 @@ class CameraViewModel extends StateNotifier<CameraState>
       await repo.initialize(CameraLensType.normal);
 
       final controller = repo.controller;
-      if (controller == null) return;
+      if (controller == null) {
+        state = state.copyWith(isReady: false, error: "Controller is null");
+        return;
+      }
+
+      // Ensure the controller is initialized before proceeding
+      if (!controller.value.isInitialized) {
+        await controller.initialize();
+      }
 
       await controller.setFocusMode(FocusMode.auto);
       await controller.setExposureMode(ExposureMode.auto);
@@ -84,10 +92,12 @@ class CameraViewModel extends StateNotifier<CameraState>
         isReady: true,
         controller: controller,
         exposure: _currentExposure,
+        error: null,
       );
 
     } catch (e) {
       debugPrint('Init error: $e');
+      state = state.copyWith(isReady: false, error: e.toString());
     } finally {
       _isInitializing = false;
     }
@@ -135,7 +145,9 @@ class CameraViewModel extends StateNotifier<CameraState>
       state = state.copyWith(controller: null, isReady: false);
 
       await Future.delayed(const Duration(milliseconds: 50));
-      await oldController?.dispose();
+      if (oldController != null && oldController.value.isInitialized) {
+        await oldController.dispose();
+      }
 
       final repo = ref.read(cameraRepositoryProvider);
       await repo.initialize(state.currentLens);
@@ -143,6 +155,9 @@ class CameraViewModel extends StateNotifier<CameraState>
       final controller = repo.controller;
 
       if (controller != null) {
+        if (!controller.value.isInitialized) {
+          await controller.initialize();
+        }
         await controller.setFocusMode(FocusMode.auto);
         await controller.setExposureMode(ExposureMode.auto);
 
@@ -151,10 +166,11 @@ class CameraViewModel extends StateNotifier<CameraState>
         await controller.setExposureOffset(_currentExposure);
       }
 
-      state = state.copyWith(controller: controller, isReady: true);
+      state = state.copyWith(controller: controller, isReady: true, error: null);
 
     } catch (e) {
       debugPrint("Restart error: $e");
+      state = state.copyWith(isReady: false, error: e.toString());
     }
   }
   // ================= AUTO FOCUS =================
@@ -305,42 +321,22 @@ class CameraViewModel extends StateNotifier<CameraState>
     try {
       final originalFile = File(path);
 
-      /// 📂 create processed copy
-      final processedPath =
-      path.replaceFirst('.jpg', '_processed.jpg');
-
-      final copiedFile = await originalFile.copy(processedPath);
-
-      /// 🎨 heavy processing (background)
-      final captured = ref.read(capturedOverlayProvider);
-      final live = ref.read(overlayPreviewProvider);
-
-      final overlayData = (captured ?? live).copyWith(
-        note: live.note,
-      );
-
-      final processedFile = await ref
-          .read(overlayViewModelProvider.notifier)
-          .processImage(
-        copiedFile,
-        orientation,
-        overlayData: overlayData, // ✅ FIX
-      );
-
       if (!context.mounted) return;
 
-      /// 🖼 open preview AFTER processing
+      /// 🖼️ Navigate IMMEDIATELY to preview
+      /// We use the original file for instant feedback.
+      /// ImagePreviewScreen renders the overlay using CustomPaint.
       final result = await Navigator.push<File>(
         context,
         MaterialPageRoute(
           builder: (_) => ImagePreviewScreen(
             originalFile: originalFile,
-            processedFile: processedFile,
+            processedFile: originalFile, // Placeholder, as preview uses original + CustomPaint
           ),
         ),
       );
 
-      /// 💾 update last image
+      /// 💾 update last image if saved
       if (result != null) {
         ref.read(lastImageProvider.notifier).state = result;
       }
@@ -348,7 +344,7 @@ class CameraViewModel extends StateNotifier<CameraState>
     } catch (e) {
       debugPrint("Post capture error: $e");
     } finally {
-      /// 🔓 unlock capture state AFTER everything
+      /// 🔓 unlock capture state
       state = state.copyWith(isCapturing: false);
     }
   }
