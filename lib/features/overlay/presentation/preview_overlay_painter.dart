@@ -1,6 +1,8 @@
+import 'dart:math';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
+import '../domain/WatermarkPosition.dart';
 import '../domain/overlay_model.dart';
 import 'live_overlay_painter.dart';
 
@@ -19,6 +21,7 @@ class PreviewOverlayPainter extends CustomPainter {
 
   @override
   void paint(Canvas canvas, Size size) {
+    if (size.width == 0 || size.height == 0) return;
 
     /// 📍 MAIN OVERLAY
     if (showOverlay) {
@@ -26,72 +29,93 @@ class PreviewOverlayPainter extends CustomPainter {
       painter.paint(canvas, size);
     }
 
-    /// 🏷 TEXT WATERMARK
-    if (showOverlay && showWatermark) {
-      final textPainter = TextPainter(
-        text: TextSpan(
-          text: "SurveyCam",
-          style: TextStyle(
-            color: Colors.white,
-            fontSize: 26, // ✅ FIXED
-            fontWeight: FontWeight.bold,
-            shadows: [
-              Shadow(
-                blurRadius: 6,
-                color: Colors.black,
-                offset: Offset(1, 1),
-              ),
-            ],
-          ),
-        ),
-        textDirection: TextDirection.ltr,
-      )..layout();
-      final padding = size.width * 0.04;
-
-      /// match drawOverlay positioning
-      final infoText =
-          "${data.dateTime}\n"
-          "Lat: ${data.latitude.toStringAsFixed(5)}\n"
-          "Lng: ${data.longitude.toStringAsFixed(5)}\n"
-          "Alt: ${data.altitude.toStringAsFixed(1)} m\n"
-          "${data.direction}";
-
-      final infoPainter = TextPainter(
-        text: TextSpan(
-          text: infoText,
-          style: TextStyle(
-            color: Colors.white,
-            fontSize: size.width * 0.035,
-          ),
-        ),
-        textDirection: TextDirection.ltr,
-      )..layout();
-
-      final infoX = size.width - infoPainter.width - padding;
-      final isRightSide = infoX > size.width / 2;
-
-      late Offset offset;
-
-      if (isRightSide) {
-        offset = Offset(
-          size.width - textPainter.width - padding,
-          padding,
-        );
-      } else {
-        offset = Offset(
-          padding,
-          padding,
-        );
-      }
-
-      textPainter.paint(canvas, offset);
+    /// 📍 WATERMARK (SurveyCam)
+    if (showWatermark) {
+      _drawWatermark(canvas, size);
     }
+  }
+
+  void _drawWatermark(Canvas canvas, Size size) {
+    canvas.save();
+
+    // ===============================
+    // ROTATE CANVAS (Consistent with LiveOverlayPainter)
+    // ===============================
+    switch (orientation) {
+      case DeviceOrientation.portraitUp:
+        break;
+      case DeviceOrientation.portraitDown:
+        canvas.translate(size.width, size.height);
+        canvas.rotate(pi);
+        break;
+      case DeviceOrientation.landscapeLeft:
+        canvas.translate(0, size.height);
+        canvas.rotate(-pi / 2);
+        break;
+      case DeviceOrientation.landscapeRight:
+        canvas.translate(size.width, 0);
+        canvas.rotate(pi / 2);
+        break;
+    }
+
+    double drawWidth = size.width;
+    double drawHeight = size.height;
+
+    if (orientation == DeviceOrientation.landscapeLeft ||
+        orientation == DeviceOrientation.landscapeRight) {
+      drawWidth = size.height;
+      drawHeight = size.width;
+    }
+
+    final baseSize = min(drawWidth, drawHeight);
+
+    // ===============================
+    // TEXT STYLE
+    // ===============================
+    final textPainter = TextPainter(
+      text: TextSpan(
+        text: "SurveyCam",
+        style: TextStyle(
+          color: Colors.white,
+          fontSize: baseSize * 0.045, // Proportional size
+          fontWeight: FontWeight.bold,
+          shadows: const [
+            Shadow(
+              blurRadius: 4,
+              color: Colors.black54,
+              offset: Offset(1, 1),
+            ),
+          ],
+        ),
+      ),
+      textDirection: TextDirection.ltr,
+    )..layout();
+
+    // ===============================
+    // POSITIONING
+    // ===============================
+    final padding = drawWidth * 0.04;
+
+    // Place it at the TOP (opposite of info box which is at bottom)
+    // Horizontal side matches the info box side
+    final isRightSide = data.position != WatermarkPosition.bottomLeft;
+
+    final dx = isRightSide
+        ? drawWidth - textPainter.width - padding
+        : padding;
+    
+    final dy = padding; // Always at the top for the watermark
+
+    textPainter.paint(canvas, Offset(dx, dy));
+
+    canvas.restore();
   }
 
   @override
   bool shouldRepaint(covariant PreviewOverlayPainter oldDelegate) {
     return oldDelegate.showOverlay != showOverlay ||
         oldDelegate.showWatermark != showWatermark ||
-        oldDelegate.data != data;
+        oldDelegate.data != data ||
+        oldDelegate.orientation != orientation;
   }
 }
