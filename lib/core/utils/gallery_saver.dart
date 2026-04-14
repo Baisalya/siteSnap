@@ -1,43 +1,29 @@
 import 'dart:io';
-import 'package:image_gallery_saver/image_gallery_saver.dart';
-import 'package:path_provider/path_provider.dart';
+import 'package:gal/gal.dart';
 
 class GallerySaver {
+  /// Saves an image to the system gallery under the 'survaycam' album.
+  /// This replaces the manual file copying and 'image_gallery_saver' calls.
   static Future<File> saveImage(File file) async {
-    late File savedFile;
-
-    if (Platform.isAndroid) {
-      // ✅ Public Pictures/survaycam folder
-      final directory =
-      Directory('/storage/emulated/0/Pictures/survaycam');
-
-      // Create folder if not exists
-      if (!directory.existsSync()) {
-        directory.createSync(recursive: true);
+    try {
+      // 1. Check and request permissions
+      if (!await Gal.hasAccess()) {
+        await Gal.requestAccess();
       }
 
-      final newPath =
-          '${directory.path}/survaycam_${DateTime.now().millisecondsSinceEpoch}.jpg';
+      // 2. Save to Gallery
+      // 'album' handles creating the 'survaycam' folder/album on both Android and iOS.
+      // On Android, this uses MediaStore to save to the public Pictures folder.
+      // On iOS, this saves to the Photos app under the specified album.
+      await Gal.putImage(file.path, album: 'survaycam');
 
-      // Copy file to survaycam folder
-      savedFile = await file.copy(newPath);
-
-      // ✅ Notify Android gallery
-      await ImageGallerySaver.saveFile(savedFile.path);
-    } else {
-      // ✅ iOS save directly to Photos
-      final result = await ImageGallerySaver.saveFile(
-        file.path,
-        name: "survaycam_${DateTime.now().millisecondsSinceEpoch}",
-      );
-
-      if (result == null || result['isSuccess'] != true) {
-        throw Exception("Failed to save image");
-      }
-
-      savedFile = file;
+      // 3. Return the file
+      // Since Gal creates its own copy in the gallery, we return the 
+      // original file to maintain compatibility with your existing code.
+      return file;
+    } catch (e) {
+      // Replicates your old error handling logic
+      throw Exception("Failed to save image to gallery: $e");
     }
-
-    return savedFile;
   }
 }
