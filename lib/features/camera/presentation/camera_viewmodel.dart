@@ -3,7 +3,6 @@ import 'dart:io';
 import 'package:camera/camera.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import 'package:flutter/widgets.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../core/di/providers.dart';
@@ -14,7 +13,6 @@ import '../../gallery/presentation/last_image_provider.dart';
 import '../../location/presentation/location_viewmodel.dart';
 import '../../overlay/presentation/captured_overlay_provider.dart';
 import '../../overlay/presentation/overlay_preview_state.dart';
-import '../../overlay/presentation/overlay_viewmodel.dart';
 import '../data/CameraState.dart';
 import '../domain/camera_lens_type.dart';
 
@@ -69,8 +67,14 @@ class CameraViewModel extends StateNotifier<CameraState>
         await controller.initialize();
       }
 
-      await controller.setFocusMode(FocusMode.auto);
-      await controller.setExposureMode(ExposureMode.auto);
+      // Set to auto focus and exposure by default
+      try {
+        await controller.setExposureMode(ExposureMode.auto);
+        await controller.setFocusMode(FocusMode.auto);
+        await controller.setFlashMode(FlashMode.off);
+      } catch (e) {
+        debugPrint("Initial focus/exposure error: $e");
+      }
 
       await controller.setFocusPoint(const Offset(0.5, 0.5));
       await controller.setExposurePoint(const Offset(0.5, 0.5));
@@ -80,9 +84,10 @@ class CameraViewModel extends StateNotifier<CameraState>
       _minExposure = await controller.getMinExposureOffset();
       _maxExposure = await controller.getMaxExposureOffset();
 
-      _currentExposure =
-          ((_minExposure + _maxExposure) / 2)
-              .clamp(_minExposure, _maxExposure);
+      final minZoom = await controller.getMinZoomLevel();
+      final maxZoom = await controller.getMaxZoomLevel();
+
+      _currentExposure = 0.0.clamp(_minExposure, _maxExposure);
 
       await controller.setExposureOffset(_currentExposure);
 
@@ -92,6 +97,11 @@ class CameraViewModel extends StateNotifier<CameraState>
         isReady: true,
         controller: controller,
         exposure: _currentExposure,
+        minExposure: _minExposure,
+        maxExposure: _maxExposure,
+        zoom: 1.0,
+        minZoom: minZoom,
+        maxZoom: maxZoom,
         error: null,
       );
 
@@ -114,17 +124,26 @@ class CameraViewModel extends StateNotifier<CameraState>
   // ================= LIFECYCLE =================
 
   @override
-  void didChangeAppLifecycleState(AppLifecycleState lifecycleState) async {
+  void didChangeAppLifecycleState(AppLifecycleState appLifecycleState) async {
     if (_isInitializing) return;
 
-    if (lifecycleState == AppLifecycleState.inactive ||
-        lifecycleState == AppLifecycleState.paused) {
+    if (appLifecycleState == AppLifecycleState.inactive ||
+        appLifecycleState == AppLifecycleState.paused) {
       try {
-        await state.controller?.pausePreview();
+        // 🔥 Kill flash/torch immediately when app goes to background
+        final controller = state.controller;
+        if (controller != null && controller.value.isInitialized) {
+          if (state.flashMode == FlashMode.always) {
+            await _nuclearFlashKill(controller);
+          } else {
+            await _softFlashQuench(controller);
+          }
+          await controller.pausePreview();
+        }
       } catch (_) {}
     }
 
-    if (lifecycleState == AppLifecycleState.resumed) {
+    if (appLifecycleState == AppLifecycleState.resumed) {
       if (_isRestarting) return;
 
       _isRestarting = true;
@@ -160,6 +179,9 @@ class CameraViewModel extends StateNotifier<CameraState>
         }
         await controller.setFocusMode(FocusMode.auto);
         await controller.setExposureMode(ExposureMode.auto);
+        
+        // Always start with flash OFF on the controller
+        await controller.setFlashMode(FlashMode.off);
 
         await Future.delayed(const Duration(milliseconds: 400));
 
@@ -173,22 +195,6 @@ class CameraViewModel extends StateNotifier<CameraState>
       state = state.copyWith(isReady: false, error: e.toString());
     }
   }
-  // ================= AUTO FOCUS =================
-  Future<void> _prepareAutoFocus(CameraController controller) async {
-    try {
-      if (!controller.value.isInitialized) return;
-
-      /// reset focus + exposure for accurate metering
-      await controller.setFocusMode(FocusMode.auto);
-      await controller.setExposureMode(ExposureMode.auto);
-
-      /// give sensor time to settle
-      await Future.delayed(const Duration(milliseconds: 250));
-
-    } catch (e) {
-      debugPrint("AutoFocus error: $e");
-    }
-  }
   // ================= FOCUS =================
 
   Future<void> setFocusPoint(
@@ -197,8 +203,10 @@ class CameraViewModel extends StateNotifier<CameraState>
     if (controller == null) return;
 
     try {
-      final dx = position.dx / previewSize.width;
-      final dy = position.dy / previewSize.height;
+      final dx = (position.dx / previewSize.width).clamp(0.0, 1.0);
+      final dy = (position.dy / previewSize.height).clamp(0.0, 1.0);
+
+      state = state.copyWith(isManualFocus: true);
 
       await controller.setFocusMode(FocusMode.auto);
       await controller.setExposureMode(ExposureMode.auto);
@@ -206,6 +214,24 @@ class CameraViewModel extends StateNotifier<CameraState>
       await controller.setFocusPoint(Offset(dx, dy));
       await controller.setExposurePoint(Offset(dx, dy));
     } catch (_) {}
+  }
+
+  Future<void> resetFocus() async {
+    final controller = state.controller;
+    if (controller == null || !controller.value.isInitialized) return;
+
+    try {
+      state = state.copyWith(isManualFocus: false);
+
+      await controller.setFocusMode(FocusMode.auto);
+      await controller.setExposureMode(ExposureMode.auto);
+      
+      // Reset points to center
+      await controller.setFocusPoint(null);
+      await controller.setExposurePoint(null);
+    } catch (e) {
+      debugPrint("Reset focus error: $e");
+    }
   }
 
   // ================= EXPOSURE =================
@@ -227,42 +253,80 @@ class CameraViewModel extends StateNotifier<CameraState>
       debugPrint("Exposure error: $e");
     }
   }
-  Future<void> _adjustExposureForCapture(CameraController controller) async {
+
+  // ================= ZOOM =================
+
+  Future<void> setZoom(double zoom) async {
+    final controller = state.controller;
+    if (controller == null || !controller.value.isInitialized) return;
+
     try {
-      double adjustedExposure = _currentExposure;
-
-      /// 🔥 If flash ON → reduce exposure
-      if (state.flashOn) {
-        adjustedExposure -= 0.5; // tweak value if needed
-      }
-
-      /// 🌙 If scene is dark (user already increased exposure)
-      if (_currentExposure < (_minExposure + _maxExposure) / 4) {
-        adjustedExposure += 0.3;
-      }
-
-      adjustedExposure =
-          adjustedExposure.clamp(_minExposure, _maxExposure);
-
-      await controller.setExposureOffset(adjustedExposure);
-
+      final clampedZoom = zoom.clamp(state.minZoom, state.maxZoom);
+      await controller.setZoomLevel(clampedZoom);
+      state = state.copyWith(zoom: clampedZoom);
     } catch (e) {
-      debugPrint("Smart exposure error: $e");
+      debugPrint("Zoom error: $e");
     }
   }
+
+  /// 🔥 THE NUCLEAR FLASH KILL
+  /// Specifically designed for Android devices where the LED driver "latches"
+  /// on in dark environments when using Auto Flash.
+  /// A softer quench that doesn't flicker
+  Future<void> _softFlashQuench(CameraController controller) async {
+    try {
+      if (!controller.value.isInitialized) return;
+      await controller.setFlashMode(FlashMode.off);
+      await Future.delayed(const Duration(milliseconds: 100));
+    } catch (_) {}
+  }
+
+  /// The heavy-duty reset for stuck drivers (causes a brief flicker)
+  Future<void> _nuclearFlashKill(CameraController controller) async {
+    try {
+      if (!controller.value.isInitialized) return;
+
+      await controller.setFlashMode(FlashMode.off);
+      await Future.delayed(const Duration(milliseconds: 50));
+
+      // Torch "kick" to reset the hardware driver
+      await controller.setFlashMode(FlashMode.torch);
+      await Future.delayed(const Duration(milliseconds: 100));
+      await controller.setFlashMode(FlashMode.off);
+    } catch (e) {
+      debugPrint("Nuclear flash kill error: $e");
+    }
+  }
+
   // ================= FLASH =================
 
-  Future<void> toggleFlash() async {
+  Future<void> setFlashMode(FlashMode mode) async {
+    state = state.copyWith(flashMode: mode);
+    
     final controller = state.controller;
-    if (controller == null) return;
+    if (controller == null || !controller.value.isInitialized) return;
 
-    final newFlashState = !state.flashOn;
+    try {
+      if (mode == FlashMode.off) {
+        // Just set to off, no nuclear kill needed here as it causes a flicker
+        await controller.setFlashMode(FlashMode.off);
+      } else {
+        // When user selects ON, we keep the controller's flash OFF for now
+        // and only enable it during the actual capture to prevent "sticking"
+        await controller.setFlashMode(FlashMode.off);
+      }
+    } catch (e) {
+      debugPrint("Error setting flash mode: $e");
+    }
+  }
 
-    await controller.setFlashMode(
-      newFlashState ? FlashMode.torch : FlashMode.off,
-    );
+  Future<void> cycleFlashMode() async {
+    final nextMode = state.flashMode == FlashMode.off ? FlashMode.always : FlashMode.off;
+    await setFlashMode(nextMode);
+  }
 
-    state = state.copyWith(flashOn: newFlashState);
+  void setAspectRatio(CameraAspectRatio ratio) {
+    state = state.copyWith(aspectRatio: ratio);
   }
 
   // ================= CAPTURE =================
@@ -277,9 +341,10 @@ class CameraViewModel extends StateNotifier<CameraState>
         state.isCapturing) {
       return;
     }
-    final overlayData = ref.read(overlayPreviewProvider);
+    
+    unawaited(HapticFeedback.mediumImpact());
 
-// 🔥 FREEZE SNAPSHOT HERE
+    final overlayData = ref.read(overlayPreviewProvider);
     ref.read(capturedOverlayProvider.notifier).state = overlayData;
     final deviceOrientation = ref.read(deviceOrientationProvider);
 
@@ -291,28 +356,61 @@ class CameraViewModel extends StateNotifier<CameraState>
     try {
       final repo = ref.read(cameraRepositoryProvider);
 
-      /// 📸 QUICK PREP (reduced delay)
+      // 1. Prepare hardware
       await controller.setFocusMode(FocusMode.auto);
       await controller.setExposureMode(ExposureMode.auto);
 
-      /// ⚡ CAPTURE ASAP (no heavy delay)
+      // 2. Temporarily enable flash IF user has it set to ON
+      if (state.flashMode == FlashMode.always) {
+        await controller.setFlashMode(FlashMode.always);
+        // Give Android time to fire pre-flash and calculate exposure
+        await Future.delayed(const Duration(milliseconds: 1000));
+      } else {
+        await controller.setFlashMode(FlashMode.off);
+        await Future.delayed(const Duration(milliseconds: 150));
+      }
+
+      // 3. CAPTURE
       final path = await repo.takePicture();
 
-      /// 🔥 restore exposure immediately
-      await controller.setExposureMode(ExposureMode.auto);
+      // 4. IMMEDIATE CLEANUP
+      // Only perform the aggressive nuclear kill if the flash was actually used.
+      // This prevents the "little flash" when capturing with flash OFF.
+      if (state.flashMode == FlashMode.always) {
+        await _nuclearFlashKill(controller);
+        
+        // Pause/Resume is the ultimate reset for stuck camera drivers
+        await controller.pausePreview();
+        await Future.delayed(const Duration(milliseconds: 100));
+        await controller.resumePreview();
+      } else {
+        await _softFlashQuench(controller);
+      }
 
-      /// 🚀 PROCESS IN BACKGROUND
-      unawaited(_handlePostCapture(
-        path,
-        context,
-        deviceOrientation,
-      ));
+      unawaited(HapticFeedback.lightImpact());
+      await _handlePostCapture(path, context, deviceOrientation);
 
     } catch (e) {
       debugPrint('Capture error: $e');
+    } finally {
+      // 🔓 RESTORATION
+      try {
+        if (controller.value.isInitialized) {
+          // IMPORTANT: Keep controller flash OFF during preview to prevent sticking.
+          // It will be enabled again only during the next 'capture' call.
+          await controller.setFlashMode(FlashMode.off);
+          
+          await controller.setFocusMode(FocusMode.auto);
+          await controller.setExposureMode(ExposureMode.auto);
+          await controller.setExposureOffset(_currentExposure);
+        }
+      } catch (e) {
+        debugPrint("Restoration error: $e");
+      }
       state = state.copyWith(isCapturing: false);
     }
   }
+
   Future<void> _handlePostCapture(
       String path,
       BuildContext context,
@@ -320,34 +418,26 @@ class CameraViewModel extends StateNotifier<CameraState>
       ) async {
     try {
       final originalFile = File(path);
-
       if (!context.mounted) return;
 
-      /// 🖼️ Navigate IMMEDIATELY to preview
-      /// We use the original file for instant feedback.
-      /// ImagePreviewScreen renders the overlay using CustomPaint.
-      final result = await Navigator.push<File>(
+      final result = await Navigator.push(
         context,
         MaterialPageRoute(
           builder: (_) => ImagePreviewScreen(
             originalFile: originalFile,
-            processedFile: originalFile, // Placeholder, as preview uses original + CustomPaint
+            processedFile: originalFile,
           ),
         ),
       );
 
-      /// 💾 update last image if saved
       if (result != null) {
-        ref.read(lastImageProvider.notifier).state = result;
+        ref.read(lastImageProvider.notifier).state = originalFile;
       }
-
     } catch (e) {
       debugPrint("Post capture error: $e");
-    } finally {
-      /// 🔓 unlock capture state
-      state = state.copyWith(isCapturing: false);
     }
   }
+
   // ================= DISPOSE =================
 
   @override

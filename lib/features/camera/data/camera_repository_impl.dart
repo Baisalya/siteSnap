@@ -1,8 +1,4 @@
 import 'package:camera/camera.dart';
-import '../../domain/camera_repository.dart';
-import '../domain/camera_lens_type.dart';
-
-import 'package:camera/camera.dart';
 import '../domain/camera_repository.dart';
 import '../domain/camera_lens_type.dart';
 
@@ -24,21 +20,18 @@ class CameraRepositoryImpl implements CameraRepository {
       throw Exception('No back camera found');
     }
 
-    /// ✅ Detect MAIN camera (highest resolution sensor)
-    /// OEM main camera usually has:
-    /// - highest resolution
-    /// - larger sensor orientation value
-    backCameras.sort(
-          (a, b) => b.sensorOrientation.compareTo(a.sensorOrientation),
-    );
-
+    // Usually, the first back camera is the primary one.
+    // Some devices have multiple back cameras (Wide, Telephoto, etc.)
+    // We try to stick to the primary one for the 'normal' lens.
     final mainCamera = backCameras.first;
 
     CameraDescription? ultraWide;
     CameraDescription? macro;
 
     if (backCameras.length > 1) {
-      ultraWide = backCameras.last;
+      // This is a heuristic, real implementation might need device-specific logic
+      // or using a package like camera_android_camerax
+      ultraWide = backCameras.last; 
     }
 
     if (backCameras.length > 2) {
@@ -61,14 +54,14 @@ class CameraRepositoryImpl implements CameraRepository {
   Future<void> _initController(CameraDescription camera) async {
     _controller = CameraController(
       camera,
-      ResolutionPreset.veryHigh, // ✅ highest possible
+      ResolutionPreset.max, // 🔥 Use MAX resolution for full clarity
       enableAudio: false,
       imageFormatGroup: ImageFormatGroup.jpeg,
     );
 
     await _controller.initialize();
 
-    // Quality tweaks
+    // Initial quality settings
     await _controller.setFocusMode(FocusMode.auto);
     await _controller.setExposureMode(ExposureMode.auto);
   }

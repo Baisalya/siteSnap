@@ -3,39 +3,41 @@ import 'package:path_provider/path_provider.dart';
 
 class survaycamGalleryRepository {
   Future<List<File>> loadImages() async {
-    Directory? directory;
+    final List<Directory> directories = [];
 
     if (Platform.isAndroid) {
-      // ✅ ONLY survaycam folder
-      directory =
-          Directory('/storage/emulated/0/Pictures/survaycam');
+      // ✅ Check both "surveycam" and "survaycam" folders
+      directories.add(Directory('/storage/emulated/0/Pictures/surveycam'));
+      directories.add(Directory('/storage/emulated/0/Pictures/survaycam'));
     } else if (Platform.isIOS) {
       // ✅ iOS app documents folder
       final docDir = await getApplicationDocumentsDirectory();
-      directory = Directory('${docDir.path}/survaycam');
+      directories.add(Directory('${docDir.path}/surveycam'));
+      directories.add(Directory('${docDir.path}/survaycam'));
     }
 
-    if (directory == null || !await directory.exists()) {
-      return [];
+    final List<File> allFiles = [];
+
+    for (var directory in directories) {
+      if (await directory.exists()) {
+        final files = directory
+            .listSync(recursive: false)
+            .whereType<File>()
+            .where((file) {
+          final path = file.path.toLowerCase();
+          return path.endsWith('.jpg') ||
+              path.endsWith('.jpeg') ||
+              path.endsWith('.png');
+        });
+        allFiles.addAll(files);
+      }
     }
 
-    final files = directory
-        .listSync(recursive: false)
-        .whereType<File>()
-        .where((file) {
-      final path = file.path.toLowerCase();
-      return path.endsWith('.jpg') ||
-          path.endsWith('.jpeg') ||
-          path.endsWith('.png');
-    })
-        .toList();
-
-    // ✅ newest first
-    files.sort(
-          (a, b) =>
-          b.lastModifiedSync().compareTo(a.lastModifiedSync()),
+    // ✅ newest first across all folders
+    allFiles.sort(
+      (a, b) => b.lastModifiedSync().compareTo(a.lastModifiedSync()),
     );
 
-    return files;
+    return allFiles;
   }
 }

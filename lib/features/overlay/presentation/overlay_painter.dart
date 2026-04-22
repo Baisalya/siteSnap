@@ -3,36 +3,71 @@ import 'dart:math';
 import 'dart:ui' as ui;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:image/image.dart' as img;
+import '../../camera/data/CameraState.dart';
 
 import '../domain/overlay_model.dart';
 import 'live_overlay_painter.dart';
 
-Future<File> drawOverlay(
+Future<Uint8List> drawOverlay(
     File file,
     OverlayData data,
     DeviceOrientation orientation, {
       bool showOverlay = true,
-      bool showWatermark = true,}
+      bool showWatermark = true,
+      ui.Image? decodedImage,
+      CameraAspectRatio? aspectRatio,
+    }
     ) async {
   /// ===============================
   /// LOAD IMAGE
   /// ===============================
-  final bytes = await file.readAsBytes();
-
-  final codec = await ui.instantiateImageCodec(bytes);
-  final frame = await codec.getNextFrame();
-  final uiImage = frame.image;
+  final ui.Image uiImage;
+  if (decodedImage != null) {
+    uiImage = decodedImage;
+  } else {
+    final bytes = await file.readAsBytes();
+    final codec = await ui.instantiateImageCodec(bytes);
+    final frame = await codec.getNextFrame();
+    uiImage = frame.image;
+  }
 
   double srcW = uiImage.width.toDouble();
   double srcH = uiImage.height.toDouble();
 
-  double dstW = srcW;
-  double dstH = srcH;
+  // Determine crop area if aspect ratio is provided
+  Rect srcRect = Rect.fromLTWH(0, 0, srcW, srcH);
+  if (aspectRatio != null) {
+    double targetRatio = aspectRatio == CameraAspectRatio.ratio4_3 ? 3 / 4 : 9 / 16;
+    
+    double currentRatio = srcW / srcH;
+    
+    if (currentRatio > targetRatio) {
+      // Sensor is wider than target ratio -> crop width
+      double newW = srcH * targetRatio;
+      srcRect = Rect.fromCenter(
+        center: Offset(srcW / 2, srcH / 2),
+        width: newW,
+        height: srcH,
+      );
+    } else if (currentRatio < targetRatio) {
+      // Sensor is taller than target ratio -> crop height
+      double newH = srcW / targetRatio;
+      srcRect = Rect.fromCenter(
+        center: Offset(srcW / 2, srcH / 2),
+        width: srcW,
+        height: newH,
+      );
+    }
+  }
+
+  double dstW = srcRect.width;
+  double dstH = srcRect.height;
 
   if (orientation == DeviceOrientation.landscapeLeft ||
       orientation == DeviceOrientation.landscapeRight) {
-    dstW = srcH;
-    dstH = srcW;
+    dstW = srcRect.height;
+    dstH = srcRect.width;
   }
 
   final recorder = ui.PictureRecorder();
@@ -63,13 +98,18 @@ Future<File> drawOverlay(
       break;
   }
 
-  /// DRAW IMAGE
-  canvas.drawImage(uiImage, Offset.zero, Paint());
+  /// DRAW IMAGE (Cropped)
+  canvas.drawImageRect(
+    uiImage, 
+    srcRect, 
+    Rect.fromLTWH(0, 0, srcRect.width, srcRect.height), 
+    Paint()..filterQuality = ui.FilterQuality.high
+  );
 
   /// DRAW MAIN OVERLAY
   final overlayPainter = LiveOverlayPainter(data, orientation);
   if (showOverlay) {
-    overlayPainter.paint(canvas, Size(srcW, srcH));
+    overlayPainter.paint(canvas, Size(srcRect.width, srcRect.height));
   }
   /// ===============================
   /// WATERMARK (AUTO SAME SIDE)
@@ -82,17 +122,17 @@ Future<File> drawOverlay(
       break;
 
     case DeviceOrientation.portraitDown:
-      canvas.translate(srcW, srcH);
+      canvas.translate(srcRect.width, srcRect.height);
       canvas.rotate(pi);
       break;
 
     case DeviceOrientation.landscapeLeft:
-      canvas.translate(0, srcH);
+      canvas.translate(0, srcRect.height);
       canvas.rotate(-pi / 2);
       break;
 
     case DeviceOrientation.landscapeRight:
-      canvas.translate(srcW, 0);
+      canvas.translate(srcRect.width, 0);
       canvas.rotate(pi / 2);
       break;
   }
@@ -148,44 +188,22 @@ Future<File> drawOverlay(
   final isRightSide = infoX > dstW / 2;
 
   /// ===============================
-  /// DETECT TOP / BOTTOM
-  /// ===============================
-  /// Your overlay is bottom → so we mark true
-  final isBottom = true;
-
-  /// ===============================
   /// PLACE WATERMARK (SAME SIDE, OTHER CORNER)
   /// ===============================
   late Offset offset;
 
   if (isRightSide) {
-    if (isBottom) {
-      /// Bottom Right → Top Right
-      offset = Offset(
-        dstW - textPainter.width - padding,
-        padding,
-      );
-    } else {
-      /// Top Right → Bottom Right
-      offset = Offset(
-        dstW - textPainter.width - padding,
-        dstH - textPainter.height - padding,
-      );
-    }
+    /// Bottom Right → Top Right
+    offset = Offset(
+      dstW - textPainter.width - padding,
+      padding,
+    );
   } else {
-    if (isBottom) {
-      /// Bottom Left → Top Left
-      offset = Offset(
-        padding,
-        padding,
-      );
-    } else {
-      /// Top Left → Bottom Left
-      offset = Offset(
-        padding,
-        dstH - textPainter.height - padding,
-      );
-    }
+    /// Bottom Left → Top Left
+    offset = Offset(
+      padding,
+      padding,
+    );
   }
   if (showOverlay && showWatermark) {
     textPainter.paint(canvas, offset);
@@ -202,10 +220,20 @@ Future<File> drawOverlay(
   final finalImage =
   await picture.toImage(dstW.toInt(), dstH.toInt());
 
-  final byteData =
-  await finalImage.toByteData(
-    format: ui.ImageByteFormat.png,
+  final byteData = await finalImage.toByteData(
+    format: ui.ImageByteFormat.rawRgba,
   );
 
-  return await file.writeAsBytes(byteData!.buffer.asUint8List());
+  if (byteData == null) return Uint8List(0);
+
+  // Convert raw RGBA bytes to JPEG using the 'image' library
+  final image = img.Image.fromBytes(
+    width: finalImage.width,
+    height: finalImage.height,
+    bytes: byteData.buffer,
+    numChannels: 4,
+    order: img.ChannelOrder.rgba,
+  );
+
+  return Uint8List.fromList(img.encodeJpg(image, quality: 95));
 }

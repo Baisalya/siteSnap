@@ -2,7 +2,7 @@ name: surveycam
 description: "A camera app for capturing photos with location and geo-tagging features."
 publish_to: 'none'
 
-version: 1.0.0+5
+version: 1.0.0+10
 
 environment:
   sdk: '>=3.2.5 <4.0.0'
@@ -27,6 +27,9 @@ dependencies:
 
   # Permissions
   permission_handler: ^11.3.0
+
+  # Update
+  in_app_update: ^4.0.1
 
   # Storage
   shared_preferences: ^2.2.2

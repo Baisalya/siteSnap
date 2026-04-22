@@ -79,6 +79,10 @@ android {
     }
 }
 
+tasks.matching { it.name == "signReleaseBundle" }.configureEach {
+    it.doNotTrackState("https://github.com/gradle/gradle/issues/21283")
+}
+
 flutter {
     source '../..'
 }

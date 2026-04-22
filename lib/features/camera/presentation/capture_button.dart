@@ -102,7 +102,7 @@ class _CaptureButtonState extends State<CaptureButton>
                     decoration: BoxDecoration(
                       shape: BoxShape.circle,
                       color: Colors.white
-                          .withOpacity(_pulseOpacity!.value),
+                          .withValues(alpha: _pulseOpacity!.value),
                     ),
                   ),
 

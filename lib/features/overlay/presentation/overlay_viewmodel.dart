@@ -1,12 +1,13 @@
 import 'dart:io';
+import 'dart:ui' as ui;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:image/image.dart' as img;
+import '../../camera/data/CameraState.dart';
+import '../../../core/utils/gallery_saver.dart';
 
 import '../domain/overlay_model.dart';
 import 'overlay_painter.dart';
-import 'overlay_preview_state.dart';
 
 final overlayViewModelProvider =
 StateNotifierProvider<OverlayViewModel, void>((ref) {
@@ -19,78 +20,65 @@ class OverlayViewModel extends StateNotifier<void> {
   OverlayViewModel(this.ref) : super(null);
 
   /// =======================================================
-  /// PROCESS IMAGE (FINAL STABLE VERSION)
+  /// PROCESS IMAGE (OPTIMIZED FOR SPEED)
   /// =======================================================
-  Future<File> processImage(
+  Future<Uint8List> processImage(
       File original,
       DeviceOrientation orientation, {
-        required OverlayData overlayData, // 🔥 ADD THIS
+        required OverlayData overlayData,
         bool showOverlay = true,
         bool showWatermark = true,
+        ui.Image? decodedImage,
+        CameraAspectRatio? aspectRatio,
       }) async {
     try {
-      /// ===============================
-      /// 1️⃣ READ ORIGINAL
-      /// ===============================
-      final bytes = await original.readAsBytes();
-
-      if (bytes.isEmpty) {
-        return original; // safety
-      }
-
-      img.Image? image = img.decodeImage(bytes);
-
-      /// ❌ If decode fails → fallback to original
-      if (image == null) {
-        return original;
-      }
-
-      /// ===============================
-      /// 2️⃣ FIX ORIENTATION
-      /// ===============================
-      image = img.bakeOrientation(image);
-
-      /// ===============================
-      /// 3️⃣ CREATE SAFE TEMP FILE
-      /// ===============================
-      final orientedPath =
-      original.path.replaceFirst('.jpg', '_oriented.jpg');
-
-      final orientedBytes = img.encodeJpg(image, quality: 100);
-
-      /// 🚨 CRITICAL CHECK
-      if (orientedBytes.isEmpty) {
-        return original;
-      }
-
-      final orientedFile =
-      await File(orientedPath).writeAsBytes(orientedBytes);
-
-      /// ===============================
-      /// 4️⃣ OVERLAY DATA
-      /// ===============================
-/*
-      final overlayData = ref.read(overlayPreviewProvider);
-*/
-
-      /// ===============================
-      /// 5️⃣ DRAW OVERLAY SAFELY
-      /// ===============================
-      final processedFile = await drawOverlay(
-        orientedFile,
+      // 🚀 DIRECT PASS: Skip the slow 'image' library decode/bake.
+      // drawOverlay uses ui.Canvas (Hardware Accelerated) which is much faster.
+      final bytes = await drawOverlay(
+        original,
         overlayData,
         orientation,
         showOverlay: showOverlay,
         showWatermark: showWatermark,
+        decodedImage: decodedImage,
+        aspectRatio: aspectRatio,
       );
 
-      return processedFile;
-
+      return bytes;
     } catch (e) {
       debugPrint("processImage error: $e");
+      return await original.readAsBytes();
+    }
+  }
 
-      /// ✅ NEVER CRASH UI
-      return original;
+  /// =======================================================
+  /// SAVE IN BACKGROUND (NON-BLOCKING)
+  /// =======================================================
+  Future<void> saveCapturedImage({
+    required File original,
+    required DeviceOrientation orientation,
+    required OverlayData overlayData,
+    bool showOverlay = true,
+    bool showWatermark = true,
+    ui.Image? decodedImage,
+    CameraAspectRatio? aspectRatio,
+  }) async {
+    try {
+      // Run the slow processing in the background
+      final bytes = await processImage(
+        original,
+        orientation,
+        overlayData: overlayData,
+        showOverlay: showOverlay,
+        showWatermark: showWatermark,
+        decodedImage: decodedImage,
+        aspectRatio: aspectRatio,
+      );
+
+      await GallerySaver.saveImageBytes(bytes);
+      debugPrint("✅ Background Save Complete");
+    } catch (e) {
+      debugPrint("❌ Background Save Failed: $e");
     }
   }
 }

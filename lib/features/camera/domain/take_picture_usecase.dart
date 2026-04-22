@@ -1,4 +1,3 @@
-import '../../domain/camera_repository.dart';
 import 'camera_repository.dart';
 
 class TakePictureUseCase {

@@ -1,28 +1,69 @@
 import 'dart:io';
+import 'dart:typed_data';
 import 'package:gal/gal.dart';
+import 'package:intl/intl.dart';
+import 'package:path/path.dart' as p;
+import 'package:shared_preferences/shared_preferences.dart';
 
 class GallerySaver {
-  /// Saves an image to the system gallery under the 'survaycam' album.
-  /// This replaces the manual file copying and 'image_gallery_saver' calls.
-  static Future<File> saveImage(File file) async {
+  static const String _photoCountKey = 'surveycam_photo_count';
+  static SharedPreferences? _prefs;
+  static bool? _hasAccessCached;
+
+  /// Optimized save using bytes directly to avoid extra I/O
+  static Future<void> saveImageBytes(Uint8List bytes) async {
     try {
-      // 1. Check and request permissions
-      if (!await Gal.hasAccess()) {
-        await Gal.requestAccess();
+      if (_hasAccessCached != true) {
+        _hasAccessCached = await Gal.hasAccess();
+        if (_hasAccessCached != true) {
+          _hasAccessCached = await Gal.requestAccess();
+        }
       }
 
-      // 2. Save to Gallery
-      // 'album' handles creating the 'survaycam' folder/album on both Android and iOS.
-      // On Android, this uses MediaStore to save to the public Pictures folder.
-      // On iOS, this saves to the Photos app under the specified album.
-      await Gal.putImage(file.path, album: 'survaycam');
+      _prefs ??= await SharedPreferences.getInstance();
+      int count = _prefs!.getInt(_photoCountKey) ?? 0;
+      count++;
+      _prefs!.setInt(_photoCountKey, count);
 
-      // 3. Return the file
-      // Since Gal creates its own copy in the gallery, we return the 
-      // original file to maintain compatibility with your existing code.
-      return file;
+      final now = DateTime.now();
+      final name = 'Surveycam_${DateFormat('yyyyMMdd_HHmmss').format(now)}_$count';
+
+      await Gal.putImageBytes(bytes, name: name, album: 'surveycam');
     } catch (e) {
-      // Replicates your old error handling logic
+      throw Exception("Failed to save image bytes: $e");
+    }
+  }
+
+  /// Saves an image file to the system gallery (optimized with rename)
+  static Future<File> saveImage(File file) async {
+    try {
+      if (_hasAccessCached != true) {
+        _hasAccessCached = await Gal.hasAccess();
+        if (_hasAccessCached != true) {
+          _hasAccessCached = await Gal.requestAccess();
+        }
+      }
+
+      _prefs ??= await SharedPreferences.getInstance();
+      int count = _prefs!.getInt(_photoCountKey) ?? 0;
+      count++;
+      _prefs!.setInt(_photoCountKey, count);
+
+      final now = DateTime.now();
+      final newName = 'Surveycam_${DateFormat('yyyyMMdd_HHmmss').format(now)}_$count.jpg';
+
+      // Use rename instead of copy for speed
+      final newPath = p.join(p.dirname(file.path), newName);
+      File fileToSave;
+      try {
+        fileToSave = await file.rename(newPath);
+      } catch (_) {
+        fileToSave = await file.copy(newPath);
+      }
+
+      await Gal.putImage(fileToSave.path, album: 'surveycam');
+      return fileToSave;
+    } catch (e) {
       throw Exception("Failed to save image to gallery: $e");
     }
   }

@@ -1,4 +1,5 @@
 import 'dart:io';
+import 'dart:ui' as ui;
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
@@ -27,54 +28,88 @@ class ImagePreviewScreen extends ConsumerStatefulWidget {
 
 class _ImagePreviewScreenState
     extends ConsumerState<ImagePreviewScreen> {
+  final TransformationController _transformationController =
+      TransformationController();
+  TapDownDetails? _doubleTapDetails;
 
+  ui.Image? _decodedImage;
   bool _saving = false;
+  bool _showUI = true;
+  double? _aspectRatio;
 
   bool _showOverlay = true;
   bool _showTextWatermark = true;
 
+  @override
+  void initState() {
+    super.initState();
+    _calculateAspectRatio();
+  }
+
+  void _calculateAspectRatio() {
+    final image = Image.file(widget.originalFile);
+    image.image.resolve(const ImageConfiguration()).addListener(
+      ImageStreamListener((info, _) {
+        if (mounted) {
+          setState(() {
+            _aspectRatio = info.image.width / info.image.height;
+            _decodedImage = info.image;
+          });
+        }
+      }),
+    );
+  }
+
+  void _handleDoubleTap() {
+    if (_transformationController.value != Matrix4.identity()) {
+      _transformationController.value = Matrix4.identity();
+    } else {
+      final position = _doubleTapDetails!.localPosition;
+      // Zoom in 3x
+      _transformationController.value = Matrix4.identity()
+        ..translate(-position.dx * 2, -position.dy * 2)
+        ..scale(3.0);
+    }
+  }
+
+  @override
+  void dispose() {
+    _transformationController.dispose();
+    super.dispose();
+  }
+
   /// ================= SAVE =================
-  Future<void> _saveImage() async {
+  void _saveImage() {
     if (_saving) return;
 
     setState(() {
-      _saving = true; // ✅ ONLY THIS (no _hideUI)
+      _saving = true;
     });
 
-    try {
-      final cameraState = ref.read(cameraViewModelProvider);
-      final captured = ref.read(capturedOverlayProvider);
-      final live = ref.read(overlayPreviewProvider);
+    final cameraState = ref.read(cameraViewModelProvider);
+    final captured = ref.read(capturedOverlayProvider);
+    final live = ref.read(overlayPreviewProvider);
 
-      final overlayData = (captured ?? live).copyWith(
-        note: live.note,
-        position: live.position,
-      );
+    final overlayData = (captured ?? live).copyWith(
+      note: live.note,
+      position: live.position,
+    );
 
-      final finalFile = await ref
-          .read(overlayViewModelProvider.notifier)
-          .processImage(
-        widget.originalFile,
-        cameraState.captureOrientation ??
-            cameraState.orientation,
-        overlayData: overlayData,
-        showOverlay: _showOverlay,
-        showWatermark: _showTextWatermark,
-      );
+    // Fire and forget: Save in background
+    ref.read(overlayViewModelProvider.notifier).saveCapturedImage(
+          original: widget.originalFile,
+          orientation:
+              cameraState.captureOrientation ?? cameraState.orientation,
+          overlayData: overlayData,
+          showOverlay: _showOverlay,
+          showWatermark: _showTextWatermark,
+          decodedImage: _decodedImage,
+          aspectRatio: cameraState.aspectRatio,
+        );
 
-      final savedFile =
-      await GallerySaver.saveImage(finalFile);
-
-      if (mounted) {
-        Navigator.pop(context, savedFile);
-      }
-    } catch (e) {
-      debugPrint("Save failed: $e");
-      if (mounted) {
-        setState(() {
-          _saving = false;
-        });
-      }
+    // Close preview immediately
+    if (mounted) {
+      Navigator.of(context).pop(true);
     }
   }
 
@@ -103,143 +138,234 @@ class _ImagePreviewScreenState
       position: live.position,
     );
 
-    return Scaffold(
-      backgroundColor: Colors.black,
-      appBar: AppBar(
+    return PopScope(
+      canPop: !_saving,
+      child: Scaffold(
         backgroundColor: Colors.black,
-        title: const Text("Preview"),
-      ),
-
-      body: Column(
-        children: [
-
-          /// ✅ IMAGE (NOW WILL NEVER SHIFT)
-          Expanded(
-            child: InteractiveViewer(
-              child: Stack(
-                children: [
-                  Image.file(
-                    widget.originalFile,
-                    fit: BoxFit.contain,
-                    width: double.infinity,
+        extendBodyBehindAppBar: true,
+        body: Stack(
+          children: [
+            /// ✅ IMAGE + OVERLAY (Full Screen & Zoomable)
+            Positioned.fill(
+              child: GestureDetector(
+                onTap: () => setState(() => _showUI = !_showUI),
+                onDoubleTapDown: (details) => _doubleTapDetails = details,
+                onDoubleTap: _handleDoubleTap,
+                behavior: HitTestBehavior.opaque,
+                child: InteractiveViewer(
+                  transformationController: _transformationController,
+                  minScale: 1.0,
+                  maxScale: 5.0,
+                  child: Center(
+                    child: _aspectRatio == null
+                        ? const CircularProgressIndicator(
+                            color: Colors.white24, strokeWidth: 2)
+                        : AspectRatio(
+                            aspectRatio: _aspectRatio!,
+                            child: Stack(
+                              children: [
+                                Image.file(
+                                  widget.originalFile,
+                                  fit: BoxFit.fill,
+                                  width: double.infinity,
+                                  height: double.infinity,
+                                ),
+                                Positioned.fill(
+                                  child: IgnorePointer(
+                                    child: CustomPaint(
+                                      painter: PreviewOverlayPainter(
+                                        data: overlayData,
+                                        showOverlay: _showOverlay,
+                                        showWatermark: _showTextWatermark,
+                                        orientation:
+                                            cameraState.captureOrientation ??
+                                                cameraState.orientation,
+                                      ),
+                                    ),
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
                   ),
-                  Positioned.fill(
-                    child: IgnorePointer(
-                      child: CustomPaint(
-                        painter: PreviewOverlayPainter(
-                          data: overlayData,
-                          showOverlay: _showOverlay,
-                          showWatermark: _showTextWatermark,
-                          orientation:
-                          cameraState.captureOrientation ??
-                              cameraState.orientation,
-                        ),
-                      ),
-                    ),
-                  ),
-                ],
+                ),
               ),
             ),
-          ),
 
-          /// ✅ FIXED HEIGHT BOTTOM (NO JUMP)
-          SizedBox(
-            height: 100, // 🔥 IMPORTANT
-            child: AnimatedSwitcher(
-              duration: const Duration(milliseconds: 250),
-              child: _saving
-                  ? _buildSavingBar()
-                  : _buildActionBar(),
+            /// ✅ FLOATING APP BAR
+            AnimatedPositioned(
+              duration: const Duration(milliseconds: 300),
+              curve: Curves.easeInOut,
+              top: _showUI ? 0 : -120,
+              left: 0,
+              right: 0,
+              child: _buildCustomAppBar(),
+            ),
+
+            /// ✅ FLOATING ACTION BAR
+            AnimatedPositioned(
+              duration: const Duration(milliseconds: 300),
+              curve: Curves.easeInOut,
+              bottom: _showUI ? 0 : -180,
+              left: 0,
+              right: 0,
+              child: _buildBottomBarContainer(),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildCustomAppBar() {
+    return Container(
+      decoration: BoxDecoration(
+        gradient: LinearGradient(
+          begin: Alignment.topCenter,
+          end: Alignment.bottomCenter,
+          colors: [
+            Colors.black.withValues(alpha: 0.7),
+            Colors.transparent,
+          ],
+        ),
+      ),
+      child: SafeArea(
+        bottom: false,
+        child: AppBar(
+          backgroundColor: Colors.transparent,
+          elevation: 0,
+          title: const Text(
+            "Preview",
+            style: TextStyle(
+              color: Colors.white,
+              fontWeight: FontWeight.bold,
+              fontSize: 18,
             ),
           ),
-        ],
+          leading: IconButton(
+            icon: const Icon(Icons.arrow_back_ios_new,
+                color: Colors.white, size: 20),
+            onPressed: _saving ? null : () => Navigator.of(context).pop(),
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildBottomBarContainer() {
+    return SafeArea(
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
+        child: AnimatedSwitcher(
+          duration: const Duration(milliseconds: 250),
+          child: _saving ? _buildSavingBar() : _buildActionBar(),
+        ),
       ),
     );
   }
 
   /// ================= ACTION BAR =================
   Widget _buildActionBar() {
-    return Container(
+    return ClipRRect(
       key: const ValueKey("actionBar"),
-      margin: const EdgeInsets.all(16),
-      padding: const EdgeInsets.symmetric(
-        horizontal: 12,
-        vertical: 14,
-      ),
-      decoration: BoxDecoration(
-        color: Colors.black.withOpacity(0.7),
-        borderRadius: BorderRadius.circular(20),
-      ),
-      child: Row(
-        children: [
-          _buildToggleButton(
-            icon: Icons.location_on,
-            label: "Overlay",
-            active: _showOverlay,
-            onTap: () {
-              setState(() => _showOverlay = !_showOverlay);
-            },
+      borderRadius: BorderRadius.circular(28),
+      child: BackdropFilter(
+        filter: ui.ImageFilter.blur(sigmaX: 12, sigmaY: 12),
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+          decoration: BoxDecoration(
+            color: Colors.white.withValues(alpha: 0.12),
+            borderRadius: BorderRadius.circular(28),
+            border: Border.all(
+              color: Colors.white.withValues(alpha: 0.1),
+              width: 0.5,
+            ),
           ),
-          const SizedBox(width: 8),
-          _buildToggleButton(
-            icon: Icons.text_fields,
-            label: "Text",
-            active: _showTextWatermark,
-            onTap: () {
-              setState(() =>
-              _showTextWatermark = !_showTextWatermark);
-            },
+          child: Row(
+            children: [
+              _buildToggleButton(
+                icon: Icons.location_on_outlined,
+                label: "Overlay",
+                active: _showOverlay,
+                onTap: () => setState(() => _showOverlay = !_showOverlay),
+              ),
+              const SizedBox(width: 12),
+              _buildToggleButton(
+                icon: Icons.text_fields_outlined,
+                label: "Text",
+                active: _showTextWatermark,
+                onTap: () => setState(
+                    () => _showTextWatermark = !_showTextWatermark),
+              ),
+              const SizedBox(width: 12),
+              _buildToggleButton(
+                icon: Icons.edit_note_outlined,
+                label: "Edit",
+                active: false,
+                onTap: _editWatermark,
+              ),
+              const Spacer(),
+              ElevatedButton.icon(
+                onPressed: _saving ? null : _saveImage,
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: Colors.white,
+                  foregroundColor: Colors.black,
+                  elevation: 0,
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(20),
+                  ),
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
+                ),
+                icon: const Icon(Icons.check_circle_outline, size: 20),
+                label: const Text(
+                  "Save",
+                  style: TextStyle(fontWeight: FontWeight.bold),
+                ),
+              ),
+            ],
           ),
-          const SizedBox(width: 8),
-          _buildToggleButton(
-            icon: Icons.tune,
-            label: "Edit",
-            active: false,
-            onTap: _editWatermark,
-          ),
-          const Spacer(),
-          ElevatedButton.icon(
-            onPressed: _saving ? null : _saveImage,
-            icon: const Icon(Icons.download),
-            label: const Text("Save"),
-          ),
-        ],
+        ),
       ),
     );
   }
 
   /// ================= SAVING BAR =================
   Widget _buildSavingBar() {
-    return Container(
+    return ClipRRect(
       key: const ValueKey("savingBar"),
-      margin: const EdgeInsets.all(16),
-      padding: const EdgeInsets.symmetric(
-        horizontal: 16,
-        vertical: 14,
-      ),
-      decoration: BoxDecoration(
-        color: Colors.black.withOpacity(0.75),
-        borderRadius: BorderRadius.circular(20),
-      ),
-      child: const Row(
-        children: [
-          SizedBox(
-            width: 18,
-            height: 18,
-            child: CircularProgressIndicator(
-              strokeWidth: 2,
-              color: Colors.white,
-            ),
+      borderRadius: BorderRadius.circular(28),
+      child: BackdropFilter(
+        filter: ui.ImageFilter.blur(sigmaX: 12, sigmaY: 12),
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 20),
+          decoration: BoxDecoration(
+            color: Colors.black.withValues(alpha: 0.4),
+            borderRadius: BorderRadius.circular(28),
           ),
-          SizedBox(width: 12),
-          Text(
-            "Saving...",
-            style: TextStyle(color: Colors.white),
+          child: const Row(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              SizedBox(
+                width: 22,
+                height: 22,
+                child: CircularProgressIndicator(
+                  strokeWidth: 2.5,
+                  color: Colors.white,
+                ),
+              ),
+              SizedBox(width: 16),
+              Text(
+                "Processing & Saving...",
+                style: TextStyle(
+                  color: Colors.white,
+                  fontWeight: FontWeight.w500,
+                  fontSize: 16,
+                ),
+              ),
+            ],
           ),
-          Spacer(),
-          Icon(Icons.check_circle_outline,
-              color: Colors.white54),
-        ],
+        ),
       ),
     );
   }
@@ -253,39 +379,33 @@ class _ImagePreviewScreenState
   }) {
     return GestureDetector(
       onTap: onTap,
-      child: AnimatedContainer(
-        duration: const Duration(milliseconds: 200),
-        padding: const EdgeInsets.symmetric(
-          horizontal: 12,
-          vertical: 6,
-        ),
-        decoration: BoxDecoration(
-          color: active
-              ? Colors.white
-              : Colors.white.withOpacity(0.15),
-          borderRadius: BorderRadius.circular(12),
-        ),
-        child: FittedBox( // ✅ FIX
-          fit: BoxFit.scaleDown,
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Icon(
-                icon,
-                size: 20,
-                color: active ? Colors.black : Colors.white,
-              ),
-              const SizedBox(height: 2),
-              Text(
-                label,
-                style: TextStyle(
-                  fontSize: 10,
-                  color: active ? Colors.black : Colors.white,
-                ),
-              ),
-            ],
+      behavior: HitTestBehavior.opaque,
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          AnimatedContainer(
+            duration: const Duration(milliseconds: 250),
+            padding: const EdgeInsets.all(10),
+            decoration: BoxDecoration(
+              color: active ? Colors.white : Colors.white.withValues(alpha: 0.1),
+              shape: BoxShape.circle,
+            ),
+            child: Icon(
+              icon,
+              size: 22,
+              color: active ? Colors.black : Colors.white,
+            ),
           ),
-        ),
+          const SizedBox(height: 6),
+          Text(
+            label,
+            style: TextStyle(
+              fontSize: 11,
+              fontWeight: active ? FontWeight.bold : FontWeight.normal,
+              color: active ? Colors.white : Colors.white.withValues(alpha: 0.7),
+            ),
+          ),
+        ],
       ),
     );
   }

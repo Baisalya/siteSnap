@@ -133,12 +133,12 @@ class LiveOverlayPainter extends CustomPainter {
     );
 
     final bgPaint = Paint()
-      ..color = Colors.white.withOpacity(0.40);
+      ..color = Colors.white.withValues(alpha: 0.40);
 
     // soft shadow
     canvas.drawShadow(
       Path()..addRRect(RRect.fromRectAndRadius(bgRect, const Radius.circular(10))),
-      Colors.black.withOpacity(0.35),
+      Colors.black.withValues(alpha: 0.35),
       6,
       false,
     );
