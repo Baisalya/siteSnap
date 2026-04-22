@@ -235,5 +235,5 @@ Future<Uint8List> drawOverlay(
     order: img.ChannelOrder.rgba,
   );
 
-  return Uint8List.fromList(img.encodeJpg(image, quality: 95));
+  return Uint8List.fromList(img.encodeJpg(image, quality: 100));
 }

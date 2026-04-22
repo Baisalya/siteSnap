@@ -58,103 +58,100 @@ class LiveOverlayPainter extends CustomPainter {
     // PROFESSIONAL TEXT STYLE
     // ===============================
     final textStyle = TextStyle(
-      color: data.locationWarning != null
-          ? Colors.redAccent
-          : Colors.black87,
-      fontSize: baseSize * 0.038, // slightly larger
-      fontWeight: FontWeight.w500,
-      height: 1.25,
-      letterSpacing: 0.3,
-      shadows: const [
-        Shadow(
-          offset: Offset(0.5, 0.5),
-          blurRadius: 2,
-          color: Colors.white60,
-        ),
-      ],
+      color: Colors.black,
+      fontSize: baseSize * 0.032, // More refined size
+      fontWeight: FontWeight.w600,
+      height: 1.2,
+      letterSpacing: 0.2,
+    );
+
+    final warningStyle = textStyle.copyWith(color: Colors.redAccent);
+    final noteStyle = textStyle.copyWith(
+      fontSize: baseSize * 0.035, 
+      color: Colors.blueGrey[900],
+      fontStyle: FontStyle.italic,
     );
 
     // ===============================
-    // BUILD TEXT
+    // BUILD TEXT SPANS
     // ===============================
-    final buffer = StringBuffer();
+    final List<TextSpan> spans = [];
 
     if (data.dateTime.isNotEmpty) {
-      buffer.writeln(data.dateTime);
+      spans.add(TextSpan(text: "${data.dateTime}\n", style: textStyle));
     }
 
     if (data.locationWarning != null) {
-      buffer.writeln(data.locationWarning);
+      spans.add(TextSpan(text: "${data.locationWarning}\n", style: warningStyle));
     } else {
-      buffer.writeln(
-          "Lat: ${data.latitude.toStringAsFixed(5)}  |  Lon: ${data.longitude.toStringAsFixed(5)}");
+      spans.add(TextSpan(
+        text: "LAT: ${data.latitude.toStringAsFixed(6)}  LON: ${data.longitude.toStringAsFixed(6)}\n",
+        style: textStyle,
+      ));
     }
 
-    buffer.writeln(
-        "Alt ${data.altitude.toStringAsFixed(1)} m  |  ${data.direction} ${data.heading.toStringAsFixed(0)}°");
+    spans.add(TextSpan(
+      text: "ALT: ${data.altitude.toStringAsFixed(1)}m  DIR: ${data.direction} ${data.heading.toStringAsFixed(0)}°\n",
+      style: textStyle,
+    ));
 
     if (data.note.isNotEmpty) {
-      buffer.writeln(data.note);
+      spans.add(TextSpan(text: data.note, style: noteStyle));
     }
 
-    final text = buffer.toString();
-
     final textPainter = TextPainter(
-      text: TextSpan(text: text, style: textStyle),
+      text: TextSpan(children: spans),
       textDirection: TextDirection.ltr,
-      maxLines: 6,
-      ellipsis: '…',
+      maxLines: 8,
+      ellipsis: '...',
     );
 
-    textPainter.layout(maxWidth: drawWidth * 0.82);
+    textPainter.layout(maxWidth: drawWidth * 0.75); // Slightly narrower to prevent edge-touching
 
     // ===============================
     // POSITION
     // ===============================
-    final marginX = drawWidth * 0.03;
-    final marginY = drawHeight * 0.03;
+    final paddingH = drawWidth * 0.03;
+    final paddingV = drawWidth * 0.02; // Using width for consistent padding
+    final marginX = drawWidth * 0.04;
+    final marginY = drawHeight * 0.04;
+
+    final boxWidth = textPainter.width + (paddingH * 2);
+    final boxHeight = textPainter.height + (paddingV * 2);
 
     final dx = data.position == WatermarkPosition.bottomLeft
         ? marginX
-        : drawWidth - textPainter.width - marginX;
+        : drawWidth - boxWidth - marginX;
 
-    final dy = drawHeight - textPainter.height - marginY;
+    final dy = drawHeight - boxHeight - marginY;
 
-    final offset = Offset(dx, dy);
+    final boxRect = Rect.fromLTWH(dx, dy, boxWidth, boxHeight);
 
     // ===============================
-    // PROFESSIONAL BACKGROUND CARD
+    // BACKGROUND CARD
     // ===============================
-    final bgRect = Rect.fromLTWH(
-      offset.dx - drawWidth * 0.018,
-      offset.dy - drawHeight * 0.018,
-      textPainter.width + drawWidth * 0.036,
-      textPainter.height + drawHeight * 0.036,
-    );
-
     final bgPaint = Paint()
-      ..color = Colors.white.withValues(alpha: 0.40);
+      ..color = Colors.white.withOpacity(0.85); // More solid for readability
 
-    // soft shadow
-    canvas.drawShadow(
-      Path()..addRRect(RRect.fromRectAndRadius(bgRect, const Radius.circular(10))),
-      Colors.black.withValues(alpha: 0.35),
-      6,
-      false,
-    );
+    // Subtle Border
+    final borderPaint = Paint()
+      ..color = Colors.black.withOpacity(0.1)
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 1.0;
 
     canvas.drawRRect(
-      RRect.fromRectAndRadius(
-        bgRect,
-        const Radius.circular(10),
-      ),
+      RRect.fromRectAndRadius(boxRect, const Radius.circular(8)),
       bgPaint,
+    );
+    canvas.drawRRect(
+      RRect.fromRectAndRadius(boxRect, const Radius.circular(8)),
+      borderPaint,
     );
 
     // ===============================
     // DRAW TEXT
     // ===============================
-    textPainter.paint(canvas, offset);
+    textPainter.paint(canvas, Offset(dx + paddingH, dy + paddingV));
 
     canvas.restore();
   }

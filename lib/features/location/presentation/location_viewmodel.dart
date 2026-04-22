@@ -56,6 +56,7 @@ StreamProvider.autoDispose<Position?>((ref) async* {
     }
 
     /// START GPS STREAM
+    yield null;
     yield* Geolocator.getPositionStream(
       locationSettings: const LocationSettings(
         accuracy: LocationAccuracy.high,

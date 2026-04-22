@@ -11,5 +11,6 @@ StateProvider<OverlayData>((ref) {
     heading: 0.0,        // ✅ REQUIRED (North)
     direction: 'N',      // ✅ Cardinal direction
     note: '',
+    locationWarning: 'Fetching location...', // ✅ Initial state
   );
 });

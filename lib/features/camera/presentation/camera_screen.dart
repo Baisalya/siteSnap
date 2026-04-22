@@ -19,6 +19,8 @@ import '../../location/presentation/location_viewmodel.dart';
 import '../../overlay/presentation/live_overlay_painter.dart';
 import '../../overlay/presentation/overlay_preview_state.dart';
 import '../data/CameraState.dart';
+import '../../../core/services/location_service.dart';
+import 'camera_settings_provider.dart';
 import 'camera_viewmodel.dart';
 import 'capture_button.dart';
 import 'note_input_sheet.dart';
@@ -83,7 +85,7 @@ class _CameraScreenState extends ConsumerState<CameraScreen> {
     final cameraVM =
     ref.read(cameraViewModelProvider.notifier);
 
-    final overlayData = ref.watch(overlayPreviewProvider);
+    // final overlayData = ref.watch(overlayPreviewProvider); // Removed to prevent full screen rebuild
     final lastImage = ref.watch(lastImageProvider);
     final focusPoint = ref.watch(focusPointProvider);
     final deviceOrientation =
@@ -141,6 +143,7 @@ class _CameraScreenState extends ConsumerState<CameraScreen> {
             return;
           }
 
+          // Update Basic Location
           ref.read(overlayPreviewProvider.notifier).state =
               current.copyWith(
                 latitude: position.latitude,
@@ -148,6 +151,21 @@ class _CameraScreenState extends ConsumerState<CameraScreen> {
                 altitude: position.altitude,
                 clearLocationWarning: true,
               );
+
+          // Auto-fetch location name if enabled
+          final settings = ref.read(cameraSettingsProvider);
+          if (settings.autoFetchLocation) {
+            final name = await LocationService.getLocationName(
+              position.latitude,
+              position.longitude,
+            );
+            if (name != null && mounted) {
+              ref.read(overlayPreviewProvider.notifier).state =
+                  ref.read(overlayPreviewProvider.notifier).state.copyWith(
+                    note: name,
+                  );
+            }
+          }
         });
       });
     }
@@ -320,11 +338,17 @@ class _CameraScreenState extends ConsumerState<CameraScreen> {
                       /// OVERLAY
                       Positioned.fill(
                         child: IgnorePointer(
-                          child: CustomPaint(
-                            painter: LiveOverlayPainter(
-                              overlayData,
-                              deviceOrientation,
-                            ),
+                          child: Consumer(
+                            builder: (context, ref, child) {
+                              final overlayData = ref.watch(overlayPreviewProvider);
+                              final orientation = ref.watch(deviceOrientationProvider);
+                              return CustomPaint(
+                                painter: LiveOverlayPainter(
+                                  overlayData,
+                                  orientation,
+                                ),
+                              );
+                            },
                           ),
                         ),
                       ),

@@ -54,7 +54,7 @@ class CameraRepositoryImpl implements CameraRepository {
   Future<void> _initController(CameraDescription camera) async {
     _controller = CameraController(
       camera,
-      ResolutionPreset.max, // 🔥 Use MAX resolution for full clarity
+      ResolutionPreset.max, // 🔥 Use HIGH instead of MAX for preview to reduce heat (MAX is overkill for preview)
       enableAudio: false,
       imageFormatGroup: ImageFormatGroup.jpeg,
     );
