@@ -28,6 +28,10 @@ dependencies:
   # Permissions
   permission_handler: ^11.3.0
 
+  # Security & Info
+  package_info_plus: ^8.0.0
+  safe_device: ^1.1.4
+
   # Update
   in_app_update: ^4.0.1
 
