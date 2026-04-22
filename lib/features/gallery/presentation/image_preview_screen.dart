@@ -10,6 +10,7 @@ import '../../overlay/presentation/overlay_viewmodel.dart';
 import '../../camera/presentation/camera_viewmodel.dart';
 import '../../camera/presentation/note_input_sheet.dart';
 import '../../overlay/presentation/preview_overlay_painter.dart';
+import '../../../core/utils/watermark_support_dialog.dart';
 
 class ImagePreviewScreen extends ConsumerStatefulWidget {
   final File originalFile;
@@ -294,8 +295,15 @@ class _ImagePreviewScreenState
                 icon: Icons.text_fields_outlined,
                 label: "Text",
                 active: _showTextWatermark,
-                onTap: () => setState(
-                    () => _showTextWatermark = !_showTextWatermark),
+                onTap: () {
+                  if (_showTextWatermark) {
+                    showDialog(
+                      context: context,
+                      builder: (context) => const WatermarkSupportDialog(),
+                    );
+                  }
+                  setState(() => _showTextWatermark = !_showTextWatermark);
+                },
               ),
               const SizedBox(width: 12),
               _buildToggleButton(
