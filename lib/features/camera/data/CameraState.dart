@@ -43,7 +43,7 @@ class CameraState {
     this.currentLens = CameraLensType.normal,
     this.isCapturing = false,
     this.isManualFocus = false,
-    this.aspectRatio = CameraAspectRatio.ratio4_3,
+    this.aspectRatio = CameraAspectRatio.ratio16_9,
     this.error,
 
     /// 🔥 DEFAULT

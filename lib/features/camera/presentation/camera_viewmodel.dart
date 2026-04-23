@@ -69,13 +69,14 @@ class CameraViewModel extends StateNotifier<CameraState>
 
       // Set to auto focus and exposure by default
       try {
-        await controller.setExposureMode(ExposureMode.auto);
         await controller.setFocusMode(FocusMode.auto);
+        await controller.setExposureMode(ExposureMode.auto);
         await controller.setFlashMode(FlashMode.off);
       } catch (e) {
         debugPrint("Initial focus/exposure error: $e");
       }
 
+      // Explicitly set central points to force AE/AF calculation
       await controller.setFocusPoint(const Offset(0.5, 0.5));
       await controller.setExposurePoint(const Offset(0.5, 0.5));
 
@@ -87,7 +88,8 @@ class CameraViewModel extends StateNotifier<CameraState>
       final minZoom = await controller.getMinZoomLevel();
       final maxZoom = await controller.getMaxZoomLevel();
 
-      _currentExposure = 0.0.clamp(_minExposure, _maxExposure);
+      // Start with a slight exposure boost (+0.5) to make dark areas "pop" more
+      _currentExposure = 0.5.clamp(_minExposure, _maxExposure);
 
       await controller.setExposureOffset(_currentExposure);
 
@@ -180,6 +182,10 @@ class CameraViewModel extends StateNotifier<CameraState>
         await controller.setFocusMode(FocusMode.auto);
         await controller.setExposureMode(ExposureMode.auto);
         
+        // Explicitly set central points to force AE/AF calculation
+        await controller.setFocusPoint(const Offset(0.5, 0.5));
+        await controller.setExposurePoint(const Offset(0.5, 0.5));
+
         // Always start with flash OFF on the controller
         await controller.setFlashMode(FlashMode.off);
 
@@ -287,12 +293,15 @@ class CameraViewModel extends StateNotifier<CameraState>
       if (!controller.value.isInitialized) return;
 
       await controller.setFlashMode(FlashMode.off);
-      await Future.delayed(const Duration(milliseconds: 50));
+      await Future.delayed(const Duration(milliseconds: 100));
 
       // Torch "kick" to reset the hardware driver
       await controller.setFlashMode(FlashMode.torch);
-      await Future.delayed(const Duration(milliseconds: 100));
+      await Future.delayed(const Duration(milliseconds: 150));
       await controller.setFlashMode(FlashMode.off);
+      
+      // Cooldown to let sensor recover from the burst
+      await Future.delayed(const Duration(milliseconds: 200));
     } catch (e) {
       debugPrint("Nuclear flash kill error: $e");
     }
@@ -359,30 +368,37 @@ class CameraViewModel extends StateNotifier<CameraState>
       // 1. Prepare hardware
       await controller.setFocusMode(FocusMode.auto);
       await controller.setExposureMode(ExposureMode.auto);
+      // Re-trigger metering on the center point to maximize gain
+      await controller.setExposurePoint(const Offset(0.5, 0.5));
 
-      // 2. Temporarily enable flash IF user has it set to ON
+      // 2. Enable Light for Capture
       if (state.flashMode == FlashMode.always) {
-        await controller.setFlashMode(FlashMode.always);
-        // Give Android time to fire pre-flash and calculate exposure
-        await Future.delayed(const Duration(milliseconds: 1000));
+        // Use Torch mode for capture to solve the "timing" and "dark image" issue.
+        // This ensures the light is at constant maximum brightness when the shutter clicks.
+        await controller.setFlashMode(FlashMode.torch);
+        
+        // Give the camera system time to adjust exposure (brighten the scene)
+        await Future.delayed(const Duration(milliseconds: 800));
+        
+        // LOCK exposure while it's bright so it doesn't dim during capture
+        await controller.setExposureMode(ExposureMode.locked);
       } else {
         await controller.setFlashMode(FlashMode.off);
-        await Future.delayed(const Duration(milliseconds: 150));
+        // Wait longer (500ms) for AE to reach its peak gain in dark areas
+        await Future.delayed(const Duration(milliseconds: 500));
+        // Lock exposure so it doesn't drop during the shutter process
+        await controller.setExposureMode(ExposureMode.locked);
       }
 
       // 3. CAPTURE
       final path = await repo.takePicture();
 
       // 4. IMMEDIATE CLEANUP
-      // Only perform the aggressive nuclear kill if the flash was actually used.
-      // This prevents the "little flash" when capturing with flash OFF.
+      // Give the hardware a tiny breath to finalize the file write
+      await Future.delayed(const Duration(milliseconds: 200));
+
       if (state.flashMode == FlashMode.always) {
         await _nuclearFlashKill(controller);
-        
-        // Pause/Resume is the ultimate reset for stuck camera drivers
-        await controller.pausePreview();
-        await Future.delayed(const Duration(milliseconds: 100));
-        await controller.resumePreview();
       } else {
         await _softFlashQuench(controller);
       }
@@ -397,12 +413,17 @@ class CameraViewModel extends StateNotifier<CameraState>
       try {
         if (controller.value.isInitialized) {
           // IMPORTANT: Keep controller flash OFF during preview to prevent sticking.
-          // It will be enabled again only during the next 'capture' call.
           await controller.setFlashMode(FlashMode.off);
           
           await controller.setFocusMode(FocusMode.auto);
           await controller.setExposureMode(ExposureMode.auto);
           await controller.setExposureOffset(_currentExposure);
+
+          // Kick the pipeline to ensure it's not hung
+          await controller.resumePreview();
+          
+          // Extra stabilization delay before allowing the next capture
+          await Future.delayed(const Duration(milliseconds: 400));
         }
       } catch (e) {
         debugPrint("Restoration error: $e");
