@@ -338,6 +338,50 @@ class CameraViewModel extends StateNotifier<CameraState>
     state = state.copyWith(aspectRatio: ratio);
   }
 
+  // ================= CAMERA SWITCH =================
+
+  Future<void> switchCamera() async {
+    if (_isInitializing || _isRestarting) return;
+
+    final nextLens = state.currentLens == CameraLensType.front
+        ? CameraLensType.normal
+        : CameraLensType.front;
+
+    state = state.copyWith(currentLens: nextLens, isReady: false);
+
+    try {
+      final repo = ref.read(cameraRepositoryProvider);
+      await repo.initialize(nextLens);
+
+      final controller = repo.controller;
+      if (controller != null) {
+        if (!controller.value.isInitialized) {
+          await controller.initialize();
+        }
+
+        _minExposure = await controller.getMinExposureOffset();
+        _maxExposure = await controller.getMaxExposureOffset();
+        final minZoom = await controller.getMinZoomLevel();
+        final maxZoom = await controller.getMaxZoomLevel();
+
+        state = state.copyWith(
+          isReady: true,
+          controller: controller,
+          exposure: 0.0,
+          minExposure: _minExposure,
+          maxExposure: _maxExposure,
+          zoom: 1.0,
+          minZoom: minZoom,
+          maxZoom: maxZoom,
+          error: null,
+        );
+      }
+    } catch (e) {
+      debugPrint("Switch camera error: $e");
+      state = state.copyWith(isReady: false, error: e.toString());
+    }
+  }
+
   // ================= CAPTURE =================
 
   Future<void> capture(BuildContext context) async {
@@ -360,6 +404,7 @@ class CameraViewModel extends StateNotifier<CameraState>
     state = state.copyWith(
       isCapturing: true,
       captureOrientation: deviceOrientation,
+      captureLens: state.currentLens,
     );
 
     try {
@@ -373,13 +418,15 @@ class CameraViewModel extends StateNotifier<CameraState>
 
       // 2. Enable Light for Capture
       if (state.flashMode == FlashMode.always) {
-        // Use Torch mode for capture to solve the "timing" and "dark image" issue.
-        // This ensures the light is at constant maximum brightness when the shutter clicks.
-        await controller.setFlashMode(FlashMode.torch);
-        
-        // Give the camera system time to adjust exposure (brighten the scene)
-        await Future.delayed(const Duration(milliseconds: 800));
-        
+        if (state.currentLens == CameraLensType.front) {
+          // For front camera, we use the Screen Flash (UI based)
+          // We wait a moment for the screen to turn bright white in the UI
+          await Future.delayed(const Duration(milliseconds: 300));
+        } else {
+          // For back camera, use the physical LED
+          await controller.setFlashMode(FlashMode.torch);
+          await Future.delayed(const Duration(milliseconds: 800));
+        }
         // LOCK exposure while it's bright so it doesn't dim during capture
         await controller.setExposureMode(ExposureMode.locked);
       } else {

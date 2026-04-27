@@ -33,6 +33,7 @@ class CameraState {
 
   /// frozen orientation at capture moment
   final DeviceOrientation? captureOrientation;
+  final CameraLensType? captureLens;
 
   final String? error;
 
@@ -56,6 +57,7 @@ class CameraState {
 
     this.orientation = DeviceOrientation.portraitUp,
     this.captureOrientation,
+    this.captureLens,
   });
 
   CameraState copyWith({
@@ -78,6 +80,7 @@ class CameraState {
 
     DeviceOrientation? orientation,
     DeviceOrientation? captureOrientation,
+    CameraLensType? captureLens,
   }) {
     return CameraState(
       isReady: isReady ?? this.isReady,
@@ -100,6 +103,7 @@ class CameraState {
       orientation: orientation ?? this.orientation,
       captureOrientation:
       captureOrientation ?? this.captureOrientation,
+      captureLens: captureLens ?? this.captureLens,
     );
   }
 }

@@ -20,6 +20,10 @@ class CameraRepositoryImpl implements CameraRepository {
       throw Exception('No back camera found');
     }
 
+    final frontCameras = cameras
+        .where((c) => c.lensDirection == CameraLensDirection.front)
+        .toList();
+
     // Usually, the first back camera is the primary one.
     // Some devices have multiple back cameras (Wide, Telephoto, etc.)
     // We try to stick to the primary one for the 'normal' lens.
@@ -27,6 +31,7 @@ class CameraRepositoryImpl implements CameraRepository {
 
     CameraDescription? ultraWide;
     CameraDescription? macro;
+    CameraDescription? frontCamera;
 
     if (backCameras.length > 1) {
       // This is a heuristic, real implementation might need device-specific logic
@@ -38,12 +43,18 @@ class CameraRepositoryImpl implements CameraRepository {
       macro = backCameras[1];
     }
 
+    if (frontCameras.isNotEmpty) {
+      frontCamera = frontCameras.first;
+    }
+
     _cameraMap = {
       CameraLensType.normal: mainCamera,
       if (ultraWide != null)
         CameraLensType.ultraWide: ultraWide,
       if (macro != null)
         CameraLensType.macro: macro,
+      if (frontCamera != null)
+        CameraLensType.front: frontCamera,
     };
 
     _currentLens = lens;

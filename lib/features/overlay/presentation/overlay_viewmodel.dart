@@ -30,6 +30,7 @@ class OverlayViewModel extends StateNotifier<void> {
         bool showWatermark = true,
         ui.Image? decodedImage,
         CameraAspectRatio? aspectRatio,
+        bool mirror = false,
       }) async {
     try {
       // 🚀 DIRECT PASS: Skip the slow 'image' library decode/bake.
@@ -42,6 +43,7 @@ class OverlayViewModel extends StateNotifier<void> {
         showWatermark: showWatermark,
         decodedImage: decodedImage,
         aspectRatio: aspectRatio,
+        mirror: mirror,
       );
 
       return bytes;
@@ -62,6 +64,7 @@ class OverlayViewModel extends StateNotifier<void> {
     bool showWatermark = true,
     ui.Image? decodedImage,
     CameraAspectRatio? aspectRatio,
+    bool mirror = false,
   }) async {
     try {
       // Run the slow processing in the background
@@ -73,6 +76,7 @@ class OverlayViewModel extends StateNotifier<void> {
         showWatermark: showWatermark,
         decodedImage: decodedImage,
         aspectRatio: aspectRatio,
+        mirror: mirror,
       );
 
       await GallerySaver.saveImageBytes(bytes);

@@ -2,6 +2,7 @@ import 'dart:io';
 import 'dart:ui' as ui;
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:surveycam/features/camera/domain/camera_lens_type.dart';
 
 import '../../../core/utils/gallery_saver.dart';
 import '../../overlay/presentation/captured_overlay_provider.dart';
@@ -96,6 +97,8 @@ class _ImagePreviewScreenState
       position: live.position,
     );
 
+    final isMirror = cameraState.captureLens == CameraLensType.front;
+
     // Fire and forget: Save in background
     ref.read(overlayViewModelProvider.notifier).saveCapturedImage(
           original: widget.originalFile,
@@ -106,6 +109,7 @@ class _ImagePreviewScreenState
           showWatermark: _showTextWatermark,
           decodedImage: _decodedImage,
           aspectRatio: cameraState.aspectRatio,
+          mirror: isMirror,
         );
 
     // Close preview immediately
@@ -165,11 +169,14 @@ class _ImagePreviewScreenState
                             aspectRatio: _aspectRatio!,
                             child: Stack(
                               children: [
-                                Image.file(
-                                  widget.originalFile,
-                                  fit: BoxFit.fill,
-                                  width: double.infinity,
-                                  height: double.infinity,
+                                Transform.scale(
+                                  scaleX: cameraState.captureLens == CameraLensType.front ? -1.0 : 1.0,
+                                  child: Image.file(
+                                    widget.originalFile,
+                                    fit: BoxFit.fill,
+                                    width: double.infinity,
+                                    height: double.infinity,
+                                  ),
                                 ),
                                 Positioned.fill(
                                   child: IgnorePointer(

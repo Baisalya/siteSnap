@@ -17,6 +17,7 @@ Future<Uint8List> drawOverlay(
       bool showWatermark = true,
       ui.Image? decodedImage,
       CameraAspectRatio? aspectRatio,
+      bool mirror = false,
     }
     ) async {
   /// ===============================
@@ -99,12 +100,25 @@ Future<Uint8List> drawOverlay(
   }
 
   /// DRAW IMAGE (Cropped)
-  canvas.drawImageRect(
-    uiImage, 
-    srcRect, 
-    Rect.fromLTWH(0, 0, srcRect.width, srcRect.height), 
-    Paint()..filterQuality = ui.FilterQuality.high
-  );
+  if (mirror) {
+    canvas.save();
+    canvas.translate(srcRect.width, 0);
+    canvas.scale(-1, 1);
+    canvas.drawImageRect(
+      uiImage,
+      srcRect,
+      Rect.fromLTWH(0, 0, srcRect.width, srcRect.height),
+      Paint()..filterQuality = ui.FilterQuality.high
+    );
+    canvas.restore();
+  } else {
+    canvas.drawImageRect(
+      uiImage,
+      srcRect,
+      Rect.fromLTWH(0, 0, srcRect.width, srcRect.height),
+      Paint()..filterQuality = ui.FilterQuality.high
+    );
+  }
 
   /// DRAW MAIN OVERLAY
   final overlayPainter = LiveOverlayPainter(data, orientation);
