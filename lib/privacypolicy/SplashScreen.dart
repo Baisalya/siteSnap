@@ -1,9 +1,9 @@
+import 'dart:ui';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:flutter_svg/flutter_svg.dart';
 
 import 'package:surveycam/privacypolicy/privacyProvider.dart';
-
-import '../features/camera/presentation/camera_screen.dart';
 import 'PrivacyDialog.dart';
 
 class SplashScreen extends ConsumerStatefulWidget {
@@ -13,165 +13,134 @@ class SplashScreen extends ConsumerStatefulWidget {
   ConsumerState<SplashScreen> createState() => _SplashScreenState();
 }
 
-class _SplashScreenState extends ConsumerState<SplashScreen> {
-  bool _handled = false;
+class _SplashScreenState extends ConsumerState<SplashScreen>
+    with SingleTickerProviderStateMixin {
+  bool _dialogShown = false;
+
+  late final AnimationController _controller;
+  late final Animation<double> _fade;
+
+  @override
+  void initState() {
+    super.initState();
+
+    _controller = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 1200),
+    )..forward();
+
+    _fade = CurvedAnimation(parent: _controller, curve: Curves.easeOut);
+  }
 
   @override
   Widget build(BuildContext context) {
     final status = ref.watch(privacyProvider);
 
-    /// 🔥 MAIN FIX: Run AFTER UI build
-    WidgetsBinding.instance.addPostFrameCallback((_) async {
-      if (_handled) return;
-      if (!mounted) return;
+    if (status == false && !_dialogShown) {
+      _dialogShown = true;
 
-      /// ⏳ Still loading → wait
-      if (status == null) return;
+      WidgetsBinding.instance.addPostFrameCallback((_) async {
+        if (!mounted) return;
 
-      _handled = true;
-
-      /// ❌ Not accepted → show dialog
-      if (status == false) {
         await showDialog(
           context: context,
           barrierDismissible: false,
           builder: (_) => const PrivacyDialog(),
         );
-      }
-
-      /// ✅ Navigate after dialog OR if already accepted
-      if (!mounted) return;
-
-      Navigator.pushReplacement(
-        context,
-        MaterialPageRoute(
-          builder: (_) => const CameraScreen(),
-        ),
-      );
-    });
+      });
+    }
 
     return Scaffold(
-      backgroundColor: Colors.black,
       body: Stack(
+        fit: StackFit.expand,
         children: [
-
-          /// 📷 BACKGROUND
+          Image.asset(
+            'A ssets/splash_bg.png',
+            fit: BoxFit.cover,
+          ),
           Container(
-            decoration: BoxDecoration(
+            decoration: const BoxDecoration(
               gradient: LinearGradient(
                 colors: [
-                  Colors.black,
-                  Colors.grey.shade900,
-                  Colors.black,
+                  Color(0xCC000000),
+                  Color(0x88000000),
+                  Color(0xFF000000),
                 ],
                 begin: Alignment.topCenter,
                 end: Alignment.bottomCenter,
               ),
             ),
           ),
-
-          /// 🧭 TOP BAR
-          Positioned(
-            top: 40,
-            left: 20,
-            right: 20,
-            child: Row(
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-              children: const [
-                Icon(Icons.flash_off, color: Colors.white70),
-                Icon(Icons.hdr_auto, color: Colors.white70),
-                Icon(Icons.settings, color: Colors.white70),
-              ],
-            ),
+          BackdropFilter(
+            filter: ImageFilter.blur(sigmaX: 1.2, sigmaY: 1.2),
+            child: Container(color: Colors.transparent),
           ),
-
-          /// 🎯 FOCUS FRAME
-          Center(
+          Positioned(
+            bottom: 0,
+            left: 0,
+            right: 0,
+            height: 250,
             child: Container(
-              width: 120,
-              height: 120,
               decoration: BoxDecoration(
-                border: Border.all(color: Colors.white54, width: 2),
-                borderRadius: BorderRadius.circular(12),
+                gradient: LinearGradient(
+                  colors: [
+                    Colors.blue.withOpacity(0.4),
+                    Colors.transparent,
+                  ],
+                  begin: Alignment.bottomCenter,
+                  end: Alignment.topCenter,
+                ),
               ),
             ),
           ),
-
-          /// ✨ APP NAME
-          const Center(
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Icon(Icons.camera_alt, color: Colors.white, size: 40),
-                SizedBox(height: 10),
-                Text(
-                  "SurveyCam",
-                  style: TextStyle(
-                    color: Colors.white,
-                    fontSize: 26,
-                    fontWeight: FontWeight.bold,
-                    letterSpacing: 1.2,
+          SafeArea(
+            child: FadeTransition(
+              opacity: _fade,
+              child: Column(
+                children: [
+                  const Spacer(),
+                  SvgPicture.asset(
+                    'Assets/surveycam_logo.svg',
+                    width: 200,
                   ),
-                ),
-                SizedBox(height: 6),
-                Text(
-                  "Geo Tagged Camera",
-                  style: TextStyle(
-                    color: Colors.white54,
-                    fontSize: 12,
+                  const SizedBox(height: 20),
+                  const Text(
+                    "SurveyCam",
+                    style: TextStyle(
+                      fontSize: 42,
+                      fontWeight: FontWeight.bold,
+                      color: Colors.white,
+                    ),
                   ),
-                ),
-              ],
-            ),
-          ),
-
-          /// 🔘 BOTTOM UI
-          Positioned(
-            bottom: 40,
-            left: 0,
-            right: 0,
-            child: Column(
-              children: [
-
-                Container(
-                  width: 70,
-                  height: 70,
-                  decoration: BoxDecoration(
-                    shape: BoxShape.circle,
-                    border: Border.all(color: Colors.white, width: 4),
+                  const SizedBox(height: 10),
+                  const Text(
+                    "Capture. Tag. Prove.",
+                    style: TextStyle(
+                      color: Colors.white70,
+                      fontSize: 16,
+                      letterSpacing: 1.2,
+                    ),
                   ),
-                  child: Center(
-                    child: Container(
-                      width: 55,
-                      height: 55,
-                      decoration: const BoxDecoration(
-                        shape: BoxShape.circle,
+                  const Spacer(),
+                  if (status == null)
+                    const Padding(
+                      padding: EdgeInsets.only(bottom: 40),
+                      child: CircularProgressIndicator(
                         color: Colors.white,
                       ),
                     ),
-                  ),
-                ),
-
-                const SizedBox(height: 15),
-
-                const Text(
-                  "PHOTO",
-                  style: TextStyle(
-                    color: Colors.white,
-                    fontWeight: FontWeight.bold,
-                  ),
-                ),
-
-                const SizedBox(height: 20),
-
-                /// ⏳ Loading
-                if (status == null)
-                  const CircularProgressIndicator(color: Colors.white),
-              ],
+                ],
+              ),
             ),
           ),
         ],
       ),
     );
+  }
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
   }
 }

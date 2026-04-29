@@ -1,0 +1,26 @@
+<svg width="200" height="200" viewBox="0 0 200 200" xmlns="http://www.w3.org/2000/svg">
+
+    <!-- Location Pin -->
+    <path d="M100 10C60 10 30 40 30 80C30 130 100 190 100 190C100 190 170 130 170 80C170 40 140 10 100 10Z"
+        fill="#1E3A8A"/>
+
+    <!-- Camera Outer Circle -->
+    <circle cx="100" cy="80" r="45" fill="#FFFFFF"/>
+    <circle cx="100" cy="80" r="38" fill="#374151"/>
+
+    <!-- Camera Lens -->
+    <circle cx="100" cy="80" r="22" fill="#111827"/>
+    <circle cx="92" cy="72" r="6" fill="#FFFFFF" opacity="0.8"/>
+
+    <!-- Small Overlay Box -->
+    <rect x="115" y="50" width="40" height="40" rx="8" fill="#FFFFFF" stroke="#1E3A8A" stroke-width="3"/>
+
+    <!-- Clock Hands -->
+    <line x1="135" y1="70" x2="135" y2="58" stroke="#1E3A8A" stroke-width="3" stroke-linecap="round"/>
+    <line x1="135" y1="70" x2="145" y2="70" stroke="#1E3A8A" stroke-width="3" stroke-linecap="round"/>
+
+    <!-- Green Check -->
+    <circle cx="155" cy="85" r="14" fill="#22C55E"/>
+    <path d="M148 85 L153 90 L162 78" stroke="#FFFFFF" stroke-width="3" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
+
+</svg>

@@ -1,6 +1,8 @@
 import 'dart:math';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:flutter_svg/flutter_svg.dart' as svg;
+import 'package:vector_graphics/vector_graphics.dart';
 
 import '../domain/WatermarkPosition.dart';
 import '../domain/overlay_model.dart';
@@ -12,12 +14,27 @@ class PreviewOverlayPainter extends CustomPainter {
   final bool showWatermark;
   final DeviceOrientation orientation;
 
+  /// ✅ Preloaded SVG
+  final PictureInfo? svgPicture;
+
   PreviewOverlayPainter({
     required this.data,
     required this.showOverlay,
     required this.showWatermark,
     required this.orientation,
+    required this.svgPicture,
   });
+
+  /// ✅ Load SVG once before using painter
+  static Future<PictureInfo> loadSvg() async {
+    const assetName = 'Assets/app_logo.svg';
+
+    final svgString = await rootBundle.loadString(assetName);
+    return await svg.vg.loadPicture(
+      svg.SvgStringLoader(svgString),
+      null,
+    );
+  }
 
   @override
   void paint(Canvas canvas, Size size) {
@@ -29,8 +46,8 @@ class PreviewOverlayPainter extends CustomPainter {
       painter.paint(canvas, size);
     }
 
-    /// 📍 WATERMARK (SurveyCam)
-    if (showWatermark) {
+    /// 📍 WATERMARK
+    if (showWatermark && svgPicture != null) {
       _drawWatermark(canvas, size);
     }
   }
@@ -39,7 +56,7 @@ class PreviewOverlayPainter extends CustomPainter {
     canvas.save();
 
     // ===============================
-    // ROTATE CANVAS (Consistent with LiveOverlayPainter)
+    // ROTATION (same as before)
     // ===============================
     switch (orientation) {
       case DeviceOrientation.portraitUp:
@@ -70,14 +87,14 @@ class PreviewOverlayPainter extends CustomPainter {
     final baseSize = min(drawWidth, drawHeight);
 
     // ===============================
-    // TEXT STYLE
+    // TEXT
     // ===============================
     final textPainter = TextPainter(
       text: TextSpan(
         text: "SurveyCam",
         style: TextStyle(
           color: Colors.white,
-          fontSize: baseSize * 0.045, // Proportional size
+          fontSize: baseSize * 0.045,
           fontWeight: FontWeight.bold,
           shadows: const [
             Shadow(
@@ -91,22 +108,44 @@ class PreviewOverlayPainter extends CustomPainter {
       textDirection: TextDirection.ltr,
     )..layout();
 
-    // ===============================
-    // POSITIONING
-    // ===============================
     final padding = drawWidth * 0.04;
+    const spacing = 8.0;
 
-    // Place it at the TOP (opposite of info box which is at bottom)
-    // Horizontal side matches the info box side
+    // ===============================
+    // SVG SIZE
+    // ===============================
+    final svgSize = textPainter.height;
+    final totalWidth = svgSize + spacing + textPainter.width;
+
+    // ===============================
+    // POSITION (UNCHANGED)
+    // ===============================
     final isRightSide = data.position != WatermarkPosition.bottomLeft;
 
     final dx = isRightSide
-        ? drawWidth - textPainter.width - padding
+        ? drawWidth - totalWidth - padding
         : padding;
-    
-    final dy = padding; // Always at the top for the watermark
 
-    textPainter.paint(canvas, Offset(dx, dy));
+    final dy = padding;
+
+    // ===============================
+    // DRAW SVG
+    // ===============================
+    canvas.save();
+    canvas.translate(dx, dy);
+
+    final scale = svgSize / svgPicture!.size.height;
+    canvas.scale(scale, scale);
+    canvas.drawPicture(svgPicture!.picture);
+    canvas.restore();
+
+    // ===============================
+    // DRAW TEXT
+    // ===============================
+    textPainter.paint(
+      canvas,
+      Offset(dx + svgSize + spacing, dy),
+    );
 
     canvas.restore();
   }
@@ -116,6 +155,7 @@ class PreviewOverlayPainter extends CustomPainter {
     return oldDelegate.showOverlay != showOverlay ||
         oldDelegate.showWatermark != showWatermark ||
         oldDelegate.data != data ||
-        oldDelegate.orientation != orientation;
+        oldDelegate.orientation != orientation ||
+        oldDelegate.svgPicture != svgPicture;
   }
 }

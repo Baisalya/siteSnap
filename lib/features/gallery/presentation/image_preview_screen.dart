@@ -2,6 +2,7 @@ import 'dart:io';
 import 'dart:ui' as ui;
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:flutter_svg/flutter_svg.dart';
 import 'package:surveycam/features/camera/domain/camera_lens_type.dart';
 
 import '../../../core/utils/gallery_saver.dart';
@@ -16,7 +17,6 @@ import '../../../core/utils/watermark_support_dialog.dart';
 class ImagePreviewScreen extends ConsumerStatefulWidget {
   final File originalFile;
   final File processedFile;
-
   const ImagePreviewScreen({
     super.key,
     required this.originalFile,
@@ -41,13 +41,23 @@ class _ImagePreviewScreenState
 
   bool _showOverlay = true;
   bool _showTextWatermark = true;
+  PictureInfo? _svgPicture;
 
   @override
   void initState() {
     super.initState();
     _calculateAspectRatio();
+    _loadSvg();
   }
+  void _loadSvg() async {
+    final pic = await PreviewOverlayPainter.loadSvg();
 
+    if (!mounted) return;
+
+    setState(() {
+      _svgPicture = pic;
+    });
+  }
   void _calculateAspectRatio() {
     final image = Image.file(widget.originalFile);
     image.image.resolve(const ImageConfiguration()).addListener(
@@ -187,7 +197,7 @@ class _ImagePreviewScreenState
                                         showWatermark: _showTextWatermark,
                                         orientation:
                                             cameraState.captureOrientation ??
-                                                cameraState.orientation,
+                                                cameraState.orientation, svgPicture: _svgPicture,
                                       ),
                                     ),
                                   ),

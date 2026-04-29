@@ -33,9 +33,8 @@ class OverlayViewModel extends StateNotifier<void> {
         bool mirror = false,
       }) async {
     try {
-      // 🚀 DIRECT PASS: Skip the slow 'image' library decode/bake.
-      // drawOverlay uses ui.Canvas (Hardware Accelerated) which is much faster.
-      final bytes = await drawOverlay(
+      // ✅ CALL VIA CLASS NAME: WatermarkProcessor.drawOverlay
+      final bytes = await WatermarkProcessor.drawOverlay(
         original,
         overlayData,
         orientation,

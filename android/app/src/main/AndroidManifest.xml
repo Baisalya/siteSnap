@@ -23,7 +23,7 @@
     <application
         android:label="SurveyCam"
         android:name="${applicationName}"
-        android:icon="@mipmap/launcher_icon"
+        android:icon="@mipmap/ic_launcher"
         >
 
         <activity

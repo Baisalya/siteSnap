@@ -85,7 +85,7 @@ class LiveOverlayPainter extends CustomPainter {
       spans.add(TextSpan(text: "${data.locationWarning}\n", style: warningStyle));
     } else {
       spans.add(TextSpan(
-        text: "LAT: ${data.latitude.toStringAsFixed(6)}  LON: ${data.longitude.toStringAsFixed(6)}\n",
+        text: "Latitude: ${data.latitude.toStringAsFixed(6)}\nLongitude: ${data.longitude.toStringAsFixed(6)}\n",
         style: textStyle,
       ));
     }
@@ -106,15 +106,15 @@ class LiveOverlayPainter extends CustomPainter {
       ellipsis: '...',
     );
 
-    textPainter.layout(maxWidth: drawWidth * 0.75); // Slightly narrower to prevent edge-touching
+    textPainter.layout(maxWidth: baseSize * 0.75); // Consistent wrapping regardless of orientation
 
     // ===============================
     // POSITION
     // ===============================
-    final paddingH = drawWidth * 0.03;
-    final paddingV = drawWidth * 0.02; // Using width for consistent padding
-    final marginX = drawWidth * 0.04;
-    final marginY = drawHeight * 0.04;
+    final paddingH = baseSize * 0.03;
+    final paddingV = baseSize * 0.02; // Using baseSize for consistent padding
+    final marginX = baseSize * 0.04;
+    final marginY = baseSize * 0.04;
 
     final boxWidth = textPainter.width + (paddingH * 2);
     final boxHeight = textPainter.height + (paddingV * 2);

@@ -1,0 +1,66 @@
+<svg width="512" height="512" viewBox="0 0 512 512" fill="none" xmlns="http://www.w3.org/2000/svg">
+    <defs>
+        <linearGradient id="pinGrad" x1="120" y1="72" x2="392" y2="440" gradientUnits="userSpaceOnUse">
+            <stop offset="0" stop-color="#1E6BFF"/>
+            <stop offset="0.55" stop-color="#0B4DFF"/>
+            <stop offset="1" stop-color="#0631B8"/>
+        </linearGradient>
+
+        <radialGradient id="glow" cx="0" cy="0" r="1" gradientUnits="userSpaceOnUse"
+            gradientTransform="translate(256 256) rotate(90) scale(220)">
+            <stop offset="0.72" stop-color="#4FA3FF" stop-opacity="0"/>
+            <stop offset="1" stop-color="#4FA3FF" stop-opacity="0.65"/>
+        </radialGradient>
+
+        <filter id="softGlow" x="-40%" y="-40%" width="180%" height="180%">
+            <feGaussianBlur stdDeviation="10" result="blur"/>
+            <feMerge>
+                <feMergeNode in="blur"/>
+                <feMergeNode in="SourceGraphic"/>
+            </feMerge>
+        </filter>
+
+        <filter id="outerGlow" x="-50%" y="-50%" width="200%" height="200%">
+            <feGaussianBlur stdDeviation="6" result="blur"/>
+            <feColorMatrix in="blur" type="matrix"
+                values="1 0 0 0 0
+                0 0.8 0 0 0
+                0 0 1 0 0
+                0 0 0 0.9 0" />
+        </filter>
+    </defs>
+
+    <!-- Pin body -->
+    <path
+        d="M256 40C171.6 40 103 108.6 103 193c0 98.4 114.5 184.8 145.1 209.7 5 4.1 12.2 4.1 17.2 0C295.5 377.8 410 291.4 410 193c0-84.4-68.6-153-154-153Z"
+        fill="url(#pinGrad)"
+        filter="url(#softGlow)"
+    />
+
+    <!-- Inner glow ring -->
+    <circle cx="256" cy="188" r="92" fill="none" stroke="#EAF3FF" stroke-width="14"/>
+    <circle cx="256" cy="188" r="74" fill="#101826" stroke="#4A5568" stroke-width="10"/>
+
+    <!-- Camera lens -->
+    <circle cx="256" cy="188" r="52" fill="#05070D"/>
+    <circle cx="256" cy="188" r="34" fill="#0C101A"/>
+    <circle cx="238" cy="170" r="12" fill="#FFFFFF" opacity="0.95"/>
+
+    <!-- Subtle lens rings -->
+    <circle cx="256" cy="188" r="44" fill="none" stroke="#20293A" stroke-width="4" opacity="0.8"/>
+    <circle cx="256" cy="188" r="26" fill="none" stroke="#2E3A52" stroke-width="3" opacity="0.7"/>
+
+    <!-- Location card -->
+    <rect x="287" y="152" width="104" height="104" rx="22" fill="#FFFFFF" filter="url(#outerGlow)"/>
+    <rect x="298" y="163" width="82" height="82" rx="14" fill="#F7FBFF"/>
+    <path d="M320 182H348V210H320V182Z" fill="none" stroke="#0B4DFF" stroke-width="10" stroke-linejoin="round"/>
+    <path d="M334 183V209" stroke="#0B4DFF" stroke-width="8" stroke-linecap="round"/>
+    <path d="M334 196H347" stroke="#0B4DFF" stroke-width="8" stroke-linecap="round"/>
+
+    <!-- Checkmark -->
+    <circle cx="380" cy="243" r="36" fill="#17C964" filter="url(#outerGlow)"/>
+    <path d="M363 243L374 255L396 229" stroke="#FFFFFF" stroke-width="10" stroke-linecap="round" stroke-linejoin="round"/>
+
+    <!-- Tiny highlight -->
+    <circle cx="230" cy="170" r="8" fill="#FFFFFF" opacity="0.8"/>
+</svg>

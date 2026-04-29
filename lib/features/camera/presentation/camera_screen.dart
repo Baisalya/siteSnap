@@ -464,18 +464,10 @@ class _CameraScreenState extends ConsumerState<CameraScreen> {
                               children: [
                                 IconButton(
                                   icon: Icon(
-                                    Icons.flip_camera_android,
+                                    Icons.flip_camera_ios_outlined,
                                     color: uiColor,
                                   ),
                                   onPressed: cameraVM.switchCamera,
-                                ),
-                                Text(
-                                  "SWITCH",
-                                  style: TextStyle(
-                                    color: uiColor,
-                                    fontSize: 10,
-                                    fontWeight: FontWeight.bold,
-                                  ),
                                 ),
                                 const SizedBox(height: 16),
                                 IconButton(
