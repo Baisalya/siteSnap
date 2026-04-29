@@ -10,6 +10,10 @@ class OverlayData {
   final String note;
   final String? locationWarning;
 
+  final String? weather;
+  final String? humidity;
+  final String? air;
+
   final WatermarkPosition position;
 
   const OverlayData({
@@ -21,6 +25,9 @@ class OverlayData {
     required this.direction,
     required this.note,
     this.locationWarning,
+    this.weather,
+    this.humidity,
+    this.air,
     this.position = WatermarkPosition.bottomLeft,
   });
 
@@ -34,6 +41,9 @@ class OverlayData {
     String? note,
     String? locationWarning,
     bool clearLocationWarning = false,
+    String? weather,
+    String? humidity,
+    String? air,
     WatermarkPosition? position,
   }) {
     return OverlayData(
@@ -49,7 +59,9 @@ class OverlayData {
       locationWarning: clearLocationWarning
           ? null
           : (locationWarning ?? this.locationWarning),
-
+      weather: weather ?? this.weather,
+      humidity: humidity ?? this.humidity,
+      air: air ?? this.air,
       position: position ?? this.position,
     );
   }

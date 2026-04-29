@@ -3,7 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:share_plus/share_plus.dart';
 import 'package:surveycam/features/gallery/data/sitesnap_gallery_repository.dart';
-import '../presentation/gallery_image_viewer.dart';
+import 'package:surveycam/features/gallery/presentation/gallery_image_viewer.dart';
 
 class GalleryFolderScreen extends StatefulWidget {
   const GalleryFolderScreen({super.key});

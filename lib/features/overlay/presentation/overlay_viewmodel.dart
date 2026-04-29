@@ -3,11 +3,12 @@ import 'dart:ui' as ui;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import '../../camera/data/CameraState.dart';
-import '../../../core/utils/gallery_saver.dart';
+import 'package:surveycam/features/camera/data/CameraState.dart';
+import 'package:surveycam/core/utils/gallery_saver.dart';
 
-import '../domain/overlay_model.dart';
-import 'overlay_painter.dart';
+import 'package:surveycam/features/overlay/domain/overlay_model.dart';
+import 'package:surveycam/features/overlay/presentation/overlay_painter.dart';
+import 'package:surveycam/features/overlay/presentation/overlay_settings_provider.dart';
 
 final overlayViewModelProvider =
 StateNotifierProvider<OverlayViewModel, void>((ref) {
@@ -33,6 +34,8 @@ class OverlayViewModel extends StateNotifier<void> {
         bool mirror = false,
       }) async {
     try {
+      final settings = ref.read(overlaySettingsProvider);
+
       // ✅ CALL VIA CLASS NAME: WatermarkProcessor.drawOverlay
       final bytes = await WatermarkProcessor.drawOverlay(
         original,
@@ -43,6 +46,7 @@ class OverlayViewModel extends StateNotifier<void> {
         decodedImage: decodedImage,
         aspectRatio: aspectRatio,
         mirror: mirror,
+        settings: settings,
       );
 
       return bytes;

@@ -1,7 +1,9 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:uuid/uuid.dart';
-import '../data/note_storage.dart';
-import '../domain/saved_note.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:surveycam/features/overlay/data/note_storage.dart';
+import 'package:surveycam/features/overlay/domain/saved_note.dart';
+
 
 final savedNotesProvider =
 StateNotifierProvider<SavedNotesController, List<SavedNote>>(

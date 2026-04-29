@@ -1,6 +1,6 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:geolocator/geolocator.dart';
-import '../../../core/di/providers.dart';
+import 'package:surveycam/core/di/providers.dart';
 
 /// =======================================================
 /// SINGLE LOCATION FETCH

@@ -4,17 +4,18 @@ import 'package:camera/camera.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:surveycam/core/di/providers.dart';
+import 'package:surveycam/core/permissions/permission_service.dart';
+import 'package:surveycam/core/utils/device_orientation_provider.dart';
 
-import '../../../core/di/providers.dart';
-import '../../../core/permissions/permission_service.dart';
-import '../../../core/utils/device_orientation_provider.dart';
-import '../../gallery/presentation/image_preview_screen.dart';
-import '../../gallery/presentation/last_image_provider.dart';
-import '../../location/presentation/location_viewmodel.dart';
-import '../../overlay/presentation/captured_overlay_provider.dart';
-import '../../overlay/presentation/overlay_preview_state.dart';
-import '../data/CameraState.dart';
-import '../domain/camera_lens_type.dart';
+
+import 'package:surveycam/features/camera/data/CameraState.dart';
+import 'package:surveycam/features/camera/domain/camera_lens_type.dart';
+import 'package:surveycam/features/gallery/presentation/image_preview_screen.dart';
+import 'package:surveycam/features/gallery/presentation/last_image_provider.dart';
+import 'package:surveycam/features/location/presentation/location_viewmodel.dart';
+import 'package:surveycam/features/overlay/presentation/captured_overlay_provider.dart';
+import 'package:surveycam/features/overlay/presentation/overlay_preview_state.dart';
 
 final cameraViewModelProvider =
 StateNotifierProvider<CameraViewModel, CameraState>((ref) {

@@ -4,15 +4,17 @@ import 'package:flutter/services.dart';
 import 'package:flutter_svg/flutter_svg.dart' as svg;
 import 'package:vector_graphics/vector_graphics.dart';
 
-import '../domain/WatermarkPosition.dart';
-import '../domain/overlay_model.dart';
-import 'live_overlay_painter.dart';
+import 'package:surveycam/features/overlay/domain/WatermarkPosition.dart';
+import 'package:surveycam/features/overlay/domain/overlay_model.dart';
+import 'package:surveycam/features/overlay/domain/overlay_settings.dart';
+import 'package:surveycam/features/overlay/presentation/live_overlay_painter.dart';
 
 class PreviewOverlayPainter extends CustomPainter {
   final OverlayData data;
   final bool showOverlay;
   final bool showWatermark;
   final DeviceOrientation orientation;
+  final OverlaySettings settings;
 
   /// ✅ Preloaded SVG
   final PictureInfo? svgPicture;
@@ -23,6 +25,7 @@ class PreviewOverlayPainter extends CustomPainter {
     required this.showWatermark,
     required this.orientation,
     required this.svgPicture,
+    this.settings = const OverlaySettings(),
   });
 
   /// ✅ Load SVG once before using painter
@@ -42,7 +45,7 @@ class PreviewOverlayPainter extends CustomPainter {
 
     /// 📍 MAIN OVERLAY
     if (showOverlay) {
-      final painter = LiveOverlayPainter(data, orientation);
+      final painter = LiveOverlayPainter(data, orientation, settings: settings);
       painter.paint(canvas, size);
     }
 
@@ -96,11 +99,11 @@ class PreviewOverlayPainter extends CustomPainter {
           color: Colors.white,
           fontSize: baseSize * 0.045,
           fontWeight: FontWeight.bold,
-          shadows: const [
+          shadows: [
             Shadow(
               blurRadius: 4,
-              color: Colors.black54,
-              offset: Offset(1, 1),
+              color: Colors.black.withOpacity(0.5),
+              offset: const Offset(1, 1),
             ),
           ],
         ),
@@ -156,6 +159,7 @@ class PreviewOverlayPainter extends CustomPainter {
         oldDelegate.showWatermark != showWatermark ||
         oldDelegate.data != data ||
         oldDelegate.orientation != orientation ||
-        oldDelegate.svgPicture != svgPicture;
+        oldDelegate.svgPicture != svgPicture ||
+        oldDelegate.settings != settings;
   }
 }

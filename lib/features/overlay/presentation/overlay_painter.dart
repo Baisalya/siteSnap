@@ -9,9 +9,10 @@ import 'package:flutter_svg/flutter_svg.dart' as svg;
 import 'package:image/image.dart' as img;
 import 'package:vector_graphics/vector_graphics.dart';
 
-import '../../camera/data/CameraState.dart';
-import '../domain/overlay_model.dart';
-import 'live_overlay_painter.dart';
+import 'package:surveycam/features/camera/data/CameraState.dart';
+import 'package:surveycam/features/overlay/domain/overlay_model.dart';
+import 'package:surveycam/features/overlay/domain/overlay_settings.dart';
+import 'package:surveycam/features/overlay/presentation/live_overlay_painter.dart';
 
 class WatermarkProcessor {
   static const String assetName = 'Assets/app_logo.svg';
@@ -73,6 +74,7 @@ class WatermarkProcessor {
         ui.Image? decodedImage,
         CameraAspectRatio? aspectRatio,
         bool mirror = false,
+        OverlaySettings settings = const OverlaySettings(),
       }) async {
     final ui.Image uiImage;
     if (decodedImage != null) {
@@ -155,7 +157,7 @@ class WatermarkProcessor {
 
     // Overlay
     if (showOverlay) {
-      final overlayPainter = LiveOverlayPainter(data, orientation);
+      final overlayPainter = LiveOverlayPainter(data, orientation, settings: settings);
       overlayPainter.paint(
         canvas,
         Size(srcRect.width, srcRect.height),
@@ -184,11 +186,11 @@ class WatermarkProcessor {
             color: Colors.white,
             fontSize: baseSize * 0.045,
             fontWeight: FontWeight.bold,
-            shadows: const [
+            shadows: [
               Shadow(
                 blurRadius: 6,
-                color: Colors.black,
-                offset: Offset(1, 1),
+                color: Colors.black.withOpacity(0.5),
+                offset: const Offset(1, 1),
               ),
             ],
           ),

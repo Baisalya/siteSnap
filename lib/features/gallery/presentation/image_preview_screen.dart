@@ -4,15 +4,15 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_svg/flutter_svg.dart';
 import 'package:surveycam/features/camera/domain/camera_lens_type.dart';
+import 'package:surveycam/features/overlay/presentation/overlay_settings_provider.dart';
 
-import '../../../core/utils/gallery_saver.dart';
-import '../../overlay/presentation/captured_overlay_provider.dart';
-import '../../overlay/presentation/overlay_preview_state.dart';
-import '../../overlay/presentation/overlay_viewmodel.dart';
-import '../../camera/presentation/camera_viewmodel.dart';
-import '../../camera/presentation/note_input_sheet.dart';
-import '../../overlay/presentation/preview_overlay_painter.dart';
-import '../../../core/utils/watermark_support_dialog.dart';
+import 'package:surveycam/features/overlay/presentation/captured_overlay_provider.dart';
+import 'package:surveycam/features/overlay/presentation/overlay_preview_state.dart';
+import 'package:surveycam/features/overlay/presentation/overlay_viewmodel.dart';
+import 'package:surveycam/features/camera/presentation/camera_viewmodel.dart';
+import 'package:surveycam/features/camera/presentation/note_input_sheet.dart';
+import 'package:surveycam/features/overlay/presentation/preview_overlay_painter.dart';
+import 'package:surveycam/core/utils/watermark_support_dialog.dart';
 
 class ImagePreviewScreen extends ConsumerStatefulWidget {
   final File originalFile;
@@ -147,6 +147,7 @@ class _ImagePreviewScreenState
     final captured = ref.watch(capturedOverlayProvider);
     final live = ref.watch(overlayPreviewProvider);
     final cameraState = ref.watch(cameraViewModelProvider);
+    final settings = ref.watch(overlaySettingsProvider);
 
     final overlayData = (captured ?? live).copyWith(
       note: live.note,
@@ -197,7 +198,9 @@ class _ImagePreviewScreenState
                                         showWatermark: _showTextWatermark,
                                         orientation:
                                             cameraState.captureOrientation ??
-                                                cameraState.orientation, svgPicture: _svgPicture,
+                                                cameraState.orientation,
+                                        svgPicture: _svgPicture,
+                                        settings: settings,
                                       ),
                                     ),
                                   ),

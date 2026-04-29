@@ -1,6 +1,6 @@
 import 'package:camera/camera.dart';
-import '../domain/camera_repository.dart';
-import '../domain/camera_lens_type.dart';
+import 'package:surveycam/features/camera/domain/camera_lens_type.dart';
+import 'package:surveycam/features/camera/domain/camera_repository.dart';
 
 class CameraRepositoryImpl implements CameraRepository {
   late CameraController _controller;

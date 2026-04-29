@@ -1,6 +1,6 @@
 import 'dart:convert';
 import 'package:shared_preferences/shared_preferences.dart';
-import '../domain/saved_note.dart';
+import 'package:surveycam/features/overlay/domain/saved_note.dart';
 
 class NoteStorage {
   static const _key = 'saved_watermark_notes';

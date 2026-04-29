@@ -2,14 +2,16 @@ import 'dart:math';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
-import '../domain/overlay_model.dart';
-import '../domain/WatermarkPosition.dart';
+import 'package:surveycam/features/overlay/domain/overlay_model.dart';
+import 'package:surveycam/features/overlay/domain/WatermarkPosition.dart';
+import 'package:surveycam/features/overlay/domain/overlay_settings.dart';
 
 class LiveOverlayPainter extends CustomPainter {
   final OverlayData data;
   final DeviceOrientation orientation;
+  final OverlaySettings settings;
 
-  LiveOverlayPainter(this.data, this.orientation);
+  LiveOverlayPainter(this.data, this.orientation, {this.settings = const OverlaySettings()});
 
   @override
   void paint(Canvas canvas, Size size) {
@@ -58,7 +60,7 @@ class LiveOverlayPainter extends CustomPainter {
     // PROFESSIONAL TEXT STYLE
     // ===============================
     final textStyle = TextStyle(
-      color: Colors.black,
+      color: settings.textColor,
       fontSize: baseSize * 0.032, // More refined size
       fontWeight: FontWeight.w600,
       height: 1.2,
@@ -68,7 +70,7 @@ class LiveOverlayPainter extends CustomPainter {
     final warningStyle = textStyle.copyWith(color: Colors.redAccent);
     final noteStyle = textStyle.copyWith(
       fontSize: baseSize * 0.035, 
-      color: Colors.blueGrey[900],
+      color: settings.textColor,
       fontStyle: FontStyle.italic,
     );
 
@@ -77,25 +79,43 @@ class LiveOverlayPainter extends CustomPainter {
     // ===============================
     final List<TextSpan> spans = [];
 
-    if (data.dateTime.isNotEmpty) {
+    if (settings.showDateTime && data.dateTime.isNotEmpty) {
       spans.add(TextSpan(text: "${data.dateTime}\n", style: textStyle));
     }
 
     if (data.locationWarning != null) {
       spans.add(TextSpan(text: "${data.locationWarning}\n", style: warningStyle));
-    } else {
+    } else if (settings.showCoordinates) {
       spans.add(TextSpan(
         text: "Latitude: ${data.latitude.toStringAsFixed(6)}\nLongitude: ${data.longitude.toStringAsFixed(6)}\n",
         style: textStyle,
       ));
     }
 
-    spans.add(TextSpan(
-      text: "ALT: ${data.altitude.toStringAsFixed(1)}m  DIR: ${data.direction} ${data.heading.toStringAsFixed(0)}°\n",
-      style: textStyle,
-    ));
+    String altDirText = "";
+    if (settings.showAltitude) {
+      altDirText += "ALT: ${data.altitude.toStringAsFixed(1)}m  ";
+    }
+    if (settings.showDirection) {
+      altDirText += "DIR: ${data.direction} ${data.heading.toStringAsFixed(0)}°";
+    }
+    if (altDirText.isNotEmpty) {
+      spans.add(TextSpan(text: "$altDirText\n", style: textStyle));
+    }
 
-    if (data.note.isNotEmpty) {
+    if (settings.showWeather && data.weather != null) {
+      spans.add(TextSpan(text: "Weather: ${data.weather}\n", style: textStyle));
+    }
+
+    if (settings.showHumidity && data.humidity != null) {
+      spans.add(TextSpan(text: "Humidity: ${data.humidity}\n", style: textStyle));
+    }
+
+    if (settings.showAir && data.air != null) {
+      spans.add(TextSpan(text: "Air: ${data.air}\n", style: textStyle));
+    }
+
+    if (settings.showNote && data.note.isNotEmpty) {
       spans.add(TextSpan(text: data.note, style: noteStyle));
     }
 
@@ -131,7 +151,7 @@ class LiveOverlayPainter extends CustomPainter {
     // BACKGROUND CARD
     // ===============================
     final bgPaint = Paint()
-      ..color = Colors.white.withOpacity(0.85); // More solid for readability
+      ..color = settings.backgroundColor.withOpacity(settings.backgroundOpacity);
 
     // Subtle Border
     final borderPaint = Paint()
@@ -159,6 +179,7 @@ class LiveOverlayPainter extends CustomPainter {
   @override
   bool shouldRepaint(covariant LiveOverlayPainter oldDelegate) {
     return oldDelegate.data != data ||
-        oldDelegate.orientation != orientation;
+        oldDelegate.orientation != orientation ||
+        oldDelegate.settings != settings;
   }
 }

@@ -5,22 +5,26 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:geolocator/geolocator.dart';
+import 'package:surveycam/core/services/location_service.dart';
+import 'package:surveycam/core/services/weather_service.dart';
+import 'package:surveycam/core/utils/datetime_utils.dart';
+import 'package:surveycam/core/utils/developer_info_dialog.dart';
+import 'package:surveycam/core/utils/device_orientation_provider.dart';
+import 'package:surveycam/core/utils/direction_utils.dart';
+import 'package:surveycam/core/utils/focus_point_provider.dart';
+import 'package:surveycam/features/compass/presentation/compass_provider.dart';
+import 'package:surveycam/features/gallery/data/gallery_folder_screen.dart';
+import 'package:surveycam/features/gallery/presentation/last_image_provider.dart';
+import 'package:surveycam/features/location/presentation/location_viewmodel.dart';
+import 'package:surveycam/features/overlay/domain/overlay_model.dart';
+import 'package:surveycam/features/overlay/presentation/live_overlay_painter.dart';
+import 'package:surveycam/features/overlay/presentation/overlay_preview_state.dart';
+import 'package:surveycam/features/overlay/presentation/overlay_settings_provider.dart';
+import 'package:surveycam/privacypolicy/privacyProvider.dart';
 import '../domain/camera_lens_type.dart';
 
-import '../../../core/utils/datetime_utils.dart';
-import '../../../core/utils/developer_info_dialog.dart';
-import '../../../core/utils/device_orientation_provider.dart';
-import '../../../core/utils/direction_utils.dart';
-import '../../../core/utils/focus_point_provider.dart';
-import '../../../privacypolicy/privacyProvider.dart';
-import '../../compass/presentation/compass_provider.dart';
-import '../../gallery/data/gallery_folder_screen.dart';
-import '../../gallery/presentation/last_image_provider.dart';
-import '../../location/presentation/location_viewmodel.dart';
-import '../../overlay/presentation/live_overlay_painter.dart';
-import '../../overlay/presentation/overlay_preview_state.dart';
-import '../data/CameraState.dart';
-import '../../../core/services/location_service.dart';
+
+import 'package:surveycam/features/camera/data/CameraState.dart';
 import 'camera_settings_provider.dart';
 import 'camera_viewmodel.dart';
 import 'capture_button.dart';
@@ -138,6 +142,20 @@ class _CameraScreenState extends ConsumerState<CameraScreen> {
                 altitude: position.altitude,
                 clearLocationWarning: true,
               );
+
+          // Fetch Weather, Humidity, Air Quality
+          final weatherData = await WeatherService.fetchWeather(
+            position.latitude,
+            position.longitude,
+          );
+          if (weatherData != null && mounted) {
+            ref.read(overlayPreviewProvider.notifier).state =
+                ref.read(overlayPreviewProvider.notifier).state.copyWith(
+                  weather: weatherData.temp,
+                  humidity: weatherData.humidity,
+                  air: weatherData.airQuality,
+                );
+          }
 
           final settings = ref.read(cameraSettingsProvider);
           if (settings.autoFetchLocation) {
@@ -304,8 +322,13 @@ class _CameraScreenState extends ConsumerState<CameraScreen> {
                                 builder: (context, ref, child) {
                                   final overlayData = ref.watch(overlayPreviewProvider);
                                   final orientation = ref.watch(deviceOrientationProvider);
+                                  final settings = ref.watch(overlaySettingsProvider);
                                   return CustomPaint(
-                                    painter: LiveOverlayPainter(overlayData, orientation),
+                                    painter: LiveOverlayPainter(
+                                      overlayData as OverlayData,
+                                      orientation,
+                                      settings: settings,
+                                    ),
                                   );
                                 },
                               ),

@@ -1,5 +1,5 @@
 import 'package:flutter_compass/flutter_compass.dart';
-import '../domain/compass_repository.dart';
+import 'package:surveycam/features/compass/domain/compass_repository.dart';
 
 class CompassRepositoryImpl implements CompassRepository {
   @override
