@@ -55,7 +55,7 @@ class _SplashScreenState extends ConsumerState<SplashScreen>
         fit: StackFit.expand,
         children: [
           Image.asset(
-            'A ssets/splash_bg.png',
+            'Assets/splash_bg.png',
             fit: BoxFit.cover,
           ),
           Container(
