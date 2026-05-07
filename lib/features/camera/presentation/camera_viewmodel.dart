@@ -584,23 +584,10 @@ class CameraViewModel extends StateNotifier<CameraState>
       final overlayData = ref.read(overlayPreviewProvider);
       final orientation = ref.read(deviceOrientationProvider);
       
-      double width, height;
-      if (wasMerged) {
-        // We now scale to 1080x1920 in mergeVideos
-        width = 1080;
-        height = 1920;
-      } else {
-        // Fallback to controller preview size
-        width = controller.value.previewSize?.height ?? 1920;
-        height = controller.value.previewSize?.width ?? 1080;
-
-        // Swap for landscape to match how FFmpeg handles it
-        if (orientation == DeviceOrientation.landscapeLeft || orientation == DeviceOrientation.landscapeRight) {
-          final temp = width;
-          width = height;
-          height = temp;
-        }
-      }
+      // Always use 1080x1920 for video overlays to ensure consistency.
+      // This matches the scaling now applied in VideoWatermarkProcessor.applyOverlayToVideo.
+      const double width = 1080;
+      const double height = 1920;
 
       debugPrint("Generating overlay image ($width x $height)...");
       final overlayBytes = await VideoWatermarkProcessor.generateVideoOverlayImage(

@@ -180,8 +180,9 @@ class VideoWatermarkProcessor {
 
       final outputPath = p.join(tempDir.path, 'processed_video_${DateTime.now().millisecondsSinceEpoch}.mp4');
 
-      // Optimized FFmpeg command for speed
-      final command = '-i "$videoPath" -i "${overlayFile.path}" -filter_complex "overlay=0:0" -c:v libx264 -preset ultrafast -crf 23 -codec:a copy -y "$outputPath"';
+      // Optimized FFmpeg command for speed with explicit scaling to 1080x1920
+      const String filter = '[0:v]scale=1080:1920:force_original_aspect_ratio=decrease,pad=1080:1920:(1080-iw)/2:(1920-ih)/2,setsar=1[v];[v][1:v]overlay=0:0';
+      final command = '-i "$videoPath" -i "${overlayFile.path}" -filter_complex "$filter" -c:v libx264 -preset ultrafast -crf 23 -codec:a copy -y "$outputPath"';
 
       final session = await FFmpegKit.execute(command);
       final returnCode = await session.getReturnCode();
