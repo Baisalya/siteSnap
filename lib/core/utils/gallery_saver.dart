@@ -26,9 +26,9 @@ class GallerySaver {
       _prefs!.setInt(_photoCountKey, count);
 
       final now = DateTime.now();
-      final name = 'Surveycam_${DateFormat('yyyyMMdd_HHmmss').format(now)}_$count';
+      // final name = 'Surveycam_${DateFormat('yyyyMMdd_HHmmss').format(now)}_$count';
 
-      await Gal.putImageBytes(bytes, name: name, album: 'surveycam');
+      await Gal.putImageBytes(bytes, album: 'surveycam');
     } catch (e) {
       throw Exception("Failed to save image bytes: $e");
     }
@@ -65,6 +65,29 @@ class GallerySaver {
       return fileToSave;
     } catch (e) {
       throw Exception("Failed to save image to gallery: $e");
+    }
+  }
+
+  static Future<void> saveVideo(String path) async {
+    try {
+      if (_hasAccessCached != true) {
+        _hasAccessCached = await Gal.hasAccess();
+        if (_hasAccessCached != true) {
+          _hasAccessCached = await Gal.requestAccess();
+        }
+      }
+
+      _prefs ??= await SharedPreferences.getInstance();
+      int count = _prefs!.getInt(_photoCountKey) ?? 0;
+      count++;
+      _prefs!.setInt(_photoCountKey, count);
+
+      final now = DateTime.now();
+      // final name = 'Surveycam_${DateFormat('yyyyMMdd_HHmmss').format(now)}_$count';
+
+      await Gal.putVideo(path, album: 'surveycam');
+    } catch (e) {
+      throw Exception("Failed to save video to gallery: $e");
     }
   }
 }

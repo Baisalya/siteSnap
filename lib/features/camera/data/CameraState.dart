@@ -8,6 +8,11 @@ enum CameraAspectRatio {
   ratio16_9,
 }
 
+enum CameraMode {
+  photo,
+  video,
+}
+
 /// =======================================================
 /// ✅ CAMERA STATE
 /// =======================================================
@@ -17,6 +22,8 @@ class CameraState {
   final FlashMode flashMode;
   final CameraLensType currentLens;
   final bool isCapturing;
+  final bool isRecording;
+  final CameraMode cameraMode;
   final bool isManualFocus;
   final CameraAspectRatio aspectRatio;
 
@@ -37,15 +44,20 @@ class CameraState {
 
   final String? error;
 
+  final List<XFile> videoSegments;
+
   const CameraState({
     required this.isReady,
     this.controller,
     this.flashMode = FlashMode.off,
     this.currentLens = CameraLensType.normal,
     this.isCapturing = false,
+    this.isRecording = false,
+    this.cameraMode = CameraMode.photo,
     this.isManualFocus = false,
     this.aspectRatio = CameraAspectRatio.ratio16_9,
     this.error,
+    this.videoSegments = const [],
 
     /// 🔥 DEFAULT
     this.exposure = 0.0,
@@ -66,6 +78,8 @@ class CameraState {
     FlashMode? flashMode,
     CameraLensType? currentLens,
     bool? isCapturing,
+    bool? isRecording,
+    CameraMode? cameraMode,
     bool? isManualFocus,
     CameraAspectRatio? aspectRatio,
     String? error,
@@ -81,6 +95,7 @@ class CameraState {
     DeviceOrientation? orientation,
     DeviceOrientation? captureOrientation,
     CameraLensType? captureLens,
+    List<XFile>? videoSegments,
   }) {
     return CameraState(
       isReady: isReady ?? this.isReady,
@@ -88,9 +103,12 @@ class CameraState {
       flashMode: flashMode ?? this.flashMode,
       currentLens: currentLens ?? this.currentLens,
       isCapturing: isCapturing ?? this.isCapturing,
+      isRecording: isRecording ?? this.isRecording,
+      cameraMode: cameraMode ?? this.cameraMode,
       isManualFocus: isManualFocus ?? this.isManualFocus,
       aspectRatio: aspectRatio ?? this.aspectRatio,
       error: error ?? this.error,
+      videoSegments: videoSegments ?? this.videoSegments,
 
       /// 🔥 APPLY
     exposure: exposure ?? this.exposure,

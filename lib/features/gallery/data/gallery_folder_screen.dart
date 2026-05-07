@@ -4,6 +4,10 @@ import 'package:permission_handler/permission_handler.dart';
 import 'package:share_plus/share_plus.dart';
 import 'package:surveycam/features/gallery/data/sitesnap_gallery_repository.dart';
 import 'package:surveycam/features/gallery/presentation/gallery_image_viewer.dart';
+import 'package:surveycam/features/gallery/presentation/video_player_screen.dart';
+import 'package:flutter_video_thumbnail_plus/flutter_video_thumbnail_plus.dart';
+import 'package:path_provider/path_provider.dart';
+import 'package:path/path.dart' as p;
 
 class GalleryFolderScreen extends StatefulWidget {
   const GalleryFolderScreen({super.key});
@@ -166,34 +170,43 @@ class _GalleryFolderScreenState extends State<GalleryFolderScreen> {
 
   /// ================= GRID ITEM =================
   Widget _buildGridItem(File file, int index, bool isSelected) {
+    final isVideo = file.path.toLowerCase().endsWith('.mp4') ||
+        file.path.toLowerCase().endsWith('.mov');
+
     return Material(
       color: Colors.transparent,
       child: InkWell(
         borderRadius: BorderRadius.circular(12),
-
         onLongPress: () {
           setState(() {
             selectionMode = true;
             selectedImages.add(file);
           });
         },
-
         onTap: () {
           if (selectionMode) {
             _toggleSelection(file);
           } else {
-            Navigator.push(
-              context,
-              MaterialPageRoute(
-                builder: (_) => GalleryImageViewer(
-                  images: images,
-                  initialIndex: index,
+            if (isVideo) {
+              Navigator.push(
+                context,
+                MaterialPageRoute(
+                  builder: (_) => VideoPlayerScreen(file: file),
                 ),
-              ),
-            );
+              );
+            } else {
+              Navigator.push(
+                context,
+                MaterialPageRoute(
+                  builder: (_) => GalleryImageViewer(
+                    images: images,
+                    initialIndex: index,
+                  ),
+                ),
+              );
+            }
           }
         },
-
         child: AnimatedContainer(
           duration: const Duration(milliseconds: 200),
           curve: Curves.easeInOut,
@@ -205,23 +218,50 @@ class _GalleryFolderScreenState extends State<GalleryFolderScreen> {
           ),
           child: Stack(
             children: [
-
-              /// 🔥 HERO IMAGE
+              /// 🔥 HERO IMAGE / THUMBNAIL
               ClipRRect(
                 borderRadius: BorderRadius.circular(10),
                 child: Hero(
                   tag: file.path,
-                  child: Image.file(
-                    file,
-                    fit: BoxFit.cover,
-                    width: double.infinity,
-                    height: double.infinity,
-
-                    /// 🚀 PERFORMANCE BOOST
-                    cacheWidth: 300,
-                  ),
+                  child: isVideo
+                      ? FutureBuilder<String?>(
+                          future: _generateThumbnail(file.path),
+                          builder: (context, snapshot) {
+                            if (snapshot.hasData && snapshot.data != null) {
+                              return Image.file(
+                                File(snapshot.data!),
+                                fit: BoxFit.cover,
+                                width: double.infinity,
+                                height: double.infinity,
+                                cacheWidth: 300,
+                              );
+                            }
+                            return Container(
+                              color: Colors.grey[900],
+                              child: const Icon(Icons.video_library,
+                                  color: Colors.white24),
+                            );
+                          },
+                        )
+                      : Image.file(
+                          file,
+                          fit: BoxFit.cover,
+                          width: double.infinity,
+                          height: double.infinity,
+                          cacheWidth: 300,
+                        ),
                 ),
               ),
+
+              /// Play icon for videos
+              if (isVideo)
+                const Center(
+                  child: Icon(
+                    Icons.play_circle_outline,
+                    color: Colors.white70,
+                    size: 32,
+                  ),
+                ),
 
               /// overlay
               if (isSelected)
@@ -252,6 +292,29 @@ class _GalleryFolderScreenState extends State<GalleryFolderScreen> {
         ),
       ),
     );
+  }
+
+  Future<String?> _generateThumbnail(String videoPath) async {
+    final tempDir = await getTemporaryDirectory();
+    final fileName = p.basenameWithoutExtension(videoPath);
+    final thumbnailPath = p.join(tempDir.path, '$fileName.jpg');
+
+    if (await File(thumbnailPath).exists()) {
+      return thumbnailPath;
+    }
+
+    try {
+      return await FlutterVideoThumbnailPlus.thumbnailFile(
+        video: videoPath,
+        thumbnailPath: tempDir.path,
+        imageFormat: ImageFormat.jpeg,
+        maxWidth: 300,
+        quality: 75,
+      );
+    } catch (e) {
+      debugPrint("Thumbnail error: $e");
+      return null;
+    }
   }
 
   /// ================= LOADING =================

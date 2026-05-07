@@ -16,6 +16,10 @@ import 'package:surveycam/features/gallery/presentation/last_image_provider.dart
 import 'package:surveycam/features/location/presentation/location_viewmodel.dart';
 import 'package:surveycam/features/overlay/presentation/captured_overlay_provider.dart';
 import 'package:surveycam/features/overlay/presentation/overlay_preview_state.dart';
+import 'package:surveycam/features/overlay/presentation/overlay_painter.dart';
+import 'package:surveycam/features/overlay/presentation/overlay_settings_provider.dart';
+import 'package:surveycam/features/overlay/presentation/video_watermark_processor.dart';
+import 'package:surveycam/core/utils/gallery_saver.dart';
 
 final cameraViewModelProvider =
 StateNotifierProvider<CameraViewModel, CameraState>((ref) {
@@ -344,6 +348,20 @@ class CameraViewModel extends StateNotifier<CameraState>
   Future<void> switchCamera() async {
     if (_isInitializing || _isRestarting) return;
 
+    final wasRecording = state.isRecording;
+    if (wasRecording) {
+      try {
+        final repo = ref.read(cameraRepositoryProvider);
+        final segment = await repo.stopVideoRecording();
+        state = state.copyWith(
+          videoSegments: [...state.videoSegments, segment],
+          isRecording: false,
+        );
+      } catch (e) {
+        debugPrint("Error saving segment during switch: $e");
+      }
+    }
+
     final nextLens = state.currentLens == CameraLensType.front
         ? CameraLensType.normal
         : CameraLensType.front;
@@ -376,14 +394,22 @@ class CameraViewModel extends StateNotifier<CameraState>
           maxZoom: maxZoom,
           error: null,
         );
+
+        if (wasRecording) {
+          await startVideoRecording();
+        }
       }
     } catch (e) {
       debugPrint("Switch camera error: $e");
-      state = state.copyWith(isReady: false, error: e.toString());
+      state = state.copyWith(isReady: false, error: e.toString(), isRecording: false);
     }
   }
 
   // ================= CAPTURE =================
+
+  void setCameraMode(CameraMode mode) {
+    state = state.copyWith(cameraMode: mode);
+  }
 
   Future<void> capture(BuildContext context) async {
     final controller = state.controller;
@@ -392,7 +418,16 @@ class CameraViewModel extends StateNotifier<CameraState>
         controller == null ||
         !controller.value.isInitialized ||
         controller.value.isTakingPicture ||
-        state.isCapturing) {
+        state.isCapturing ||
+        state.isRecording) {
+      if (state.isRecording) {
+        await stopVideoRecording(context);
+      }
+      return;
+    }
+
+    if (state.cameraMode == CameraMode.video) {
+      await startVideoRecording(clearSegments: true);
       return;
     }
     
@@ -477,6 +512,142 @@ class CameraViewModel extends StateNotifier<CameraState>
         debugPrint("Restoration error: $e");
       }
       state = state.copyWith(isCapturing: false);
+    }
+  }
+
+  Future<void> startVideoRecording({bool clearSegments = false}) async {
+    final controller = state.controller;
+    if (controller == null || !controller.value.isInitialized || state.isRecording) return;
+
+    try {
+      final repo = ref.read(cameraRepositoryProvider);
+      
+      if (state.flashMode == FlashMode.always && state.currentLens != CameraLensType.front) {
+        await controller.setFlashMode(FlashMode.torch);
+      }
+
+      await repo.startVideoRecording();
+      state = state.copyWith(
+        isRecording: true,
+        videoSegments: clearSegments ? [] : state.videoSegments,
+      );
+      unawaited(HapticFeedback.heavyImpact());
+    } catch (e) {
+      debugPrint("Start recording error: $e");
+    }
+  }
+
+  Future<void> stopVideoRecording(BuildContext context) async {
+    final controller = state.controller;
+    if (controller == null || !controller.value.isInitialized || !state.isRecording) return;
+
+    try {
+      final repo = ref.read(cameraRepositoryProvider);
+      final lastSegment = await repo.stopVideoRecording();
+      final allSegments = [...state.videoSegments, lastSegment];
+      
+      // Update state: stop recording but DON'T clear segments yet in case of failure
+      state = state.copyWith(isRecording: false);
+      unawaited(HapticFeedback.mediumImpact());
+
+      if (state.flashMode == FlashMode.always) {
+        await _softFlashQuench(controller);
+      }
+
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text("Processing video..."),
+            duration: Duration(milliseconds: 500),
+          ),
+        );
+      }
+
+      // 1. Merge segments if necessary
+      String finalVideoPath = lastSegment.path;
+      bool wasMerged = false;
+      if (allSegments.length > 1) {
+        debugPrint("Merging ${allSegments.length} segments...");
+        final mergedPath = await VideoWatermarkProcessor.mergeVideos(
+          allSegments.map((s) => s.path).toList(),
+        );
+        if (mergedPath != null) {
+          finalVideoPath = mergedPath;
+          wasMerged = true;
+          debugPrint("Merged video saved at: $finalVideoPath");
+        } else {
+          debugPrint("Merging failed, using last segment.");
+        }
+      }
+
+      // 2. Process video with overlay
+      final overlayData = ref.read(overlayPreviewProvider);
+      final orientation = ref.read(deviceOrientationProvider);
+      
+      double width, height;
+      if (wasMerged) {
+        // We now scale to 1080x1920 in mergeVideos
+        width = 1080;
+        height = 1920;
+      } else {
+        // Fallback to controller preview size
+        width = controller.value.previewSize?.height ?? 1920;
+        height = controller.value.previewSize?.width ?? 1080;
+
+        // Swap for landscape to match how FFmpeg handles it
+        if (orientation == DeviceOrientation.landscapeLeft || orientation == DeviceOrientation.landscapeRight) {
+          final temp = width;
+          width = height;
+          height = temp;
+        }
+      }
+
+      debugPrint("Generating overlay image ($width x $height)...");
+      final overlayBytes = await VideoWatermarkProcessor.generateVideoOverlayImage(
+        data: overlayData,
+        orientation: orientation,
+        width: width,
+        height: height,
+        settings: ref.read(overlaySettingsProvider),
+      );
+
+      debugPrint("Applying overlay to video...");
+      final processedPath = await VideoWatermarkProcessor.applyOverlayToVideo(
+        videoPath: finalVideoPath,
+        overlayBytes: overlayBytes,
+      );
+
+      if (processedPath != null) {
+        debugPrint("Video processed successfully: $processedPath");
+        await GallerySaver.saveVideo(processedPath);
+        if (context.mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text("Video saved to gallery")),
+          );
+        }
+        ref.read(lastImageProvider.notifier).state = File(processedPath);
+      } else {
+        debugPrint("Overlay processing failed, saving raw video.");
+        await GallerySaver.saveVideo(finalVideoPath);
+        if (context.mounted) {
+           ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text("Video saved (without overlay)")),
+          );
+        }
+        ref.read(lastImageProvider.notifier).state = File(finalVideoPath);
+      }
+
+      // 3. CLEANUP segments after successful save
+      state = state.copyWith(videoSegments: []);
+      
+    } catch (e) {
+      debugPrint("Stop recording error: $e");
+      state = state.copyWith(isRecording: false);
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text("Error saving video: $e")),
+        );
+      }
     }
   }
 

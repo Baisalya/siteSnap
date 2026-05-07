@@ -9,6 +9,8 @@ class survaycamGalleryRepository {
       // ✅ Check both "surveycam" and "survaycam" folders
       directories.add(Directory('/storage/emulated/0/Pictures/surveycam'));
       directories.add(Directory('/storage/emulated/0/Pictures/survaycam'));
+      directories.add(Directory('/storage/emulated/0/Movies/surveycam'));
+      directories.add(Directory('/storage/emulated/0/Movies/survaycam'));
     } else if (Platform.isIOS) {
       // ✅ iOS app documents folder
       final docDir = await getApplicationDocumentsDirectory();
@@ -27,7 +29,9 @@ class survaycamGalleryRepository {
           final path = file.path.toLowerCase();
           return path.endsWith('.jpg') ||
               path.endsWith('.jpeg') ||
-              path.endsWith('.png');
+              path.endsWith('.png') ||
+              path.endsWith('.mp4') ||
+              path.endsWith('.mov');
         });
         allFiles.addAll(files);
       }

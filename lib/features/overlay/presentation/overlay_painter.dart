@@ -189,7 +189,7 @@ class WatermarkProcessor {
             shadows: [
               Shadow(
                 blurRadius: 6,
-                color: Colors.black.withOpacity(0.5),
+                color: Colors.black.withValues(alpha: 0.5),
                 offset: const Offset(1, 1),
               ),
             ],
@@ -202,7 +202,7 @@ class WatermarkProcessor {
       const double spacing = 10;
       final double totalWidth = svgSize + spacing + textPainter.width;
 
-      /// ✅ FIXED POSITION LOGIC
+      /// ✅ RESTORED OLD POSITION LOGIC FOR PHOTOS
       final bool isLandscape =
           orientation == DeviceOrientation.landscapeLeft ||
               orientation == DeviceOrientation.landscapeRight;

@@ -18,6 +18,9 @@ dependencies:
   image: ^4.1.7
   path_provider: ^2.1.2
   photo_view: ^0.14.0
+  ffmpeg_kit_flutter_new_https_gpl: ^2.1.0
+  vector_graphics: ^1.1.11+1
+  path: ^1.9.0
 
   # Location & Sensors
   geolocator: ^10.1.0
@@ -48,6 +51,8 @@ dependencies:
   sensors_plus: ^4.0.2
   flutter_svg: ^2.2.1
   http: ^1.2.0
+  video_player: ^2.8.1
+  flutter_video_thumbnail_plus: ^1.0.6
 
   exif: ^3.1.4
 

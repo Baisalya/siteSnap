@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:photo_view/photo_view.dart';
 import 'package:photo_view/photo_view_gallery.dart';
 import 'package:share_plus/share_plus.dart';
+import 'package:surveycam/features/gallery/presentation/video_player_screen.dart';
 
 class GalleryImageViewer extends StatefulWidget {
   final List<File> images;
@@ -78,24 +79,52 @@ class _GalleryImageViewerState extends State<GalleryImageViewer> {
           : null,
 
       body: GestureDetector(
-        onTap: _toggleUI,
-
+        onTap: () {
+          final file = widget.images[currentIndex];
+          final isVideo = file.path.toLowerCase().endsWith('.mp4') ||
+              file.path.toLowerCase().endsWith('.mov');
+          if (isVideo) {
+            Navigator.push(
+              context,
+              MaterialPageRoute(
+                builder: (_) => VideoPlayerScreen(file: file),
+              ),
+            );
+          } else {
+            _toggleUI();
+          }
+        },
         child: Stack(
           children: [
-
             /// 📷 PROFESSIONAL GALLERY
             PhotoViewGallery.builder(
               pageController: _pageController,
               itemCount: widget.images.length,
-
               onPageChanged: (index) {
                 setState(() {
                   currentIndex = index;
                 });
               },
-
               builder: (context, index) {
                 final file = widget.images[index];
+                final isVideo = file.path.toLowerCase().endsWith('.mp4') ||
+                    file.path.toLowerCase().endsWith('.mov');
+
+                if (isVideo) {
+                  return PhotoViewGalleryPageOptions.customChild(
+                    child: Stack(
+                      alignment: Alignment.center,
+                      children: [
+                        const Icon(Icons.video_library,
+                            color: Colors.white24, size: 100),
+                        const Icon(Icons.play_circle_outline,
+                            color: Colors.white, size: 80),
+                      ],
+                    ),
+                    initialScale: PhotoViewComputedScale.contained,
+                    heroAttributes: PhotoViewHeroAttributes(tag: file.path),
+                  );
+                }
 
                 return PhotoViewGalleryPageOptions(
                   imageProvider: FileImage(file),
@@ -103,18 +132,14 @@ class _GalleryImageViewerState extends State<GalleryImageViewer> {
                   /// 🔥 PERFECT ZOOM CONFIG
                   minScale: PhotoViewComputedScale.contained,
                   maxScale: PhotoViewComputedScale.covered * 3,
-
                   initialScale: PhotoViewComputedScale.contained,
-
                   heroAttributes: PhotoViewHeroAttributes(
                     tag: file.path,
                   ),
                 );
               },
-
               scrollPhysics: const BouncingScrollPhysics(),
-              backgroundDecoration:
-              const BoxDecoration(color: Colors.black),
+              backgroundDecoration: const BoxDecoration(color: Colors.black),
             ),
 
             /// 🔻 BOTTOM CONTROLS (optional)

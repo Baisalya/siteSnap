@@ -43,6 +43,8 @@ class _CameraScreenState extends ConsumerState<CameraScreen> {
   bool _showExposure = false;
   Timer? _dateTimer;
   Timer? _focusTimer;
+  Timer? _recordingTimer;
+  int _recordingSeconds = 0;
   bool _isCapturing = false;
   
   @override
@@ -64,10 +66,37 @@ class _CameraScreenState extends ConsumerState<CameraScreen> {
     );
   }
 
+  void _startRecordingTimer() {
+    _recordingSeconds = 0;
+    _recordingTimer?.cancel();
+    _recordingTimer = Timer.periodic(const Duration(seconds: 1), (timer) {
+      if (mounted) {
+        setState(() {
+          _recordingSeconds++;
+        });
+      }
+    });
+  }
+
+  void _stopRecordingTimer() {
+    _recordingTimer?.cancel();
+    _recordingTimer = null;
+    setState(() {
+      _recordingSeconds = 0;
+    });
+  }
+
+  String _formatDuration(int seconds) {
+    final minutes = (seconds / 60).floor();
+    final remainingSeconds = seconds % 60;
+    return '${minutes.toString().padLeft(2, '0')}:${remainingSeconds.toString().padLeft(2, '0')}';
+  }
+
   @override
   void dispose() {
     _dateTimer?.cancel();
     _focusTimer?.cancel();
+    _recordingTimer?.cancel();
     super.dispose();
   }
 
@@ -518,67 +547,140 @@ class _CameraScreenState extends ConsumerState<CameraScreen> {
 
                 /// BOTTOM CONTROLS
                 Container(
-                  height: 140,
-                  padding: const EdgeInsets.symmetric(horizontal: 24),
+                  padding: const EdgeInsets.only(top: 8),
                   color: isSelfieFlashActive ? const Color(0xFFFDF0ED) : Colors.black,
-                  child: Row(
-                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
                     children: [
-                      Column(
-                        mainAxisSize: MainAxisSize.min,
+                      // Mode Selector
+                      Row(
+                        mainAxisAlignment: MainAxisAlignment.center,
                         children: [
-                          IconButton(
-                            icon: Icon(
-                              cameraState.flashMode == FlashMode.always
-                                  ? Icons.flash_on
-                                  : Icons.flash_off,
-                              color: cameraState.flashMode == FlashMode.off
-                                  ? uiColor.withOpacity(0.5)
-                                  : uiColor,
-                            ),
-                            onPressed: cameraVM.cycleFlashMode,
+                          _buildModeButton(
+                            label: "PHOTO",
+                            active: cameraState.cameraMode == CameraMode.photo,
+                            onTap: () => cameraVM.setCameraMode(CameraMode.photo),
+                            uiColor: uiColor,
                           ),
-                          Text(
-                            cameraState.flashMode == FlashMode.always ? "ON" : "OFF",
-                            style: TextStyle(
-                              color: uiColor,
-                              fontSize: 10,
-                              fontWeight: FontWeight.bold,
-                            ),
+                          const SizedBox(width: 24),
+                          _buildModeButton(
+                            label: "VIDEO",
+                            active: cameraState.cameraMode == CameraMode.video,
+                            onTap: () => cameraVM.setCameraMode(CameraMode.video),
+                            uiColor: uiColor,
                           ),
                         ],
                       ),
-                      CaptureButton(
-                        onCapture: () async {
-                          if (!cameraState.isReady || _isCapturing) return;
-                          setState(() => _isCapturing = true);
-                          SystemSound.play(SystemSoundType.click);
-                          HapticFeedback.mediumImpact();
-                          try {
-                            await cameraVM.capture(context);
-                          } catch (e) {
-                            debugPrint("Capture error: $e");
-                          }
-                          await Future.delayed(const Duration(milliseconds: 80));
-                          if (mounted) {
-                            setState(() => _isCapturing = false);
-                          }
-                        },
-                      ),
-                      GestureDetector(
-                        onTap: () {
-                          Navigator.push(
-                            context,
-                            MaterialPageRoute(
-                              builder: (_) => const GalleryFolderScreen(),
+                      const SizedBox(height: 8),
+                      Container(
+                        height: 120,
+                        padding: const EdgeInsets.symmetric(horizontal: 24),
+                        child: Row(
+                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                          children: [
+                            Column(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                IconButton(
+                                  icon: Icon(
+                                    cameraState.flashMode == FlashMode.always
+                                        ? Icons.flash_on
+                                        : Icons.flash_off,
+                                    color: cameraState.flashMode == FlashMode.off
+                                        ? uiColor.withOpacity(0.5)
+                                        : uiColor,
+                                  ),
+                                  onPressed: cameraVM.cycleFlashMode,
+                                ),
+                                Text(
+                                  cameraState.flashMode == FlashMode.always ? "ON" : "OFF",
+                                  style: TextStyle(
+                                    color: uiColor,
+                                    fontSize: 10,
+                                    fontWeight: FontWeight.bold,
+                                  ),
+                                ),
+                              ],
                             ),
-                          );
-                        },
-                        child: CircleAvatar(
-                          radius: 22,
-                          backgroundColor: isSelfieFlashActive ? Colors.black12 : Colors.grey.shade800,
-                          backgroundImage: lastImage != null ? FileImage(lastImage) : null,
-                          child: lastImage == null ? Icon(Icons.image, color: uiColor) : null,
+                            Column(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                if (cameraState.isRecording)
+                                  Padding(
+                                    padding: const EdgeInsets.only(bottom: 4.0),
+                                    child: Row(
+                                      mainAxisSize: MainAxisSize.min,
+                                      children: [
+                                        Container(
+                                          width: 8,
+                                          height: 8,
+                                          decoration: const BoxDecoration(
+                                            color: Colors.red,
+                                            shape: BoxShape.circle,
+                                          ),
+                                        ),
+                                        const SizedBox(width: 6),
+                                        Text(
+                                          _formatDuration(_recordingSeconds),
+                                          style: const TextStyle(
+                                            color: Colors.white,
+                                            fontWeight: FontWeight.bold,
+                                            fontSize: 12,
+                                          ),
+                                        ),
+                                      ],
+                                    ),
+                                  ),
+                                CaptureButton(
+                                  isRecording: cameraState.isRecording,
+                                  mode: cameraState.cameraMode,
+                                  onCapture: () async {
+                                    if (!cameraState.isReady || _isCapturing) return;
+                                    
+                                    if (cameraState.cameraMode == CameraMode.video) {
+                                      if (cameraState.isRecording) {
+                                        _stopRecordingTimer();
+                                        await cameraVM.stopVideoRecording(context);
+                                      } else {
+                                        _startRecordingTimer();
+                                        await cameraVM.startVideoRecording();
+                                      }
+                                      return;
+                                    }
+
+                                    setState(() => _isCapturing = true);
+                                    SystemSound.play(SystemSoundType.click);
+                                    HapticFeedback.mediumImpact();
+                                    try {
+                                      await cameraVM.capture(context);
+                                    } catch (e) {
+                                      debugPrint("Capture error: $e");
+                                    }
+                                    await Future.delayed(const Duration(milliseconds: 80));
+                                    if (mounted) {
+                                      setState(() => _isCapturing = false);
+                                    }
+                                  },
+                                ),
+                              ],
+                            ),
+                            GestureDetector(
+                              onTap: () {
+                                Navigator.push(
+                                  context,
+                                  MaterialPageRoute(
+                                    builder: (_) => const GalleryFolderScreen(),
+                                  ),
+                                );
+                              },
+                              child: CircleAvatar(
+                                radius: 22,
+                                backgroundColor: isSelfieFlashActive ? Colors.black12 : Colors.grey.shade800,
+                                backgroundImage: lastImage != null ? FileImage(lastImage) : null,
+                                child: lastImage == null ? Icon(Icons.image, color: uiColor) : null,
+                              ),
+                            ),
+                          ],
                         ),
                       ),
                     ],
@@ -599,6 +701,41 @@ class _CameraScreenState extends ConsumerState<CameraScreen> {
               ),
           ],
         ),
+      ),
+    );
+  }
+
+  Widget _buildModeButton({
+    required String label,
+    required bool active,
+    required VoidCallback onTap,
+    required Color uiColor,
+  }) {
+    return GestureDetector(
+      onTap: onTap,
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Text(
+            label,
+            style: TextStyle(
+              color: active ? Colors.amberAccent : uiColor.withOpacity(0.5),
+              fontWeight: FontWeight.bold,
+              fontSize: 12,
+              letterSpacing: 1.2,
+            ),
+          ),
+          const SizedBox(height: 4),
+          if (active)
+            Container(
+              width: 4,
+              height: 4,
+              decoration: const BoxDecoration(
+                color: Colors.amberAccent,
+                shape: BoxShape.circle,
+              ),
+            ),
+        ],
       ),
     );
   }

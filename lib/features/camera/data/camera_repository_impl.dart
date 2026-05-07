@@ -65,8 +65,8 @@ class CameraRepositoryImpl implements CameraRepository {
   Future<void> _initController(CameraDescription camera) async {
     _controller = CameraController(
       camera,
-      ResolutionPreset.high, // 🔥 High is better for low-light preview and performance than MAX
-      enableAudio: false,
+      ResolutionPreset.max, // 🔥 Use MAX for highest possible quality
+      enableAudio: true,
       imageFormatGroup: ImageFormatGroup.jpeg,
     );
 
@@ -86,6 +86,22 @@ class CameraRepositoryImpl implements CameraRepository {
 
     final file = await _controller.takePicture();
     return file.path;
+  }
+
+  @override
+  Future<void> startVideoRecording() async {
+    if (!_controller.value.isInitialized || _controller.value.isRecordingVideo) {
+      return;
+    }
+    await _controller.startVideoRecording();
+  }
+
+  @override
+  Future<XFile> stopVideoRecording() async {
+    if (!_controller.value.isInitialized || !_controller.value.isRecordingVideo) {
+      throw Exception("No recording in progress");
+    }
+    return await _controller.stopVideoRecording();
   }
 
   Future<void> switchLens(CameraLensType type) async {

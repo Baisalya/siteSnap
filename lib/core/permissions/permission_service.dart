@@ -3,18 +3,20 @@ import 'package:permission_handler/permission_handler.dart';
 
 class PermissionService {
 
-  /// CAMERA + LOCATION (used on camera start)
+  /// CAMERA + LOCATION + MICROPHONE (used on camera start)
   static Future<void> requestCameraAndLocation() async {
     final cameraStatus = await Permission.camera.request();
     final locationStatus = await Permission.locationWhenInUse.request();
+    final micStatus = await Permission.microphone.request();
 
     if (cameraStatus.isPermanentlyDenied ||
-        locationStatus.isPermanentlyDenied) {
+        locationStatus.isPermanentlyDenied ||
+        micStatus.isPermanentlyDenied) {
       await openAppSettings();
       throw Exception('Permissions permanently denied');
     }
 
-    if (!cameraStatus.isGranted || !locationStatus.isGranted) {
+    if (!cameraStatus.isGranted || !locationStatus.isGranted || !micStatus.isGranted) {
       throw Exception('Required permissions not granted');
     }
   }

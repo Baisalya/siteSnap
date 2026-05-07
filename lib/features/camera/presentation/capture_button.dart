@@ -1,11 +1,16 @@
 import 'package:flutter/material.dart';
+import 'package:surveycam/features/camera/data/CameraState.dart';
 
 class CaptureButton extends StatefulWidget {
   final VoidCallback onCapture;
+  final bool isRecording;
+  final CameraMode mode;
 
   const CaptureButton({
     super.key,
     required this.onCapture,
+    this.isRecording = false,
+    this.mode = CameraMode.photo,
   });
 
   @override
@@ -57,8 +62,10 @@ class _CaptureButtonState extends State<CaptureButton>
   Future<void> _handleTap() async {
     if (_controller == null) return;
 
-    await _controller!.forward();
-    await _controller!.reverse();
+    if (widget.mode == CameraMode.photo) {
+      await _controller!.forward();
+      await _controller!.reverse();
+    }
 
     widget.onCapture();
   }
@@ -79,6 +86,8 @@ class _CaptureButtonState extends State<CaptureButton>
         _pulseOpacity == null) {
       return const SizedBox(height: 90, width: 90);
     }
+
+    final Color innerColor = widget.mode == CameraMode.video ? Colors.red : Colors.white;
 
     return SizedBox(
       height: 90,
@@ -101,7 +110,7 @@ class _CaptureButtonState extends State<CaptureButton>
                     width: 82,
                     decoration: BoxDecoration(
                       shape: BoxShape.circle,
-                      color: Colors.white
+                      color: (widget.isRecording ? Colors.red : Colors.white)
                           .withValues(alpha: _pulseOpacity!.value),
                     ),
                   ),
@@ -112,24 +121,22 @@ class _CaptureButtonState extends State<CaptureButton>
                     width: 72,
                     decoration: BoxDecoration(
                       shape: BoxShape.circle,
-                      color: Colors.white,
+                      color: Colors.transparent,
                       border: Border.all(
-                        color: Colors.grey.shade400,
+                        color: Colors.white,
                         width: 4,
                       ),
                     ),
                   ),
 
                   // Inner shutter
-                  Transform.scale(
-                    scale: _innerScale!.value,
-                    child: Container(
-                      height: 52,
-                      width: 52,
-                      decoration: const BoxDecoration(
-                        shape: BoxShape.circle,
-                        color: Colors.white,
-                      ),
+                  AnimatedContainer(
+                    duration: const Duration(milliseconds: 200),
+                    height: widget.isRecording ? 30 : 52,
+                    width: widget.isRecording ? 30 : 52,
+                    decoration: BoxDecoration(
+                      color: innerColor,
+                      borderRadius: BorderRadius.circular(widget.isRecording ? 4 : 50),
                     ),
                   ),
                 ],
