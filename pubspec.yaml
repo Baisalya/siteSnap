@@ -23,8 +23,8 @@ dependencies:
   path: ^1.9.0
 
   # Location & Sensors
-  geolocator: ^10.1.0
-  geocoding: ^3.0.0
+  geolocator: ^14.0.0
+  geocoding: ^4.0.0
   flutter_compass: ^0.8.0
 
   # State Management
