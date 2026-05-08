@@ -28,7 +28,7 @@ class _AppLauncherState extends ConsumerState<AppLauncher> {
   @override
   void initState() {
     super.initState();
-    _performSecurityCheck();
+   // _performSecurityCheck();
   }
 
   Future<void> _performSecurityCheck() async {
@@ -38,6 +38,7 @@ class _AppLauncherState extends ConsumerState<AppLauncher> {
       const bool isRelease = bool.fromEnvironment('dart.vm.product');
 
       /// ✅ 1. Emulator check (only in release)
+/*
       bool isRealDevice = await SafeDevice.isRealDevice;
       if (isRelease && !isRealDevice) {
         _flagUnauthorized(
@@ -47,6 +48,8 @@ class _AppLauncherState extends ConsumerState<AppLauncher> {
         );
         return;
       }
+*/
+/*
 
       /// ✅ 2. Root check
       bool isJailBroken = await SafeDevice.isJailBroken;
@@ -58,6 +61,7 @@ class _AppLauncherState extends ConsumerState<AppLauncher> {
         );
         return;
       }
+*/
 
       /// ✅ 3. Dev mode (only in release)
       bool isDevMode = await SafeDevice.isDevelopmentModeEnable;
@@ -69,6 +73,7 @@ class _AppLauncherState extends ConsumerState<AppLauncher> {
         );
         return;
       }
+/*
 
       /// ✅ 4. Mock location
       bool isMockLocation = await SafeDevice.isMockLocation;
@@ -80,6 +85,7 @@ class _AppLauncherState extends ConsumerState<AppLauncher> {
         );
         return;
       }
+*/
 
       /// ✅ 5. Installer check (only in release)
       PackageInfo packageInfo = await PackageInfo.fromPlatform();

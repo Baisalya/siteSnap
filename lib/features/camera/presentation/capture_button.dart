@@ -97,50 +97,60 @@ class _CaptureButtonState extends State<CaptureButton>
         child: AnimatedBuilder(
           animation: _controller!,
           builder: (_, __) {
-            return Transform.scale(
-              scale: _outerScale!.value,
-              child: Stack(
-                alignment: Alignment.center,
-                clipBehavior: Clip.none,
-                children: [
-
-                  // Pulse glow
-                  Container(
-                    height: 82,
-                    width: 82,
-                    decoration: BoxDecoration(
-                      shape: BoxShape.circle,
-                      color: (widget.isRecording ? Colors.red : Colors.white)
-                          .withValues(alpha: _pulseOpacity!.value),
-                    ),
+            return Stack(
+              alignment: Alignment.center,
+              clipBehavior: Clip.none,
+              children: [
+                // Pulse glow
+                Container(
+                  height: 82,
+                  width: 82,
+                  decoration: BoxDecoration(
+                    shape: BoxShape.circle,
+                    color: (widget.isRecording ? Colors.red : Colors.white)
+                        .withValues(alpha: _pulseOpacity!.value),
                   ),
+                ),
 
-                  // Outer ring
-                  Container(
+                // Outer ring
+                Transform.scale(
+                  scale: _outerScale!.value,
+                  child: Container(
                     height: 72,
                     width: 72,
                     decoration: BoxDecoration(
                       shape: BoxShape.circle,
                       color: Colors.transparent,
                       border: Border.all(
-                        color: Colors.white,
-                        width: 4,
+                        color: Colors.white.withValues(alpha: 0.8),
+                        width: 3.5,
                       ),
                     ),
                   ),
+                ),
 
-                  // Inner shutter
-                  AnimatedContainer(
+                // Inner shutter
+                Transform.scale(
+                  scale: _innerScale!.value,
+                  child: AnimatedContainer(
                     duration: const Duration(milliseconds: 200),
-                    height: widget.isRecording ? 30 : 52,
-                    width: widget.isRecording ? 30 : 52,
+                    height: widget.isRecording ? 32 : 56,
+                    width: widget.isRecording ? 32 : 56,
                     decoration: BoxDecoration(
                       color: innerColor,
-                      borderRadius: BorderRadius.circular(widget.isRecording ? 4 : 50),
+                      borderRadius: BorderRadius.circular(widget.isRecording ? 8 : 50),
+                      boxShadow: [
+                        if (!widget.isRecording)
+                          BoxShadow(
+                            color: Colors.black.withValues(alpha: 0.1),
+                            blurRadius: 4,
+                            spreadRadius: 1,
+                          ),
+                      ],
                     ),
                   ),
-                ],
-              ),
+                ),
+              ],
             );
           },
         ),
