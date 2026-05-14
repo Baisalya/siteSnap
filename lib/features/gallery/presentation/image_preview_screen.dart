@@ -3,6 +3,9 @@ import 'dart:ui' as ui;
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_svg/flutter_svg.dart';
+import 'package:share_plus/share_plus.dart';
+import 'package:path_provider/path_provider.dart';
+import 'package:path/path.dart' as p;
 import 'package:surveycam/features/camera/domain/camera_lens_type.dart';
 import 'package:surveycam/features/overlay/presentation/overlay_settings_provider.dart';
 
@@ -129,6 +132,73 @@ class _ImagePreviewScreenState
             mirror: isMirror,
           );
     });
+  }
+
+  /// ================= SHARE =================
+  Future<void> _shareImage() async {
+    if (_saving) return;
+
+    setState(() {
+      _saving = true;
+    });
+
+    try {
+      final cameraState = ref.read(cameraViewModelProvider);
+      final captured = ref.read(capturedOverlayProvider);
+      final live = ref.read(overlayPreviewProvider);
+
+      final overlayData = (captured ?? live).copyWith(
+        note: live.note,
+        position: live.position,
+      );
+
+      final isMirror = cameraState.captureLens == CameraLensType.front;
+      final orientation =
+          cameraState.captureOrientation ?? cameraState.orientation;
+      final aspectRatio = cameraState.aspectRatio;
+
+      // Process image with overlays
+      final bytes = await ref.read(overlayViewModelProvider.notifier).processImage(
+            widget.originalFile,
+            orientation,
+            overlayData: overlayData,
+            showOverlay: _showOverlay,
+            showWatermark: _showTextWatermark,
+            decodedImage: _decodedImage,
+            aspectRatio: aspectRatio,
+            mirror: isMirror,
+          );
+
+      // Save to temp file for sharing
+      final tempDir = await getTemporaryDirectory();
+      final tempPath = p.join(
+        tempDir.path,
+        "shared_${DateTime.now().millisecondsSinceEpoch}.jpg",
+      );
+      final tempFile = File(tempPath);
+      await tempFile.writeAsBytes(bytes);
+
+      if (!mounted) return;
+
+      // Share
+      await Share.shareXFiles(
+        [XFile(tempPath)],
+        text: "Shared from SurveyCam 📷",
+      );
+    } catch (e) {
+      debugPrint("Share error: $e");
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text("Failed to share image")),
+        );
+      }
+    } finally {
+      if (mounted) {
+        setState(() {
+          _saving = false;
+        });
+      }
+    }
   }
 
   /// ================= EDIT =================
@@ -334,6 +404,13 @@ class _ImagePreviewScreenState
                 label: "Edit",
                 active: false,
                 onTap: _editWatermark,
+              ),
+              const SizedBox(width: 12),
+              _buildToggleButton(
+                icon: Icons.share_outlined,
+                label: "Share",
+                active: false,
+                onTap: _shareImage,
               ),
               const Spacer(),
               ElevatedButton.icon(
