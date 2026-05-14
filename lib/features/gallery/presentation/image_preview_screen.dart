@@ -108,24 +108,27 @@ class _ImagePreviewScreenState
     );
 
     final isMirror = cameraState.captureLens == CameraLensType.front;
+    final orientation = cameraState.captureOrientation ?? cameraState.orientation;
+    final aspectRatio = cameraState.aspectRatio;
 
-    // Fire and forget: Save in background
-    ref.read(overlayViewModelProvider.notifier).saveCapturedImage(
-          original: widget.originalFile,
-          orientation:
-              cameraState.captureOrientation ?? cameraState.orientation,
-          overlayData: overlayData,
-          showOverlay: _showOverlay,
-          showWatermark: _showTextWatermark,
-          decodedImage: _decodedImage,
-          aspectRatio: cameraState.aspectRatio,
-          mirror: isMirror,
-        );
-
-    // Close preview immediately
+    // Pop first to ensure smooth transition
     if (mounted) {
       Navigator.of(context).pop(true);
     }
+
+    // Fire after a small delay to prioritize navigation animation
+    Future.delayed(const Duration(milliseconds: 300), () {
+      ref.read(overlayViewModelProvider.notifier).saveCapturedImage(
+            original: widget.originalFile,
+            orientation: orientation,
+            overlayData: overlayData,
+            showOverlay: _showOverlay,
+            showWatermark: _showTextWatermark,
+            decodedImage: _decodedImage,
+            aspectRatio: aspectRatio,
+            mirror: isMirror,
+          );
+    });
   }
 
   /// ================= EDIT =================

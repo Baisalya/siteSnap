@@ -3,6 +3,7 @@ import 'dart:math';
 import 'dart:typed_data';
 import 'dart:ui' as ui;
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_svg/flutter_svg.dart' as svg;
@@ -240,12 +241,30 @@ class WatermarkProcessor {
     final byteData =
     await finalImage.toByteData(format: ui.ImageByteFormat.rawRgba);
 
+    // Dispose UI images as early as possible
+    if (decodedImage == null) {
+      uiImage.dispose();
+    }
+    finalImage.dispose();
+
     if (byteData == null) return Uint8List(0);
 
+    return await compute(_encodeJpgTask, {
+      'width': finalImage.width,
+      'height': finalImage.height,
+      'buffer': byteData.buffer,
+    });
+  }
+
+  static Uint8List _encodeJpgTask(Map<String, dynamic> params) {
+    final int width = params['width'];
+    final int height = params['height'];
+    final ByteBuffer buffer = params['buffer'];
+
     final processedImage = img.Image.fromBytes(
-      width: finalImage.width,
-      height: finalImage.height,
-      bytes: byteData.buffer,
+      width: width,
+      height: height,
+      bytes: buffer,
       numChannels: 4,
       order: img.ChannelOrder.rgba,
     );

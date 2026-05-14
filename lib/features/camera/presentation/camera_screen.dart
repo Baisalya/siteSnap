@@ -5,6 +5,7 @@ import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:surveycam/core/services/location_service.dart';
+import 'package:surveycam/core/services/rate_us_service.dart';
 import 'package:surveycam/core/services/weather_service.dart';
 import 'package:surveycam/core/utils/datetime_utils.dart';
 import 'package:surveycam/core/utils/developer_info_dialog.dart';
@@ -48,6 +49,14 @@ class _CameraScreenState extends ConsumerState<CameraScreen> {
   @override
   void initState() {
     super.initState();
+
+    /// INITIALIZE RATE US SERVICE AND CHECK
+    WidgetsBinding.instance.addPostFrameCallback((_) async {
+      await RateUsService.init();
+      if (mounted) {
+        await RateUsService.showRateDialogIfMeetsCriteria(context);
+      }
+    });
 
     /// DATE TIME UPDATE TIMER
     _dateTimer = Timer.periodic(

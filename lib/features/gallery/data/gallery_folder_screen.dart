@@ -1,5 +1,6 @@
 import 'dart:io';
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:share_plus/share_plus.dart';
 import 'package:surveycam/features/gallery/data/sitesnap_gallery_repository.dart';
@@ -9,60 +10,29 @@ import 'package:flutter_video_thumbnail_plus/flutter_video_thumbnail_plus.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:path/path.dart' as p;
 
-class GalleryFolderScreen extends StatefulWidget {
+class GalleryFolderScreen extends ConsumerStatefulWidget {
   const GalleryFolderScreen({super.key});
 
   @override
-  State<GalleryFolderScreen> createState() =>
+  ConsumerState<GalleryFolderScreen> createState() =>
       _GalleryFolderScreenState();
 }
 
-class _GalleryFolderScreenState extends State<GalleryFolderScreen> {
-  List<File> images = [];
-  bool loading = true;
-
+class _GalleryFolderScreenState extends ConsumerState<GalleryFolderScreen> {
   Set<File> selectedImages = {};
   bool selectionMode = false;
-
-  final repo = survaycamGalleryRepository();
 
   @override
   void initState() {
     super.initState();
-    _initGallery();
+    _checkPermissions();
   }
 
-  /// ================= INIT =================
-  Future<void> _initGallery() async {
-    final granted = await _requestPermission();
-    if (!granted) return;
-
-    await _loadImages();
-  }
-
-  /// ================= PERMISSION =================
-  Future<bool> _requestPermission() async {
-    final status = await Permission.photos.request();
-
-    if (status.isGranted) return true;
-
-    if (status.isPermanentlyDenied) {
-      openAppSettings();
+  Future<void> _checkPermissions() async {
+    final status = await Permission.photos.status;
+    if (status.isDenied) {
+      await Permission.photos.request();
     }
-
-    return false;
-  }
-
-  /// ================= LOAD =================
-  Future<void> _loadImages() async {
-    final result = await repo.loadImages();
-
-    if (!mounted) return;
-
-    setState(() {
-      images = result;
-      loading = false;
-    });
   }
 
   /// ================= SHARE =================
@@ -88,7 +58,7 @@ class _GalleryFolderScreenState extends State<GalleryFolderScreen> {
     });
   }
 
-  void _selectAll() {
+  void _selectAll(List<File> images) {
     setState(() {
       selectedImages = images.toSet();
       selectionMode = true;
@@ -105,6 +75,8 @@ class _GalleryFolderScreenState extends State<GalleryFolderScreen> {
   /// ================= BUILD =================
   @override
   Widget build(BuildContext context) {
+    final galleryAsync = ref.watch(galleryFilesProvider);
+
     return Scaffold(
       backgroundColor: Colors.black,
 
@@ -112,29 +84,28 @@ class _GalleryFolderScreenState extends State<GalleryFolderScreen> {
       appBar: AppBar(
         elevation: 0,
         backgroundColor: Colors.black,
-
         leading: selectionMode
             ? IconButton(
-          icon: const Icon(Icons.close, color: Colors.white),
-          onPressed: _clearSelection,
-        )
+                icon: const Icon(Icons.close, color: Colors.white),
+                onPressed: _clearSelection,
+              )
             : null,
-
         title: selectionMode
             ? Text(
-          "${selectedImages.length} selected",
-          style: const TextStyle(color: Colors.white),
-        )
+                "${selectedImages.length} selected",
+                style: const TextStyle(color: Colors.white),
+              )
             : const Text(
-          "SurveyCam Photos",
-          style: TextStyle(color: Colors.white),
-        ),
-
+                "SurveyCam Gallery",
+                style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold),
+              ),
         actions: [
           if (selectionMode) ...[
             IconButton(
               icon: const Icon(Icons.select_all, color: Colors.white),
-              onPressed: _selectAll,
+              onPressed: () {
+                galleryAsync.whenData((images) => _selectAll(images));
+              },
             ),
             IconButton(
               icon: const Icon(Icons.share, color: Colors.white),
@@ -145,31 +116,40 @@ class _GalleryFolderScreenState extends State<GalleryFolderScreen> {
       ),
 
       /// ================= BODY =================
-      body: loading
-          ? _loadingView()
-          : images.isEmpty
-          ? _emptyView()
-          : GridView.builder(
-        padding: const EdgeInsets.all(6),
-        gridDelegate:
-        const SliverGridDelegateWithFixedCrossAxisCount(
-          crossAxisCount: 3,
-          crossAxisSpacing: 6,
-          mainAxisSpacing: 6,
-        ),
-        itemCount: images.length,
-        itemBuilder: (_, i) {
-          final file = images[i];
-          final isSelected = selectedImages.contains(file);
+      body: galleryAsync.when(
+        data: (images) {
+          if (images.isEmpty) return _emptyView();
 
-          return _buildGridItem(file, i, isSelected);
+          return RefreshIndicator(
+            onRefresh: () => ref.refresh(galleryFilesProvider.future),
+            color: Colors.amberAccent,
+            backgroundColor: Colors.grey[900],
+            child: GridView.builder(
+              padding: const EdgeInsets.all(6),
+              gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+                crossAxisCount: 3,
+                crossAxisSpacing: 6,
+                mainAxisSpacing: 6,
+              ),
+              itemCount: images.length,
+              itemBuilder: (_, i) {
+                final file = images[i];
+                final isSelected = selectedImages.contains(file);
+                return _buildGridItem(file, i, isSelected, images);
+              },
+            ),
+          );
         },
+        loading: () => _loadingView(),
+        error: (err, stack) => Center(
+          child: Text("Error: $err", style: const TextStyle(color: Colors.red)),
+        ),
       ),
     );
   }
 
   /// ================= GRID ITEM =================
-  Widget _buildGridItem(File file, int index, bool isSelected) {
+  Widget _buildGridItem(File file, int index, bool isSelected, List<File> allImages) {
     final isVideo = file.path.toLowerCase().endsWith('.mp4') ||
         file.path.toLowerCase().endsWith('.mov');
 
@@ -199,7 +179,7 @@ class _GalleryFolderScreenState extends State<GalleryFolderScreen> {
                 context,
                 MaterialPageRoute(
                   builder: (_) => GalleryImageViewer(
-                    images: images,
+                    images: allImages,
                     initialIndex: index,
                   ),
                 ),

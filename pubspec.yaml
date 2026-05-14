@@ -2,7 +2,7 @@ name: surveycam
 description: "A camera app for capturing photos with location and geo-tagging features."
 publish_to: 'none'
 
-version: 2.0.3+15
+version: 2.0.3+16
 
 environment:
   sdk: '>=3.2.5 <4.0.0'
@@ -56,6 +56,9 @@ dependencies:
 
   exif: ^3.1.4
 
+  lottie: ^3.1.2
+  google_fonts: ^6.2.1
+
 dev_dependencies:
   flutter_test:
     sdk: flutter
@@ -76,7 +79,7 @@ flutter:
     - Assets/splash_bg.png
     - Assets/surveycam_logo.svg
     - Assets/App_logo.png
-
+    - Assets/lottie/
 # -------------------------------
 # ✅ APP ICON CONFIG
 # -------------------------------

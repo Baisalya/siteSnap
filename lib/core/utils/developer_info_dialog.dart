@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:url_launcher/url_launcher.dart';
+import '../services/rate_us_service.dart';
+import 'rate_us_dialog.dart';
 
 class DeveloperInfoDialog extends StatelessWidget {
   const DeveloperInfoDialog({super.key});
@@ -101,6 +103,35 @@ class DeveloperInfoDialog extends StatelessWidget {
                     Icon(Icons.privacy_tip, size: 18),
                     SizedBox(width: 6),
                     Text("Privacy Policy"),
+                  ],
+                ),
+              ),
+            ),
+
+            const SizedBox(height: 10),
+
+            /// RATE US BUTTON (MANUAL TRIGGER)
+            SizedBox(
+              width: double.infinity,
+              child: OutlinedButton(
+                onPressed: () {
+                  Navigator.pop(context); // Close developer dialog
+                  showDialog(
+                    context: context,
+                    barrierDismissible: false,
+                    builder: (context) => const RateUsDialog(),
+                  );
+                },
+                style: OutlinedButton.styleFrom(
+                  foregroundColor: Colors.amberAccent,
+                  side: const BorderSide(color: Colors.amberAccent),
+                ),
+                child: const Row(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    Icon(Icons.star_rate_rounded, size: 18),
+                    SizedBox(width: 6),
+                    Text("Rate SurveyCam"),
                   ],
                 ),
               ),

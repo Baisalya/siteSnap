@@ -18,8 +18,10 @@ import 'package:surveycam/features/overlay/presentation/captured_overlay_provide
 import 'package:surveycam/features/overlay/presentation/overlay_preview_state.dart';
 import 'package:surveycam/features/overlay/presentation/overlay_painter.dart';
 import 'package:surveycam/features/overlay/presentation/overlay_settings_provider.dart';
-import 'package:surveycam/features/overlay/presentation/video_watermark_processor.dart';
+import 'package:surveycam/features/gallery/data/sitesnap_gallery_repository.dart';
 import 'package:surveycam/core/utils/gallery_saver.dart';
+
+import '../../overlay/presentation/video_watermark_processor.dart';
 
 final cameraViewModelProvider =
 StateNotifierProvider<CameraViewModel, CameraState>((ref) {
@@ -607,6 +609,7 @@ class CameraViewModel extends StateNotifier<CameraState>
       if (processedPath != null) {
         debugPrint("Video processed successfully: $processedPath");
         await GallerySaver.saveVideo(processedPath);
+        ref.invalidate(galleryFilesProvider);
         if (context.mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
             const SnackBar(content: Text("Video saved to gallery")),
@@ -616,6 +619,7 @@ class CameraViewModel extends StateNotifier<CameraState>
       } else {
         debugPrint("Overlay processing failed, saving raw video.");
         await GallerySaver.saveVideo(finalVideoPath);
+        ref.invalidate(galleryFilesProvider);
         if (context.mounted) {
            ScaffoldMessenger.of(context).showSnackBar(
             const SnackBar(content: Text("Video saved (without overlay)")),
@@ -659,6 +663,7 @@ class CameraViewModel extends StateNotifier<CameraState>
 
       if (result != null) {
         ref.read(lastImageProvider.notifier).state = originalFile;
+        ref.invalidate(galleryFilesProvider);
       }
     } catch (e) {
       debugPrint("Post capture error: $e");
