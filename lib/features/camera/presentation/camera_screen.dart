@@ -102,13 +102,7 @@ class _CameraScreenState extends ConsumerState<CameraScreen> with WidgetsBinding
 
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
-    if (state == AppLifecycleState.resumed) {
-      // Re-initialize camera if it was lost
-      final cameraState = ref.read(cameraViewModelProvider);
-      if (!cameraState.isReady || cameraState.controller == null) {
-        ref.read(cameraViewModelProvider.notifier).refreshCamera();
-      }
-    }
+    // Redundant refresh removed as ViewModel handles it efficiently
   }
 
   @override
@@ -739,17 +733,12 @@ class _CameraScreenState extends ConsumerState<CameraScreen> with WidgetsBinding
                               child: Center(
                                 child: GestureDetector(
                                   onTap: () async {
-                                    final result = await Navigator.push(
+                                    await Navigator.push(
                                       context,
                                       MaterialPageRoute(
                                         builder: (_) => const GalleryFolderScreen(),
                                       ),
                                     );
-                                    
-                                    // Refresh camera when coming back from Gallery
-                                    if (mounted) {
-                                      ref.read(cameraViewModelProvider.notifier).refreshCamera();
-                                    }
                                   },
                                   child: Container(
                                     padding: const EdgeInsets.all(2),

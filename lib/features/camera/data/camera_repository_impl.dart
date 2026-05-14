@@ -1,23 +1,37 @@
 import 'package:camera/camera.dart';
+import 'package:flutter/foundation.dart';
 import 'package:surveycam/features/camera/domain/camera_lens_type.dart';
 import 'package:surveycam/features/camera/domain/camera_repository.dart';
 
 class CameraRepositoryImpl implements CameraRepository {
   CameraController? _controller;
   late Map<CameraLensType, CameraDescription> _cameraMap;
+  List<CameraDescription>? _cachedCameras;
 
   CameraLensType _currentLens = CameraLensType.normal;
 
   @override
   Future<void> initialize(CameraLensType lens) async {
+    // Skip if already initialized with the correct lens to avoid "Disposed CameraController" errors
+    // BUT check if hardware is actually responsive (it might have been seized by another app)
+    if (_controller != null && _controller!.value.isInitialized && _currentLens == lens) {
+      try {
+        // Quick pulse check - if this fails, hardware was lost
+        await _controller!.getMinZoomLevel();
+        return; 
+      } catch (e) {
+        debugPrint("Camera hardware lost or unresponsive: $e. Forcing re-init.");
+      }
+    }
+
     // Ensure previous controller is fully disposed before attempting to open a new one
     if (_controller != null) {
       await dispose();
-      // Add a small breather for the hardware to release
-      await Future.delayed(const Duration(milliseconds: 150));
+      // Add a tiny breather for the hardware to release
+      await Future.delayed(const Duration(milliseconds: 50));
     }
 
-    final cameras = await availableCameras();
+    final cameras = _cachedCameras ??= await availableCameras();
 
     final backCameras = cameras
         .where((c) => c.lensDirection == CameraLensDirection.back)

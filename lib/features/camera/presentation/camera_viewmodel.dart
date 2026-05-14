@@ -90,8 +90,8 @@ class CameraViewModel extends StateNotifier<CameraState>
         await repo.initialize(CameraLensType.normal);
       } catch (e) {
         debugPrint('Repo init error: $e');
-        // Try one retry if it fails immediately
-        await Future.delayed(const Duration(milliseconds: 500));
+        // Try one retry if it fails immediately with a smaller delay
+        await Future.delayed(const Duration(milliseconds: 200));
         await repo.initialize(CameraLensType.normal);
       }
 
@@ -117,7 +117,6 @@ class CameraViewModel extends StateNotifier<CameraState>
         debugPrint("Initial focus/exposure mode error: $e");
       }
 
-      // Explicitly set central points to force AE/AF calculation (wrapped in try-catch)
       try {
         if (controller.value.isInitialized) {
           await controller.setFocusPoint(const Offset(0.5, 0.5));
@@ -127,8 +126,6 @@ class CameraViewModel extends StateNotifier<CameraState>
         debugPrint("Initial focus/exposure point error: $e");
       }
 
-      await Future.delayed(const Duration(milliseconds: 600));
-
       if (controller.value.isInitialized) {
         _minExposure = await controller.getMinExposureOffset();
         _maxExposure = await controller.getMaxExposureOffset();
@@ -136,8 +133,8 @@ class CameraViewModel extends StateNotifier<CameraState>
         final minZoom = await controller.getMinZoomLevel();
         final maxZoom = await controller.getMaxZoomLevel();
 
-        // Start with a slight exposure boost (+0.5) to make dark areas "pop" more
-        _currentExposure = 0.5.clamp(_minExposure, _maxExposure);
+        // Set exposure offset to 0.0 (Neutral) to minimize ISO noise in low light
+        _currentExposure = 0.0.clamp(_minExposure, _maxExposure);
 
         try {
           await controller.setExposureOffset(_currentExposure);
@@ -190,7 +187,8 @@ class CameraViewModel extends StateNotifier<CameraState>
     debugPrint("AppLifecycleState: $appState");
 
     if (appState == AppLifecycleState.inactive ||
-        appState == AppLifecycleState.paused) {
+        appState == AppLifecycleState.paused ||
+        appState == AppLifecycleState.hidden) {
       try {
         final controller = this.state.controller;
         if (controller != null) {
@@ -200,9 +198,11 @@ class CameraViewModel extends StateNotifier<CameraState>
             await _softFlashQuench(controller);
           }
           
-          // Full disposal on backgrounding to free up hardware
-          await ref.read(cameraRepositoryProvider).dispose();
-          this.state = this.state.copyWith(controller: null, isReady: false);
+          if (appState == AppLifecycleState.paused || appState == AppLifecycleState.hidden) {
+            // Full disposal on backgrounding/hiding to free up hardware
+            await ref.read(cameraRepositoryProvider).dispose();
+            this.state = this.state.copyWith(controller: null, isReady: false);
+          }
         }
       } catch (e) {
         debugPrint("Error on backgrounding: $e");
@@ -210,8 +210,7 @@ class CameraViewModel extends StateNotifier<CameraState>
     }
 
     if (appState == AppLifecycleState.resumed) {
-      // Small delay to ensure hardware is released by OS/other apps
-      await Future.delayed(const Duration(milliseconds: 300));
+      // Immediate initialize for instant resume (Repository handles re-acquisition check)
       await initialize();
     }
   }
@@ -222,7 +221,6 @@ class CameraViewModel extends StateNotifier<CameraState>
     debugPrint("Refreshing camera manually...");
     await ref.read(cameraRepositoryProvider).dispose();
     state = state.copyWith(controller: null, isReady: false, error: null);
-    await Future.delayed(const Duration(milliseconds: 200));
     await initialize();
   }
 
@@ -523,16 +521,22 @@ class CameraViewModel extends StateNotifier<CameraState>
         } else {
           // For back camera, use the physical LED
           await controller.setFlashMode(FlashMode.torch);
-          await Future.delayed(const Duration(milliseconds: 800));
+          await Future.delayed(const Duration(milliseconds: 600)); // Increased for stabilization
         }
-        // LOCK exposure while it's bright so it doesn't dim during capture
-        await controller.setExposureMode(ExposureMode.locked);
       } else {
         await controller.setFlashMode(FlashMode.off);
-        // Wait longer (500ms) for AE to reach its peak gain in dark areas
+        // Wait longer for AE to stabilize for high clarity and low noise
         await Future.delayed(const Duration(milliseconds: 500));
-        // Lock exposure so it doesn't drop during the shutter process
-        await controller.setExposureMode(ExposureMode.locked);
+      }
+
+      // 2.5 LOCK Focus and Exposure for full clarity
+      try {
+        if (controller.value.isInitialized) {
+          await controller.setFocusMode(FocusMode.locked);
+          await controller.setExposureMode(ExposureMode.locked);
+        }
+      } catch (e) {
+        debugPrint("Locking focus/exposure error: $e");
       }
 
       // 3. CAPTURE

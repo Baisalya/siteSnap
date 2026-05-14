@@ -56,16 +56,19 @@ class PrivacyDialog extends ConsumerWidget {
                     SizedBox(height: 12),
 
                     _SectionTitle("1. Information We Access"),
-                    _Bullet("Camera – Capture photos"),
+                    _Bullet("Camera – Capture photos and videos"),
                     _Bullet("Location (GPS) – Add geo-tagging"),
-                    _Bullet("Storage – Save images locally"),
+                    _Bullet("Storage – Save media locally"),
+                    _Bullet("Notifications – Processing status updates"),
+                    _Bullet("Background Service – Ensure media processing completes"),
 
                     SizedBox(height: 12),
 
                     _SectionTitle("2. How We Use Information"),
-                    _Bullet("Capture and store images"),
+                    _Bullet("Capture and store images/videos"),
                     _Bullet("Embed date, time, and location"),
                     _Bullet("Provide proof-based documentation"),
+                    _Bullet("Process watermarks in the background for reliability"),
 
                     _BodyText(
                         "We do NOT use your data for advertising, tracking, or analytics."),
@@ -88,6 +91,8 @@ class PrivacyDialog extends ConsumerWidget {
                     _Bullet("Camera access"),
                     _Bullet("Location access"),
                     _Bullet("Storage access"),
+                    _Bullet("Notification access"),
+                    _Bullet("Foreground Service access"),
 
                     SizedBox(height: 12),
 

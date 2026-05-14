@@ -14,7 +14,8 @@ dependencies:
   cupertino_icons: ^1.0.2
 
   # Camera & Media
-  camera: ^0.10.5+9
+  camera: 0.11.0
+  camera_android_camerax: 0.6.5
   image: ^4.1.7
   path_provider: ^2.1.2
   photo_view: ^0.14.0
@@ -59,6 +60,7 @@ dependencies:
 
   lottie: ^3.1.2
   google_fonts: ^6.2.1
+  camera_platform_interface: ^2.13.0
 
 dev_dependencies:
   flutter_test:
