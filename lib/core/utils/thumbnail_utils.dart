@@ -5,11 +5,13 @@ import 'package:path_provider/path_provider.dart';
 import 'package:path/path.dart' as p;
 
 class ThumbnailUtils {
+  static String? _tempDirPath;
+
   static Future<String?> generateVideoThumbnail(String videoPath) async {
     try {
-      final tempDir = await getTemporaryDirectory();
+      _tempDirPath ??= (await getTemporaryDirectory()).path;
       final fileName = p.basenameWithoutExtension(videoPath);
-      final thumbnailPath = p.join(tempDir.path, 'thumb_$fileName.jpg');
+      final thumbnailPath = p.join(_tempDirPath!, 'thumb_$fileName.jpg');
 
       if (await File(thumbnailPath).exists()) {
         return thumbnailPath;
@@ -17,7 +19,7 @@ class ThumbnailUtils {
 
       return await FlutterVideoThumbnailPlus.thumbnailFile(
         video: videoPath,
-        thumbnailPath: tempDir.path,
+        thumbnailPath: _tempDirPath!,
         imageFormat: ImageFormat.jpeg,
         maxWidth: 300,
         quality: 75,

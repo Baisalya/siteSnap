@@ -47,4 +47,14 @@ class PermissionService {
       throw Exception('Gallery permission not granted');
     }
   }
+
+  /// NOTIFICATION (used for background video processing)
+  static Future<void> requestNotificationPermission() async {
+    if (Platform.isAndroid) {
+      final status = await Permission.notification.status;
+      if (!status.isGranted) {
+        await Permission.notification.request();
+      }
+    }
+  }
 }

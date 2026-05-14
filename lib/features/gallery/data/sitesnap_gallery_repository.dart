@@ -33,47 +33,63 @@ class SurveyCamGalleryRepository {
 
     final List<File> allFiles = [];
 
-    for (var directory in directories) {
+    // Parallelize directory listing
+    final results = await Future.wait(directories.map((directory) async {
       try {
         if (await directory.exists()) {
           final isSurveyCam = directory.path.toLowerCase().contains('surveycam') || 
                              directory.path.toLowerCase().contains('survaycam');
           
-          final files = directory
-              .listSync(recursive: isSurveyCam) // Recursive only for our app folders
-              .whereType<File>()
-              .where((file) {
-            final path = file.path.toLowerCase();
-            // Filter only our files if it's a general folder like DCIM/Camera
-            if (!isSurveyCam) {
-              final name = p.basename(path);
-              if (!name.contains('SurveyCam') && !name.contains('Surveycam')) {
-                return false;
+          final List<File> files = [];
+          await for (var entity in directory.list(recursive: isSurveyCam)) {
+            if (entity is File) {
+              final path = entity.path.toLowerCase();
+              if (!isSurveyCam) {
+                final name = p.basename(path);
+                if (!name.contains('surveycam')) {
+                  continue;
+                }
+              }
+
+              if (path.endsWith('.jpg') ||
+                  path.endsWith('.jpeg') ||
+                  path.endsWith('.png') ||
+                  path.endsWith('.mp4') ||
+                  path.endsWith('.mov')) {
+                files.add(entity);
               }
             }
-            
-            return path.endsWith('.jpg') ||
-                path.endsWith('.jpeg') ||
-                path.endsWith('.png') ||
-                path.endsWith('.mp4') ||
-                path.endsWith('.mov');
-          });
-          allFiles.addAll(files);
+          }
+          return files;
         }
       } catch (e) {
         // Silently skip
       }
+      return <File>[];
+    }));
+
+    for (var files in results) {
+      allFiles.addAll(files);
     }
 
-    // ✅ newest first across all folders
-    allFiles.sort((a, b) {
+    // ✅ newest first across all folders - use async lastModified for sorting
+    final fileWithDates = await Future.wait(allFiles.map((file) async {
       try {
-        return b.lastModifiedSync().compareTo(a.lastModifiedSync());
+        final date = await file.lastModified();
+        return _FileWithDate(file, date);
       } catch (_) {
-        return 0;
+        return _FileWithDate(file, DateTime(1970));
       }
-    });
+    }));
 
-    return allFiles;
+    fileWithDates.sort((a, b) => b.date.compareTo(a.date));
+
+    return fileWithDates.map((fd) => fd.file).toList();
   }
+}
+
+class _FileWithDate {
+  final File file;
+  final DateTime date;
+  _FileWithDate(this.file, this.date);
 }

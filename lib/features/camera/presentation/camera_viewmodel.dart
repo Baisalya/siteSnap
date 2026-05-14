@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:io';
+import 'dart:isolate';
 import 'package:camera/camera.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -7,8 +8,10 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:surveycam/core/di/providers.dart';
 import 'package:surveycam/core/permissions/permission_service.dart';
 import 'package:surveycam/core/utils/device_orientation_provider.dart';
-
-
+import 'package:flutter_foreground_task/flutter_foreground_task.dart';
+import 'package:surveycam/core/services/background_video_task.dart';
+import 'package:surveycam/core/utils/gallery_saver.dart';
+import 'package:surveycam/core/utils/thumbnail_utils.dart';
 import 'package:surveycam/features/camera/data/CameraState.dart';
 import 'package:surveycam/features/camera/domain/camera_lens_type.dart';
 import 'package:surveycam/features/gallery/presentation/image_preview_screen.dart';
@@ -16,11 +19,7 @@ import 'package:surveycam/features/gallery/presentation/last_image_provider.dart
 import 'package:surveycam/features/location/presentation/location_viewmodel.dart';
 import 'package:surveycam/features/overlay/presentation/captured_overlay_provider.dart';
 import 'package:surveycam/features/overlay/presentation/overlay_preview_state.dart';
-import 'package:surveycam/features/overlay/presentation/overlay_painter.dart';
-import 'package:surveycam/features/overlay/presentation/overlay_settings_provider.dart';
 import 'package:surveycam/features/gallery/data/sitesnap_gallery_repository.dart';
-import 'package:surveycam/core/utils/gallery_saver.dart';
-import 'package:surveycam/core/utils/thumbnail_utils.dart';
 
 import '../../overlay/presentation/video_watermark_processor.dart';
 
@@ -42,14 +41,35 @@ class CameraViewModel extends StateNotifier<CameraState>
   bool _isInitializing = false;
   bool _isRestarting = false;
   Timer? _videoHistoryTimer;
+  ReceivePort? _receivePort;
 
   bool get isCameraStable => _isCameraStable;
   double get exposureValue => _currentExposure;
 
   CameraViewModel(this.ref)
-      : super(const CameraState(isReady: false)) {
+      : super( const CameraState(isReady: false)) {
     WidgetsBinding.instance.addObserver(this);
+    _initBackgroundService();
     initialize();
+  }
+
+  void _initBackgroundService() {
+    _receivePort?.close();
+    _receivePort = FlutterForegroundTask.receivePort;
+    _receivePort?.listen(_onReceiveTaskData);
+  }
+
+  void _onReceiveTaskData(dynamic message) {
+    if (message is Map<String, dynamic>) {
+      if (message['type'] == 'progress') {
+        state = state.copyWith(processingProgress: message['value']);
+      } else if (message['type'] == 'complete') {
+        state = state.copyWith(clearProcessingProgress: true);
+        ref.invalidate(galleryFilesProvider);
+      } else if (message['type'] == 'error') {
+        state = state.copyWith(clearProcessingProgress: true, error: message['error']);
+      }
+    }
   }
 
   // ================= INIT =================
@@ -58,16 +78,26 @@ class CameraViewModel extends StateNotifier<CameraState>
     if (_isInitializing) return;
     _isInitializing = true;
 
+    state = state.copyWith(error: null);
+
     try {
       await PermissionService.requestCameraAndLocation();
       ref.invalidate(locationStreamProvider);
 
       final repo = ref.read(cameraRepositoryProvider);
-      await repo.initialize(CameraLensType.normal);
+      
+      try {
+        await repo.initialize(CameraLensType.normal);
+      } catch (e) {
+        debugPrint('Repo init error: $e');
+        // Try one retry if it fails immediately
+        await Future.delayed(const Duration(milliseconds: 500));
+        await repo.initialize(CameraLensType.normal);
+      }
 
       final controller = repo.controller;
       if (controller == null) {
-        state = state.copyWith(isReady: false, error: "Controller is null");
+        state = state.copyWith(isReady: false, error: "Camera controller failed to initialize");
         return;
       }
 
@@ -78,47 +108,67 @@ class CameraViewModel extends StateNotifier<CameraState>
 
       // Set to auto focus and exposure by default
       try {
-        await controller.setFocusMode(FocusMode.auto);
-        await controller.setExposureMode(ExposureMode.auto);
-        await controller.setFlashMode(FlashMode.off);
+        if (controller.value.isInitialized) {
+          await controller.setFocusMode(FocusMode.auto);
+          await controller.setExposureMode(ExposureMode.auto);
+          await controller.setFlashMode(FlashMode.off);
+        }
       } catch (e) {
-        debugPrint("Initial focus/exposure error: $e");
+        debugPrint("Initial focus/exposure mode error: $e");
       }
 
-      // Explicitly set central points to force AE/AF calculation
-      await controller.setFocusPoint(const Offset(0.5, 0.5));
-      await controller.setExposurePoint(const Offset(0.5, 0.5));
+      // Explicitly set central points to force AE/AF calculation (wrapped in try-catch)
+      try {
+        if (controller.value.isInitialized) {
+          await controller.setFocusPoint(const Offset(0.5, 0.5));
+          await controller.setExposurePoint(const Offset(0.5, 0.5));
+        }
+      } catch (e) {
+        debugPrint("Initial focus/exposure point error: $e");
+      }
 
       await Future.delayed(const Duration(milliseconds: 600));
 
-      _minExposure = await controller.getMinExposureOffset();
-      _maxExposure = await controller.getMaxExposureOffset();
+      if (controller.value.isInitialized) {
+        _minExposure = await controller.getMinExposureOffset();
+        _maxExposure = await controller.getMaxExposureOffset();
 
-      final minZoom = await controller.getMinZoomLevel();
-      final maxZoom = await controller.getMaxZoomLevel();
+        final minZoom = await controller.getMinZoomLevel();
+        final maxZoom = await controller.getMaxZoomLevel();
 
-      // Start with a slight exposure boost (+0.5) to make dark areas "pop" more
-      _currentExposure = 0.5.clamp(_minExposure, _maxExposure);
+        // Start with a slight exposure boost (+0.5) to make dark areas "pop" more
+        _currentExposure = 0.5.clamp(_minExposure, _maxExposure);
 
-      await controller.setExposureOffset(_currentExposure);
+        try {
+          await controller.setExposureOffset(_currentExposure);
+        } catch (e) {
+          debugPrint("Initial exposure offset error: $e");
+        }
 
-      _isCameraStable = true;
+        _isCameraStable = true;
 
-      state = state.copyWith(
-        isReady: true,
-        controller: controller,
-        exposure: _currentExposure,
-        minExposure: _minExposure,
-        maxExposure: _maxExposure,
-        zoom: 1.0,
-        minZoom: minZoom,
-        maxZoom: maxZoom,
-        error: null,
-      );
+        state = state.copyWith(
+          isReady: true,
+          controller: controller,
+          exposure: _currentExposure,
+          minExposure: _minExposure,
+          maxExposure: _maxExposure,
+          zoom: 1.0,
+          minZoom: minZoom,
+          maxZoom: maxZoom,
+          error: null,
+        );
+      } else {
+        state = state.copyWith(isReady: false, error: "Camera controller not initialized after setup");
+      }
 
     } catch (e) {
       debugPrint('Init error: $e');
-      state = state.copyWith(isReady: false, error: e.toString());
+      String errorMessage = e.toString();
+      if (errorMessage.contains('CameraException')) {
+        errorMessage = "Camera Error: Please ensure no other app is using the camera.";
+      }
+      state = state.copyWith(isReady: false, error: errorMessage);
     } finally {
       _isInitializing = false;
     }
@@ -135,87 +185,53 @@ class CameraViewModel extends StateNotifier<CameraState>
   // ================= LIFECYCLE =================
 
   @override
-  void didChangeAppLifecycleState(AppLifecycleState appLifecycleState) async {
-    if (_isInitializing) return;
+  void didChangeAppLifecycleState(AppLifecycleState state) async {
+    final appState = state;
+    debugPrint("AppLifecycleState: $appState");
 
-    if (appLifecycleState == AppLifecycleState.inactive ||
-        appLifecycleState == AppLifecycleState.paused) {
+    if (appState == AppLifecycleState.inactive ||
+        appState == AppLifecycleState.paused) {
       try {
-        // 🔥 Kill flash/torch immediately when app goes to background
-        final controller = state.controller;
-        if (controller != null && controller.value.isInitialized) {
-          if (state.flashMode == FlashMode.always) {
+        final controller = this.state.controller;
+        if (controller != null) {
+          if (this.state.flashMode == FlashMode.always) {
             await _nuclearFlashKill(controller);
           } else {
             await _softFlashQuench(controller);
           }
-          await controller.pausePreview();
+          
+          // Full disposal on backgrounding to free up hardware
+          await ref.read(cameraRepositoryProvider).dispose();
+          this.state = this.state.copyWith(controller: null, isReady: false);
         }
-      } catch (_) {}
+      } catch (e) {
+        debugPrint("Error on backgrounding: $e");
+      }
     }
 
-    if (appLifecycleState == AppLifecycleState.resumed) {
-      if (_isRestarting) return;
-
-      _isRestarting = true;
-      try {
-        await _restartCamera();
-      } finally {
-        _isRestarting = false;
-      }
+    if (appState == AppLifecycleState.resumed) {
+      // Small delay to ensure hardware is released by OS/other apps
+      await Future.delayed(const Duration(milliseconds: 300));
+      await initialize();
     }
   }
 
-  // ================= RESTART =================
+  // ================= REFRESH =================
 
-  Future<void> _restartCamera() async {
-    try {
-      final oldController = state.controller;
-
-      state = state.copyWith(controller: null, isReady: false);
-
-      await Future.delayed(const Duration(milliseconds: 50));
-      if (oldController != null && oldController.value.isInitialized) {
-        await oldController.dispose();
-      }
-
-      final repo = ref.read(cameraRepositoryProvider);
-      await repo.initialize(state.currentLens);
-
-      final controller = repo.controller;
-
-      if (controller != null) {
-        if (!controller.value.isInitialized) {
-          await controller.initialize();
-        }
-        await controller.setFocusMode(FocusMode.auto);
-        await controller.setExposureMode(ExposureMode.auto);
-        
-        // Explicitly set central points to force AE/AF calculation
-        await controller.setFocusPoint(const Offset(0.5, 0.5));
-        await controller.setExposurePoint(const Offset(0.5, 0.5));
-
-        // Always start with flash OFF on the controller
-        await controller.setFlashMode(FlashMode.off);
-
-        await Future.delayed(const Duration(milliseconds: 400));
-
-        await controller.setExposureOffset(_currentExposure);
-      }
-
-      state = state.copyWith(controller: controller, isReady: true, error: null);
-
-    } catch (e) {
-      debugPrint("Restart error: $e");
-      state = state.copyWith(isReady: false, error: e.toString());
-    }
+  Future<void> refreshCamera() async {
+    debugPrint("Refreshing camera manually...");
+    await ref.read(cameraRepositoryProvider).dispose();
+    state = state.copyWith(controller: null, isReady: false, error: null);
+    await Future.delayed(const Duration(milliseconds: 200));
+    await initialize();
   }
+
   // ================= FOCUS =================
 
   Future<void> setFocusPoint(
       Offset position, Size previewSize) async {
     final controller = state.controller;
-    if (controller == null) return;
+    if (controller == null || !controller.value.isInitialized) return;
 
     try {
       final dx = (position.dx / previewSize.width).clamp(0.0, 1.0);
@@ -223,12 +239,33 @@ class CameraViewModel extends StateNotifier<CameraState>
 
       state = state.copyWith(isManualFocus: true);
 
-      await controller.setFocusMode(FocusMode.auto);
-      await controller.setExposureMode(ExposureMode.auto);
+      // Wrap individual calls in try-catch as some devices might fail on one but not the other
+      try {
+        await controller.setFocusMode(FocusMode.auto);
+      } catch (e) {
+        debugPrint("Error setting focus mode: $e");
+      }
+      
+      try {
+        await controller.setExposureMode(ExposureMode.auto);
+      } catch (e) {
+        debugPrint("Error setting exposure mode: $e");
+      }
 
-      await controller.setFocusPoint(Offset(dx, dy));
-      await controller.setExposurePoint(Offset(dx, dy));
-    } catch (_) {}
+      try {
+        await controller.setFocusPoint(Offset(dx, dy));
+      } catch (e) {
+        debugPrint("Error setting focus point: $e");
+      }
+      
+      try {
+        await controller.setExposurePoint(Offset(dx, dy));
+      } catch (e) {
+        debugPrint("Error setting exposure point: $e");
+      }
+    } catch (e) {
+      debugPrint("Overall focus point error: $e");
+    }
   }
 
   Future<void> resetFocus() async {
@@ -382,22 +419,27 @@ class CameraViewModel extends StateNotifier<CameraState>
           await controller.initialize();
         }
 
-        _minExposure = await controller.getMinExposureOffset();
-        _maxExposure = await controller.getMaxExposureOffset();
-        final minZoom = await controller.getMinZoomLevel();
-        final maxZoom = await controller.getMaxZoomLevel();
+        try {
+          _minExposure = await controller.getMinExposureOffset();
+          _maxExposure = await controller.getMaxExposureOffset();
+          final minZoom = await controller.getMinZoomLevel();
+          final maxZoom = await controller.getMaxZoomLevel();
 
-        state = state.copyWith(
-          isReady: true,
-          controller: controller,
-          exposure: 0.0,
-          minExposure: _minExposure,
-          maxExposure: _maxExposure,
-          zoom: 1.0,
-          minZoom: minZoom,
-          maxZoom: maxZoom,
-          error: null,
-        );
+          state = state.copyWith(
+            isReady: true,
+            controller: controller,
+            exposure: 0.0,
+            minExposure: _minExposure,
+            maxExposure: _maxExposure,
+            zoom: 1.0,
+            minZoom: minZoom,
+            maxZoom: maxZoom,
+            error: null,
+          );
+        } catch (e) {
+          debugPrint("Error getting camera capabilities during switch: $e");
+          state = state.copyWith(isReady: true, controller: controller, error: null);
+        }
 
         if (wasRecording) {
           await startVideoRecording();
@@ -451,10 +493,26 @@ class CameraViewModel extends StateNotifier<CameraState>
       final repo = ref.read(cameraRepositoryProvider);
 
       // 1. Prepare hardware
-      await controller.setFocusMode(FocusMode.auto);
-      await controller.setExposureMode(ExposureMode.auto);
-      // Re-trigger metering on the center point to maximize gain
-      await controller.setExposurePoint(const Offset(0.5, 0.5));
+      if (controller.value.isInitialized) {
+        try {
+          await controller.setFocusMode(FocusMode.auto);
+        } catch (e) {
+          debugPrint("Capture focus mode error: $e");
+        }
+        
+        try {
+          await controller.setExposureMode(ExposureMode.auto);
+        } catch (e) {
+          debugPrint("Capture exposure mode error: $e");
+        }
+        
+        // Re-trigger metering on the center point to maximize gain
+        try {
+          await controller.setExposurePoint(const Offset(0.5, 0.5));
+        } catch (e) {
+          debugPrint("Capture exposure point error: $e");
+        }
+      }
 
       // 2. Enable Light for Capture
       if (state.flashMode == FlashMode.always) {
@@ -491,7 +549,9 @@ class CameraViewModel extends StateNotifier<CameraState>
       }
 
       unawaited(HapticFeedback.lightImpact());
-      await _handlePostCapture(path, context, deviceOrientation);
+      if (context.mounted) {
+        await _handlePostCapture(path, context, deviceOrientation);
+      }
 
     } catch (e) {
       debugPrint('Capture error: $e');
@@ -565,8 +625,11 @@ class CameraViewModel extends StateNotifier<CameraState>
       final lastSegment = await repo.stopVideoRecording();
       final allSegments = [...state.videoSegments, lastSegment];
       
-      // Update state: stop recording but DON'T clear segments yet in case of failure
-      state = state.copyWith(isRecording: false);
+      // Update state: stop recording and start processing overlay
+      state = state.copyWith(
+        isRecording: false,
+        processingProgress: 0.05,
+      );
       unawaited(HapticFeedback.mediumImpact());
 
       if (state.flashMode == FlashMode.always) {
@@ -577,14 +640,13 @@ class CameraViewModel extends StateNotifier<CameraState>
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
             content: Text("Processing video..."),
-            duration: Duration(milliseconds: 500),
+            duration: Duration(milliseconds: 1500),
           ),
         );
       }
 
       // 1. Merge segments if necessary
       String finalVideoPath = lastSegment.path;
-      bool wasMerged = false;
       if (allSegments.length > 1) {
         debugPrint("Merging ${allSegments.length} segments...");
         final mergedPath = await VideoWatermarkProcessor.mergeVideos(
@@ -592,83 +654,143 @@ class CameraViewModel extends StateNotifier<CameraState>
         );
         if (mergedPath != null) {
           finalVideoPath = mergedPath;
-          wasMerged = true;
           debugPrint("Merged video saved at: $finalVideoPath");
         } else {
           debugPrint("Merging failed, using last segment.");
         }
       }
 
-      // 2. Process video with overlay
-      final history = state.videoDataHistory;
-      final orientation = ref.read(deviceOrientationProvider);
-      
-      // Always use 1080x1920 for video overlays to ensure consistency.
-      const double width = 1080;
-      const double height = 1920;
-
-      debugPrint("Generating overlay sequence for ${history.length} samples...");
+      // 2. Generate overlay sequence (Main Isolate)
       final sequenceDir = await VideoWatermarkProcessor.generateVideoOverlaySequence(
-        history: history,
-        orientation: orientation,
-        width: width,
-        height: height,
-        settings: ref.read(overlaySettingsProvider),
+        history: state.videoDataHistory,
+        orientation: state.orientation,
+        width: 1080,
+        height: 1920,
+        onProgress: (p) {
+          state = state.copyWith(processingProgress: 0.05 + (p * 0.35)); // 5% to 40%
+        },
       );
 
-      String? processedPath;
-      if (sequenceDir != null) {
-        debugPrint("Applying sequence overlay to video...");
-        processedPath = await VideoWatermarkProcessor.applyOverlaySequenceToVideo(
-          videoPath: finalVideoPath,
-          sequenceDir: sequenceDir,
-          frameCount: history.length,
-        );
+      if (sequenceDir == null) {
+        throw Exception("Failed to generate overlay sequence.");
       }
 
-      if (processedPath != null) {
-        debugPrint("Video processed successfully: $processedPath");
-        final savedPath = await GallerySaver.saveVideo(processedPath);
-        ref.invalidate(galleryFilesProvider);
-        if (context.mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text("Video saved to gallery")),
-          );
-        }
-        
-        // Generate thumbnail for the preview circle
-        final thumbPath = await ThumbnailUtils.generateVideoThumbnail(savedPath);
-        if (thumbPath != null) {
-          ref.read(lastImageProvider.notifier).state = File(thumbPath);
-        }
-      } else {
-        debugPrint("Overlay processing failed, saving raw video.");
-        final savedPath = await GallerySaver.saveVideo(finalVideoPath);
-        ref.invalidate(galleryFilesProvider);
-        if (context.mounted) {
-           ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text("Video saved (without overlay)")),
-          );
-        }
-        
-        final thumbPath = await ThumbnailUtils.generateVideoThumbnail(savedPath);
-        if (thumbPath != null) {
-          ref.read(lastImageProvider.notifier).state = File(thumbPath);
-        }
-      }
+      // 3. Start foreground service to keep app alive and show notification
+      await _startForegroundService();
 
-      // 3. CLEANUP segments after successful save
-      state = state.copyWith(videoSegments: [], videoDataHistory: []);
-      
+      // 4. Orchestrate processing on main isolate (avoids MissingPluginException)
+      unawaited(_processVideoOnMainIsolate(
+        videoPath: finalVideoPath,
+        sequenceDir: sequenceDir,
+        frameCount: state.videoDataHistory.length,
+      ));
+
+      // 5. Cleanup local segments state
+      state = state.copyWith(
+        videoSegments: [], 
+        videoDataHistory: [], 
+      );
+
     } catch (e) {
       debugPrint("Stop recording error: $e");
-      state = state.copyWith(isRecording: false);
+      state = state.copyWith(isRecording: false, clearProcessingProgress: true);
+      await FlutterForegroundTask.stopService();
       if (context.mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(content: Text("Error saving video: $e")),
         );
       }
     }
+  }
+
+  Future<void> _startForegroundService() async {
+    // 0. Ensure notification permission
+    await PermissionService.requestNotificationPermission();
+
+    // 1. Initialize notification options
+    FlutterForegroundTask.init(
+      androidNotificationOptions: AndroidNotificationOptions(
+        channelId: 'processing_channel',
+        channelName: 'Video Processing',
+        channelDescription: 'Shows progress of video watermarking',
+        channelImportance: NotificationChannelImportance.LOW,
+        priority: NotificationPriority.LOW,
+        iconData: const NotificationIconData(
+          resType: ResourceType.mipmap,
+          resPrefix: ResourcePrefix.ic,
+          name: 'launcher',
+        ),
+      ),
+      iosNotificationOptions: const IOSNotificationOptions(
+        showNotification: true,
+        playSound: false,
+      ),
+      foregroundTaskOptions: const ForegroundTaskOptions(
+        interval: 5000,
+        isOnceEvent: false,
+        autoRunOnBoot: false,
+        allowWakeLock: true,
+        allowWifiLock: true,
+      ),
+    );
+
+    // 2. Start service
+    await FlutterForegroundTask.startService(
+      notificationTitle: 'SurveyCam',
+      notificationText: 'Preparing video watermark...',
+      callback: startCallback,
+    );
+  }
+
+  Future<void> _processVideoOnMainIsolate({
+    required String videoPath,
+    required String sequenceDir,
+    required int frameCount,
+  }) async {
+    try {
+      // 1. Apply Sequence (Heavy FFmpeg part)
+      final processedPath = await VideoWatermarkProcessor.applyOverlaySequenceToVideo(
+        videoPath: videoPath,
+        sequenceDir: sequenceDir,
+        frameCount: frameCount,
+        onProgress: (p) {
+          final progress = 0.4 + (p * 0.5); // 40% to 90%
+          state = state.copyWith(processingProgress: progress);
+          _updateNotification("Applying watermark... ${(progress * 100).toInt()}%");
+        },
+      );
+
+      if (processedPath == null) throw Exception("FFmpeg processing failed");
+
+      state = state.copyWith(processingProgress: 0.95);
+      _updateNotification("Saving to gallery... 95%");
+
+      // 2. Save to Gallery
+      final savedPath = await GallerySaver.saveVideo(processedPath);
+      await ThumbnailUtils.generateVideoThumbnail(savedPath);
+
+      _updateNotification("Video saved successfully!", isFinished: true);
+      
+      state = state.copyWith(clearProcessingProgress: true);
+      ref.invalidate(galleryFilesProvider);
+
+    } catch (e) {
+      debugPrint("Process video on main isolate error: $e");
+      _updateNotification("Error: ${e.toString()}", isFinished: true);
+      state = state.copyWith(clearProcessingProgress: true, error: e.toString());
+    } finally {
+      // Stop service after a delay to show success/error
+      Future.delayed(const Duration(seconds: 3), () {
+        FlutterForegroundTask.stopService();
+      });
+    }
+  }
+
+  void _updateNotification(String text, {bool isFinished = false}) {
+    FlutterForegroundTask.updateService(
+      notificationTitle: "SurveyCam - Processing",
+      notificationText: text,
+    );
   }
 
   Future<void> _handlePostCapture(
@@ -705,7 +827,8 @@ class CameraViewModel extends StateNotifier<CameraState>
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
     _videoHistoryTimer?.cancel();
-    state.controller?.dispose();
+    _receivePort?.close();
+    ref.read(cameraRepositoryProvider).dispose();
     super.dispose();
   }
 }

@@ -6,10 +6,9 @@ import 'package:share_plus/share_plus.dart';
 import 'package:surveycam/features/gallery/data/sitesnap_gallery_repository.dart';
 import 'package:surveycam/features/gallery/presentation/gallery_image_viewer.dart';
 import 'package:surveycam/features/gallery/presentation/video_player_screen.dart';
-import 'package:flutter_video_thumbnail_plus/flutter_video_thumbnail_plus.dart';
-import 'package:path_provider/path_provider.dart';
-import 'package:path/path.dart' as p;
 import 'package:surveycam/core/utils/thumbnail_utils.dart';
+
+final gallerySelectionProvider = StateProvider<Set<File>>((ref) => {});
 
 class GalleryFolderScreen extends ConsumerStatefulWidget {
   const GalleryFolderScreen({super.key});
@@ -20,9 +19,6 @@ class GalleryFolderScreen extends ConsumerStatefulWidget {
 }
 
 class _GalleryFolderScreenState extends ConsumerState<GalleryFolderScreen> {
-  Set<File> selectedImages = {};
-  bool selectionMode = false;
-
   @override
   void initState() {
     super.initState();
@@ -38,6 +34,7 @@ class _GalleryFolderScreenState extends ConsumerState<GalleryFolderScreen> {
 
   /// ================= SHARE =================
   void _shareSelected() {
+    final selectedImages = ref.read(gallerySelectionProvider);
     if (selectedImages.isEmpty) return;
 
     Share.shareXFiles(
@@ -47,36 +44,20 @@ class _GalleryFolderScreenState extends ConsumerState<GalleryFolderScreen> {
   }
 
   /// ================= SELECT =================
-  void _toggleSelection(File file) {
-    setState(() {
-      if (selectedImages.contains(file)) {
-        selectedImages.remove(file);
-      } else {
-        selectedImages.add(file);
-      }
-
-      selectionMode = selectedImages.isNotEmpty;
-    });
-  }
-
   void _selectAll(List<File> images) {
-    setState(() {
-      selectedImages = images.toSet();
-      selectionMode = true;
-    });
+    ref.read(gallerySelectionProvider.notifier).state = images.toSet();
   }
 
   void _clearSelection() {
-    setState(() {
-      selectedImages.clear();
-      selectionMode = false;
-    });
+    ref.read(gallerySelectionProvider.notifier).state = {};
   }
 
   /// ================= BUILD =================
   @override
   Widget build(BuildContext context) {
     final galleryAsync = ref.watch(galleryFilesProvider);
+    final selectedImages = ref.watch(gallerySelectionProvider);
+    final selectionMode = selectedImages.isNotEmpty;
 
     return Scaffold(
       backgroundColor: Colors.black,
@@ -133,10 +114,14 @@ class _GalleryFolderScreenState extends ConsumerState<GalleryFolderScreen> {
                 mainAxisSpacing: 6,
               ),
               itemCount: images.length,
-              itemBuilder: (_, i) {
+              itemBuilder: (context, i) {
                 final file = images[i];
-                final isSelected = selectedImages.contains(file);
-                return _buildGridItem(file, i, isSelected, images);
+                return GalleryItem(
+                  key: ValueKey(file.path),
+                  file: file,
+                  index: i,
+                  allImages: images,
+                );
               },
             ),
           );
@@ -147,136 +132,6 @@ class _GalleryFolderScreenState extends ConsumerState<GalleryFolderScreen> {
         ),
       ),
     );
-  }
-
-  /// ================= GRID ITEM =================
-  Widget _buildGridItem(File file, int index, bool isSelected, List<File> allImages) {
-    final isVideo = file.path.toLowerCase().endsWith('.mp4') ||
-        file.path.toLowerCase().endsWith('.mov');
-
-    return Material(
-      color: Colors.transparent,
-      child: InkWell(
-        borderRadius: BorderRadius.circular(12),
-        onLongPress: () {
-          setState(() {
-            selectionMode = true;
-            selectedImages.add(file);
-          });
-        },
-        onTap: () {
-          if (selectionMode) {
-            _toggleSelection(file);
-          } else {
-            if (isVideo) {
-              Navigator.push(
-                context,
-                MaterialPageRoute(
-                  builder: (_) => VideoPlayerScreen(file: file),
-                ),
-              );
-            } else {
-              Navigator.push(
-                context,
-                MaterialPageRoute(
-                  builder: (_) => GalleryImageViewer(
-                    images: allImages,
-                    initialIndex: index,
-                  ),
-                ),
-              );
-            }
-          }
-        },
-        child: AnimatedContainer(
-          duration: const Duration(milliseconds: 200),
-          curve: Curves.easeInOut,
-          decoration: BoxDecoration(
-            borderRadius: BorderRadius.circular(12),
-            border: isSelected
-                ? Border.all(color: Colors.blue, width: 2)
-                : null,
-          ),
-          child: Stack(
-            children: [
-              /// 🔥 HERO IMAGE / THUMBNAIL
-              ClipRRect(
-                borderRadius: BorderRadius.circular(10),
-                child: Hero(
-                  tag: file.path,
-                  child: isVideo
-                      ? FutureBuilder<String?>(
-                          future: _generateThumbnail(file.path),
-                          builder: (context, snapshot) {
-                            if (snapshot.hasData && snapshot.data != null) {
-                              return Image.file(
-                                File(snapshot.data!),
-                                fit: BoxFit.cover,
-                                width: double.infinity,
-                                height: double.infinity,
-                                cacheWidth: 300,
-                              );
-                            }
-                            return Container(
-                              color: Colors.grey[900],
-                              child: const Icon(Icons.video_library,
-                                  color: Colors.white24),
-                            );
-                          },
-                        )
-                      : Image.file(
-                          file,
-                          fit: BoxFit.cover,
-                          width: double.infinity,
-                          height: double.infinity,
-                          cacheWidth: 300,
-                        ),
-                ),
-              ),
-
-              /// Play icon for videos
-              if (isVideo)
-                const Center(
-                  child: Icon(
-                    Icons.play_circle_outline,
-                    color: Colors.white70,
-                    size: 32,
-                  ),
-                ),
-
-              /// overlay
-              if (isSelected)
-                Container(
-                  decoration: BoxDecoration(
-                    borderRadius: BorderRadius.circular(10),
-                    color: Colors.black.withValues(alpha: 0.4),
-                  ),
-                ),
-
-              /// check icon
-              if (isSelected)
-                const Positioned(
-                  top: 6,
-                  right: 6,
-                  child: CircleAvatar(
-                    radius: 10,
-                    backgroundColor: Colors.blue,
-                    child: Icon(
-                      Icons.check,
-                      size: 14,
-                      color: Colors.white,
-                    ),
-                  ),
-                ),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
-
-  Future<String?> _generateThumbnail(String videoPath) async {
-    return await ThumbnailUtils.generateVideoThumbnail(videoPath);
   }
 
   /// ================= LOADING =================
@@ -316,6 +171,178 @@ class _GalleryFolderScreenState extends ConsumerState<GalleryFolderScreen> {
           ),
         ],
       ),
+    );
+  }
+}
+
+class GalleryItem extends ConsumerWidget {
+  final File file;
+  final int index;
+  final List<File> allImages;
+
+  const GalleryItem({
+    super.key,
+    required this.file,
+    required this.index,
+    required this.allImages,
+  });
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final selectedImages = ref.watch(gallerySelectionProvider);
+    final isSelected = selectedImages.contains(file);
+    final selectionMode = selectedImages.isNotEmpty;
+
+    final isVideo = file.path.toLowerCase().endsWith('.mp4') ||
+        file.path.toLowerCase().endsWith('.mov');
+
+    return RepaintBoundary(
+      child: Material(
+        color: Colors.transparent,
+        child: InkWell(
+          borderRadius: BorderRadius.circular(12),
+          onLongPress: () {
+            ref.read(gallerySelectionProvider.notifier).update((state) => {...state, file});
+          },
+          onTap: () {
+            if (selectionMode) {
+              ref.read(gallerySelectionProvider.notifier).update((state) {
+                final newState = {...state};
+                if (newState.contains(file)) {
+                  newState.remove(file);
+                } else {
+                  newState.add(file);
+                }
+                return newState;
+              });
+            } else {
+              if (isVideo) {
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    builder: (_) => VideoPlayerScreen(file: file),
+                  ),
+                );
+              } else {
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    builder: (_) => GalleryImageViewer(
+                      images: allImages,
+                      initialIndex: index,
+                    ),
+                  ),
+                );
+              }
+            }
+          },
+          child: AnimatedContainer(
+            duration: const Duration(milliseconds: 200),
+            curve: Curves.easeInOut,
+            decoration: BoxDecoration(
+              borderRadius: BorderRadius.circular(12),
+              border: isSelected
+                  ? Border.all(color: Colors.blue, width: 2)
+                  : null,
+            ),
+            child: Stack(
+              children: [
+                /// 🔥 HERO IMAGE / THUMBNAIL
+                ClipRRect(
+                  borderRadius: BorderRadius.circular(10),
+                  child: Hero(
+                    tag: file.path,
+                    child: isVideo
+                        ? VideoThumbnailWidget(videoPath: file.path)
+                        : Image.file(
+                            file,
+                            fit: BoxFit.cover,
+                            width: double.infinity,
+                            height: double.infinity,
+                            cacheWidth: 300,
+                          ),
+                  ),
+                ),
+
+                /// Play icon for videos
+                if (isVideo)
+                  const Center(
+                    child: Icon(
+                      Icons.play_circle_outline,
+                      color: Colors.white70,
+                      size: 32,
+                    ),
+                  ),
+
+                /// overlay
+                if (isSelected)
+                  Container(
+                    decoration: BoxDecoration(
+                      borderRadius: BorderRadius.circular(10),
+                      color: Colors.black.withValues(alpha: 0.4),
+                    ),
+                  ),
+
+                /// check icon
+                if (isSelected)
+                  const Positioned(
+                    top: 6,
+                    right: 6,
+                    child: CircleAvatar(
+                      radius: 10,
+                      backgroundColor: Colors.blue,
+                      child: Icon(
+                        Icons.check,
+                        size: 14,
+                        color: Colors.white,
+                      ),
+                    ),
+                  ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class VideoThumbnailWidget extends StatefulWidget {
+  final String videoPath;
+  const VideoThumbnailWidget({super.key, required this.videoPath});
+
+  @override
+  State<VideoThumbnailWidget> createState() => _VideoThumbnailWidgetState();
+}
+
+class _VideoThumbnailWidgetState extends State<VideoThumbnailWidget> {
+  late Future<String?> _thumbnailFuture;
+
+  @override
+  void initState() {
+    super.initState();
+    _thumbnailFuture = ThumbnailUtils.generateVideoThumbnail(widget.videoPath);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return FutureBuilder<String?>(
+      future: _thumbnailFuture,
+      builder: (context, snapshot) {
+        if (snapshot.hasData && snapshot.data != null) {
+          return Image.file(
+            File(snapshot.data!),
+            fit: BoxFit.cover,
+            width: double.infinity,
+            height: double.infinity,
+            cacheWidth: 300,
+          );
+        }
+        return Container(
+          color: Colors.grey[900],
+          child: const Icon(Icons.video_library, color: Colors.white24),
+        );
+      },
     );
   }
 }

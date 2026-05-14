@@ -6,5 +6,6 @@ abstract class CameraRepository {
   Future<String> takePicture();
   Future<void> startVideoRecording();
   Future<XFile> stopVideoRecording();
-  CameraController get controller;
+  Future<void> dispose();
+  CameraController? get controller;
 }

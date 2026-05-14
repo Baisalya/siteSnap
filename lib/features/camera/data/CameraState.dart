@@ -28,7 +28,6 @@ class CameraState {
   final bool isManualFocus;
   final CameraAspectRatio aspectRatio;
 
-  /// 🔥 ADD THIS
   final double exposure;
   final double minExposure;
   final double maxExposure;
@@ -47,6 +46,7 @@ class CameraState {
 
   final List<XFile> videoSegments;
   final List<OverlayData> videoDataHistory;
+  final double? processingProgress;
 
   const CameraState({
     required this.isReady,
@@ -60,19 +60,17 @@ class CameraState {
     this.aspectRatio = CameraAspectRatio.ratio16_9,
     this.error,
     this.videoSegments = const [],
-
-    /// 🔥 DEFAULT
+    this.videoDataHistory = const [],
+    this.processingProgress,
     this.exposure = 0.0,
     this.minExposure = -2.0,
     this.maxExposure = 2.0,
     this.zoom = 1.0,
     this.maxZoom = 1.0,
     this.minZoom = 1.0,
-
     this.orientation = DeviceOrientation.portraitUp,
     this.captureOrientation,
     this.captureLens,
-    this.videoDataHistory = const [],
   });
 
   CameraState copyWith({
@@ -86,20 +84,19 @@ class CameraState {
     bool? isManualFocus,
     CameraAspectRatio? aspectRatio,
     String? error,
-
-    /// 🔥 ADD THIS
     double? exposure,
     double? minExposure,
     double? maxExposure,
     double? zoom,
     double? maxZoom,
     double? minZoom,
-
     DeviceOrientation? orientation,
     DeviceOrientation? captureOrientation,
     CameraLensType? captureLens,
     List<XFile>? videoSegments,
     List<OverlayData>? videoDataHistory,
+    double? processingProgress,
+    bool clearProcessingProgress = false,
   }) {
     return CameraState(
       isReady: isReady ?? this.isReady,
@@ -113,20 +110,17 @@ class CameraState {
       aspectRatio: aspectRatio ?? this.aspectRatio,
       error: error ?? this.error,
       videoSegments: videoSegments ?? this.videoSegments,
-
-      /// 🔥 APPLY
-    exposure: exposure ?? this.exposure,
-    minExposure: minExposure ?? this.minExposure,
-    maxExposure: maxExposure ?? this.maxExposure,
-    zoom: zoom ?? this.zoom,
-    maxZoom: maxZoom ?? this.maxZoom,
-    minZoom: minZoom ?? this.minZoom,
-
-      orientation: orientation ?? this.orientation,
-      captureOrientation:
-      captureOrientation ?? this.captureOrientation,
-      captureLens: captureLens ?? this.captureLens,
       videoDataHistory: videoDataHistory ?? this.videoDataHistory,
+      processingProgress: clearProcessingProgress ? null : (processingProgress ?? this.processingProgress),
+      exposure: exposure ?? this.exposure,
+      minExposure: minExposure ?? this.minExposure,
+      maxExposure: maxExposure ?? this.maxExposure,
+      zoom: zoom ?? this.zoom,
+      maxZoom: maxZoom ?? this.maxZoom,
+      minZoom: minZoom ?? this.minZoom,
+      orientation: orientation ?? this.orientation,
+      captureOrientation: captureOrientation ?? this.captureOrientation,
+      captureLens: captureLens ?? this.captureLens,
     );
   }
 }

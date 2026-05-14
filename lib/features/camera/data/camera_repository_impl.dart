@@ -3,13 +3,20 @@ import 'package:surveycam/features/camera/domain/camera_lens_type.dart';
 import 'package:surveycam/features/camera/domain/camera_repository.dart';
 
 class CameraRepositoryImpl implements CameraRepository {
-  late CameraController _controller;
+  CameraController? _controller;
   late Map<CameraLensType, CameraDescription> _cameraMap;
 
   CameraLensType _currentLens = CameraLensType.normal;
 
   @override
   Future<void> initialize(CameraLensType lens) async {
+    // Ensure previous controller is fully disposed before attempting to open a new one
+    if (_controller != null) {
+      await dispose();
+      // Add a small breather for the hardware to release
+      await Future.delayed(const Duration(milliseconds: 150));
+    }
+
     final cameras = await availableCameras();
 
     final backCameras = cameras
@@ -59,63 +66,103 @@ class CameraRepositoryImpl implements CameraRepository {
 
     _currentLens = lens;
 
-    await _initController(_cameraMap[lens]!);
+    final cameraDesc = _cameraMap[lens];
+    if (cameraDesc == null) {
+      throw Exception('Camera lens not found: $lens');
+    }
+
+    await _initController(cameraDesc);
   }
 
   Future<void> _initController(CameraDescription camera) async {
-    _controller = CameraController(
+    final controller = CameraController(
       camera,
       ResolutionPreset.max, // 🔥 Use MAX for highest possible quality
       enableAudio: true,
       imageFormatGroup: ImageFormatGroup.jpeg,
     );
 
-    await _controller.initialize();
+    _controller = controller;
 
-    // Initial quality settings
-    await _controller.setFocusMode(FocusMode.auto);
-    await _controller.setExposureMode(ExposureMode.auto);
+    try {
+      await controller.initialize();
+
+      // Initial quality settings - only if supported
+      if (controller.value.isInitialized) {
+        try {
+          await controller.setFocusMode(FocusMode.auto);
+        } catch (e) {
+          print("Focus mode auto not supported: $e");
+        }
+        
+        try {
+          await controller.setExposureMode(ExposureMode.auto);
+        } catch (e) {
+          print("Exposure mode auto not supported: $e");
+        }
+      }
+    } catch (e) {
+      // If initialization fails, dispose and rethrow
+      await controller.dispose();
+      _controller = null;
+      rethrow;
+    }
   }
 
   @override
   Future<String> takePicture() async {
-    if (!_controller.value.isInitialized ||
-        _controller.value.isTakingPicture) {
+    final controller = _controller;
+    if (controller == null || !controller.value.isInitialized ||
+        controller.value.isTakingPicture) {
       throw Exception("Camera not ready");
     }
 
-    final file = await _controller.takePicture();
+    final file = await controller.takePicture();
     return file.path;
   }
 
   @override
   Future<void> startVideoRecording() async {
-    if (!_controller.value.isInitialized || _controller.value.isRecordingVideo) {
+    final controller = _controller;
+    if (controller == null || !controller.value.isInitialized || controller.value.isRecordingVideo) {
       return;
     }
-    await _controller.startVideoRecording();
+    await controller.startVideoRecording();
   }
 
   @override
   Future<XFile> stopVideoRecording() async {
-    if (!_controller.value.isInitialized || !_controller.value.isRecordingVideo) {
+    final controller = _controller;
+    if (controller == null || !controller.value.isInitialized || !controller.value.isRecordingVideo) {
       throw Exception("No recording in progress");
     }
-    return await _controller.stopVideoRecording();
+    return await controller.stopVideoRecording();
   }
 
   Future<void> switchLens(CameraLensType type) async {
     if (type == _currentLens) return;
     if (!_cameraMap.containsKey(type)) return;
 
-    await _controller.dispose();
+    await dispose();
 
     _currentLens = type;
     await _initController(_cameraMap[type]!);
   }
 
+  @override
+  Future<void> dispose() async {
+    if (_controller != null) {
+      try {
+        await _controller!.dispose();
+      } catch (e) {
+        print("Error disposing camera controller: $e");
+      }
+      _controller = null;
+    }
+  }
+
   CameraLensType get currentLens => _currentLens;
 
   @override
-  CameraController get controller => _controller;
+  CameraController? get controller => _controller;
 }

@@ -37,7 +37,7 @@ class CameraScreen extends ConsumerStatefulWidget {
       _CameraScreenState();
 }
 
-class _CameraScreenState extends ConsumerState<CameraScreen> {
+class _CameraScreenState extends ConsumerState<CameraScreen> with WidgetsBindingObserver {
 
   bool _showExposure = false;
   Timer? _dateTimer;
@@ -49,6 +49,7 @@ class _CameraScreenState extends ConsumerState<CameraScreen> {
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
 
     /// INITIALIZE RATE US SERVICE AND CHECK
     WidgetsBinding.instance.addPostFrameCallback((_) async {
@@ -100,7 +101,19 @@ class _CameraScreenState extends ConsumerState<CameraScreen> {
   }
 
   @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) {
+      // Re-initialize camera if it was lost
+      final cameraState = ref.read(cameraViewModelProvider);
+      if (!cameraState.isReady || cameraState.controller == null) {
+        ref.read(cameraViewModelProvider.notifier).refreshCamera();
+      }
+    }
+  }
+
+  @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     _dateTimer?.cancel();
     _focusTimer?.cancel();
     _recordingTimer?.cancel();
@@ -316,7 +329,10 @@ class _CameraScreenState extends ConsumerState<CameraScreen> {
                                                       child: SizedBox(
                                                         width: controller.value.previewSize!.height,
                                                         height: controller.value.previewSize!.width,
-                                                        child: CameraPreview(controller),
+                                                        child: CameraPreview(
+                                                          controller,
+                                                          key: ValueKey(controller.description.name),
+                                                        ),
                                                       ),
                                                     ),
 
@@ -722,13 +738,18 @@ class _CameraScreenState extends ConsumerState<CameraScreen> {
                               width: 60,
                               child: Center(
                                 child: GestureDetector(
-                                  onTap: () {
-                                    Navigator.push(
+                                  onTap: () async {
+                                    final result = await Navigator.push(
                                       context,
                                       MaterialPageRoute(
                                         builder: (_) => const GalleryFolderScreen(),
                                       ),
                                     );
+                                    
+                                    // Refresh camera when coming back from Gallery
+                                    if (mounted) {
+                                      ref.read(cameraViewModelProvider.notifier).refreshCamera();
+                                    }
                                   },
                                   child: Container(
                                     padding: const EdgeInsets.all(2),

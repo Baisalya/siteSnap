@@ -53,6 +53,7 @@ class VideoWatermarkProcessor {
     bool showOverlay = true,
     bool showWatermark = true,
     OverlaySettings settings = const OverlaySettings(),
+    Function(double)? onProgress,
   }) async {
     try {
       final tempDir = await getTemporaryDirectory();
@@ -137,6 +138,11 @@ class VideoWatermarkProcessor {
           final file = File(p.join(sequenceDir.path, 'frame_$i.png'));
           await file.writeAsBytes(pngBytes);
         }
+
+        // Report progress for image generation (0% to 40%)
+        if (onProgress != null) {
+          onProgress((i + 1) / history.length * 0.4);
+        }
       }
       return sequenceDir.path;
     } catch (e) {
@@ -149,22 +155,26 @@ class VideoWatermarkProcessor {
     required String videoPath,
     required String sequenceDir,
     required int frameCount,
+    Function(double)? onProgress,
   }) async {
     try {
       final tempDir = await getTemporaryDirectory();
       final outputPath = p.join(tempDir.path, 'processed_video_${DateTime.now().millisecondsSinceEpoch}.mp4');
 
       // FFmpeg command to use image sequence as overlay
-      // -framerate 1: The sequence is sampled at 1Hz (matches our timer)
-      // -i frame_%d.png: Input pattern for the images
-      // [1:v]setpts=PTS-STARTPTS: Synchronization
       final command = '-i "$videoPath" -framerate 1 -i "$sequenceDir/frame_%d.png" '
           '-filter_complex "[0:v]scale=1080:1920:force_original_aspect_ratio=decrease,pad=1080:1920:(1080-iw)/2:(1920-ih)/2,setsar=1[v];'
           '[1:v]setpts=PTS-STARTPTS[ov];[v][ov]overlay=0:0" '
           '-c:v libx264 -preset ultrafast -crf 23 -codec:a copy -y "$outputPath"';
 
+      debugPrint("Executing FFmpeg: $command");
+      
+      // We use FFmpegKit.execute (synchronous wait) which is safe in an async function 
+      // as it runs the heavy lifting in native threads.
       final session = await FFmpegKit.execute(command);
       final returnCode = await session.getReturnCode();
+      
+      debugPrint("FFmpeg finished with return code: $returnCode");
 
       // Cleanup sequence dir
       try {
@@ -172,8 +182,11 @@ class VideoWatermarkProcessor {
       } catch (_) {}
 
       if (ReturnCode.isSuccess(returnCode)) {
+        if (onProgress != null) onProgress(1.0);
         return outputPath;
       } else {
+        final logs = await session.getAllLogsAsString();
+        debugPrint("FFmpeg failed. Logs: $logs");
         return null;
       }
     } catch (e) {
