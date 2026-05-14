@@ -70,7 +70,7 @@ class GallerySaver {
     }
   }
 
-  static Future<void> saveVideo(String path) async {
+  static Future<String> saveVideo(String path) async {
     try {
       if (_hasAccessCached != true) {
         _hasAccessCached = await Gal.hasAccess();
@@ -101,6 +101,7 @@ class GallerySaver {
       }
 
       await Gal.putVideo(finalPath, album: 'surveycam');
+      return finalPath;
     } catch (e) {
       throw Exception("Failed to save video to gallery: $e");
     }

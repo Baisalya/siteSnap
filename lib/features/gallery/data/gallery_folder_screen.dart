@@ -9,6 +9,7 @@ import 'package:surveycam/features/gallery/presentation/video_player_screen.dart
 import 'package:flutter_video_thumbnail_plus/flutter_video_thumbnail_plus.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:path/path.dart' as p;
+import 'package:surveycam/core/utils/thumbnail_utils.dart';
 
 class GalleryFolderScreen extends ConsumerStatefulWidget {
   const GalleryFolderScreen({super.key});
@@ -275,26 +276,7 @@ class _GalleryFolderScreenState extends ConsumerState<GalleryFolderScreen> {
   }
 
   Future<String?> _generateThumbnail(String videoPath) async {
-    final tempDir = await getTemporaryDirectory();
-    final fileName = p.basenameWithoutExtension(videoPath);
-    final thumbnailPath = p.join(tempDir.path, '$fileName.jpg');
-
-    if (await File(thumbnailPath).exists()) {
-      return thumbnailPath;
-    }
-
-    try {
-      return await FlutterVideoThumbnailPlus.thumbnailFile(
-        video: videoPath,
-        thumbnailPath: tempDir.path,
-        imageFormat: ImageFormat.jpeg,
-        maxWidth: 300,
-        quality: 75,
-      );
-    } catch (e) {
-      debugPrint("Thumbnail error: $e");
-      return null;
-    }
+    return await ThumbnailUtils.generateVideoThumbnail(videoPath);
   }
 
   /// ================= LOADING =================

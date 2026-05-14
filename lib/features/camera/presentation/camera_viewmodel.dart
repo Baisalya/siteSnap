@@ -20,6 +20,7 @@ import 'package:surveycam/features/overlay/presentation/overlay_painter.dart';
 import 'package:surveycam/features/overlay/presentation/overlay_settings_provider.dart';
 import 'package:surveycam/features/gallery/data/sitesnap_gallery_repository.dart';
 import 'package:surveycam/core/utils/gallery_saver.dart';
+import 'package:surveycam/core/utils/thumbnail_utils.dart';
 
 import '../../overlay/presentation/video_watermark_processor.dart';
 
@@ -40,6 +41,7 @@ class CameraViewModel extends StateNotifier<CameraState>
   bool _isCameraStable = false;
   bool _isInitializing = false;
   bool _isRestarting = false;
+  Timer? _videoHistoryTimer;
 
   bool get isCameraStable => _isCameraStable;
   double get exposureValue => _currentExposure;
@@ -529,9 +531,21 @@ class CameraViewModel extends StateNotifier<CameraState>
       }
 
       await repo.startVideoRecording();
+      
+      // Start history tracking
+      _videoHistoryTimer?.cancel();
+      _videoHistoryTimer = Timer.periodic(const Duration(seconds: 1), (timer) {
+        final currentOverlay = ref.read(overlayPreviewProvider);
+        state = state.copyWith(
+          videoDataHistory: [...state.videoDataHistory, currentOverlay],
+        );
+      });
+      // Initial sample
+      final initialOverlay = ref.read(overlayPreviewProvider);
       state = state.copyWith(
         isRecording: true,
         videoSegments: clearSegments ? [] : state.videoSegments,
+        videoDataHistory: clearSegments ? [initialOverlay] : [...state.videoDataHistory, initialOverlay],
       );
       unawaited(HapticFeedback.heavyImpact());
     } catch (e) {
@@ -545,6 +559,9 @@ class CameraViewModel extends StateNotifier<CameraState>
 
     try {
       final repo = ref.read(cameraRepositoryProvider);
+      _videoHistoryTimer?.cancel();
+      _videoHistoryTimer = null;
+      
       final lastSegment = await repo.stopVideoRecording();
       final allSegments = [...state.videoSegments, lastSegment];
       
@@ -583,53 +600,65 @@ class CameraViewModel extends StateNotifier<CameraState>
       }
 
       // 2. Process video with overlay
-      final overlayData = ref.read(overlayPreviewProvider);
+      final history = state.videoDataHistory;
       final orientation = ref.read(deviceOrientationProvider);
       
       // Always use 1080x1920 for video overlays to ensure consistency.
-      // This matches the scaling now applied in VideoWatermarkProcessor.applyOverlayToVideo.
       const double width = 1080;
       const double height = 1920;
 
-      debugPrint("Generating overlay image ($width x $height)...");
-      final overlayBytes = await VideoWatermarkProcessor.generateVideoOverlayImage(
-        data: overlayData,
+      debugPrint("Generating overlay sequence for ${history.length} samples...");
+      final sequenceDir = await VideoWatermarkProcessor.generateVideoOverlaySequence(
+        history: history,
         orientation: orientation,
         width: width,
         height: height,
         settings: ref.read(overlaySettingsProvider),
       );
 
-      debugPrint("Applying overlay to video...");
-      final processedPath = await VideoWatermarkProcessor.applyOverlayToVideo(
-        videoPath: finalVideoPath,
-        overlayBytes: overlayBytes,
-      );
+      String? processedPath;
+      if (sequenceDir != null) {
+        debugPrint("Applying sequence overlay to video...");
+        processedPath = await VideoWatermarkProcessor.applyOverlaySequenceToVideo(
+          videoPath: finalVideoPath,
+          sequenceDir: sequenceDir,
+          frameCount: history.length,
+        );
+      }
 
       if (processedPath != null) {
         debugPrint("Video processed successfully: $processedPath");
-        await GallerySaver.saveVideo(processedPath);
+        final savedPath = await GallerySaver.saveVideo(processedPath);
         ref.invalidate(galleryFilesProvider);
         if (context.mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
             const SnackBar(content: Text("Video saved to gallery")),
           );
         }
-        ref.read(lastImageProvider.notifier).state = File(processedPath);
+        
+        // Generate thumbnail for the preview circle
+        final thumbPath = await ThumbnailUtils.generateVideoThumbnail(savedPath);
+        if (thumbPath != null) {
+          ref.read(lastImageProvider.notifier).state = File(thumbPath);
+        }
       } else {
         debugPrint("Overlay processing failed, saving raw video.");
-        await GallerySaver.saveVideo(finalVideoPath);
+        final savedPath = await GallerySaver.saveVideo(finalVideoPath);
         ref.invalidate(galleryFilesProvider);
         if (context.mounted) {
            ScaffoldMessenger.of(context).showSnackBar(
             const SnackBar(content: Text("Video saved (without overlay)")),
           );
         }
-        ref.read(lastImageProvider.notifier).state = File(finalVideoPath);
+        
+        final thumbPath = await ThumbnailUtils.generateVideoThumbnail(savedPath);
+        if (thumbPath != null) {
+          ref.read(lastImageProvider.notifier).state = File(thumbPath);
+        }
       }
 
       // 3. CLEANUP segments after successful save
-      state = state.copyWith(videoSegments: []);
+      state = state.copyWith(videoSegments: [], videoDataHistory: []);
       
     } catch (e) {
       debugPrint("Stop recording error: $e");
@@ -675,6 +704,7 @@ class CameraViewModel extends StateNotifier<CameraState>
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
+    _videoHistoryTimer?.cancel();
     state.controller?.dispose();
     super.dispose();
   }

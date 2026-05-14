@@ -45,6 +45,143 @@ class VideoWatermarkProcessor {
     }
   }
 
+  static Future<String?> generateVideoOverlaySequence({
+    required List<OverlayData> history,
+    required DeviceOrientation orientation,
+    required double width,
+    required double height,
+    bool showOverlay = true,
+    bool showWatermark = true,
+    OverlaySettings settings = const OverlaySettings(),
+  }) async {
+    try {
+      final tempDir = await getTemporaryDirectory();
+      final sequenceDir = Directory(p.join(tempDir.path, 'overlay_seq_${DateTime.now().millisecondsSinceEpoch}'));
+      await sequenceDir.create(recursive: true);
+
+      final svgString = await rootBundle.loadString(assetName);
+      final PictureInfo pictureInfo = await svg.vg.loadPicture(
+        svg.SvgStringLoader(svgString),
+        null,
+      );
+
+      for (int i = 0; i < history.length; i++) {
+        final data = history[i];
+        final recorder = ui.PictureRecorder();
+        final canvas = Canvas(recorder);
+
+        if (showOverlay) {
+          final overlayPainter = LiveOverlayPainter(data, orientation, settings: settings);
+          overlayPainter.paint(canvas, Size(width, height));
+        }
+
+        if (showWatermark) {
+          canvas.save();
+          _undoOrientationForVideoWatermark(canvas, orientation, width, height);
+
+          final double baseSize = min(width, height);
+          final double padding = baseSize * 0.04;
+
+          final textPainter = TextPainter(
+            text: TextSpan(
+              text: "SurveyCam",
+              style: TextStyle(
+                color: Colors.white,
+                fontSize: baseSize * 0.045,
+                fontWeight: FontWeight.bold,
+                shadows: [
+                  Shadow(
+                    blurRadius: 6,
+                    color: Colors.black.withValues(alpha: 0.5),
+                    offset: const Offset(1, 1),
+                  ),
+                ],
+              ),
+            ),
+            textDirection: TextDirection.ltr,
+          )..layout();
+
+          final double svgSize = textPainter.height;
+          const double spacing = 10;
+          final double totalWidth = svgSize + spacing + textPainter.width;
+
+          double dx, dy;
+          if (orientation == DeviceOrientation.landscapeLeft || orientation == DeviceOrientation.landscapeRight) {
+            dx = padding; dy = padding;
+          } else {
+            dx = width - totalWidth - padding; dy = padding;
+          }
+
+          canvas.save();
+          canvas.translate(dx, dy);
+          final double scale = svgSize / pictureInfo.size.height;
+          canvas.scale(scale, scale);
+          canvas.drawPicture(pictureInfo.picture);
+          canvas.restore();
+
+          textPainter.paint(canvas, Offset(dx + svgSize + spacing, dy));
+          canvas.restore();
+        }
+
+        final picture = recorder.endRecording();
+        final finalImage = await picture.toImage(width.toInt(), height.toInt());
+        final byteData = await finalImage.toByteData(format: ui.ImageByteFormat.rawRgba);
+        finalImage.dispose();
+
+        if (byteData != null) {
+          final pngBytes = await compute(_encodePngTask, {
+            'width': finalImage.width,
+            'height': finalImage.height,
+            'buffer': byteData.buffer,
+          });
+          final file = File(p.join(sequenceDir.path, 'frame_$i.png'));
+          await file.writeAsBytes(pngBytes);
+        }
+      }
+      return sequenceDir.path;
+    } catch (e) {
+      debugPrint("Error generating sequence: $e");
+      return null;
+    }
+  }
+
+  static Future<String?> applyOverlaySequenceToVideo({
+    required String videoPath,
+    required String sequenceDir,
+    required int frameCount,
+  }) async {
+    try {
+      final tempDir = await getTemporaryDirectory();
+      final outputPath = p.join(tempDir.path, 'processed_video_${DateTime.now().millisecondsSinceEpoch}.mp4');
+
+      // FFmpeg command to use image sequence as overlay
+      // -framerate 1: The sequence is sampled at 1Hz (matches our timer)
+      // -i frame_%d.png: Input pattern for the images
+      // [1:v]setpts=PTS-STARTPTS: Synchronization
+      final command = '-i "$videoPath" -framerate 1 -i "$sequenceDir/frame_%d.png" '
+          '-filter_complex "[0:v]scale=1080:1920:force_original_aspect_ratio=decrease,pad=1080:1920:(1080-iw)/2:(1920-ih)/2,setsar=1[v];'
+          '[1:v]setpts=PTS-STARTPTS[ov];[v][ov]overlay=0:0" '
+          '-c:v libx264 -preset ultrafast -crf 23 -codec:a copy -y "$outputPath"';
+
+      final session = await FFmpegKit.execute(command);
+      final returnCode = await session.getReturnCode();
+
+      // Cleanup sequence dir
+      try {
+        await Directory(sequenceDir).delete(recursive: true);
+      } catch (_) {}
+
+      if (ReturnCode.isSuccess(returnCode)) {
+        return outputPath;
+      } else {
+        return null;
+      }
+    } catch (e) {
+      debugPrint("Error applying sequence: $e");
+      return null;
+    }
+  }
+
   static Future<Uint8List> generateVideoOverlayImage({
     required OverlayData data,
     required DeviceOrientation orientation,

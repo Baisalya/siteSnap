@@ -1,5 +1,6 @@
 import 'package:camera/camera.dart';
 import 'package:flutter/services.dart';
+import '../../overlay/domain/overlay_model.dart';
 
 import '../domain/camera_lens_type.dart';
 
@@ -45,6 +46,7 @@ class CameraState {
   final String? error;
 
   final List<XFile> videoSegments;
+  final List<OverlayData> videoDataHistory;
 
   const CameraState({
     required this.isReady,
@@ -70,6 +72,7 @@ class CameraState {
     this.orientation = DeviceOrientation.portraitUp,
     this.captureOrientation,
     this.captureLens,
+    this.videoDataHistory = const [],
   });
 
   CameraState copyWith({
@@ -96,6 +99,7 @@ class CameraState {
     DeviceOrientation? captureOrientation,
     CameraLensType? captureLens,
     List<XFile>? videoSegments,
+    List<OverlayData>? videoDataHistory,
   }) {
     return CameraState(
       isReady: isReady ?? this.isReady,
@@ -122,6 +126,7 @@ class CameraState {
       captureOrientation:
       captureOrientation ?? this.captureOrientation,
       captureLens: captureLens ?? this.captureLens,
+      videoDataHistory: videoDataHistory ?? this.videoDataHistory,
     );
   }
 }
