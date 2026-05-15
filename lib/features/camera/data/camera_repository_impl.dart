@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'package:camera/camera.dart';
 import 'package:flutter/foundation.dart';
 import 'package:surveycam/features/camera/domain/camera_lens_type.dart';
@@ -15,8 +16,10 @@ class CameraRepositoryImpl implements CameraRepository {
     // 1. If we are already initialized with the correct lens, perform a health check
     if (_controller != null && _controller!.value.isInitialized && _currentLens == lens) {
       try {
-        // Pulse check: if this fails, the hardware is locked/lost
-        await _controller!.getMinZoomLevel();
+        // Health check: if preview is paused, just resume it
+        if (!_controller!.value.isPreviewPaused) {
+           await _controller!.getMinZoomLevel();
+        }
         return; 
       } catch (e) {
         debugPrint("Camera hardware health check failed: $e. Re-initializing...");
@@ -30,21 +33,22 @@ class CameraRepositoryImpl implements CameraRepository {
       } catch (e) {
         debugPrint("Cleanup of old controller failed: $e");
       }
-      // Breathing room for the OS/Driver to release resources
-      await Future.delayed(const Duration(milliseconds: 200));
+      // Reduced breathing room for the OS/Driver to release resources
+      await Future.delayed(const Duration(milliseconds: 100));
     }
 
     // 3. Initialize with Retry Logic
     int retryCount = 0;
-    const maxRetries = 3;
+    const maxRetries = 2; // Reduced retries for faster failure/recovery
     
     while (retryCount < maxRetries) {
       try {
-        // Proactive Discovery within the retry loop
-        final cameras = await availableCameras();
+        // Proactive Discovery within the retry loop - use cache if available
+        final cameras = _cachedCameras ?? await availableCameras();
         _cachedCameras = cameras;
         
         if (cameras.isEmpty) {
+          _cachedCameras = null; // Clear cache on failure to force refresh
           throw Exception('No cameras detected on this device');
         }
 
@@ -108,7 +112,7 @@ class CameraRepositoryImpl implements CameraRepository {
   Future<void> _initController(CameraDescription camera) async {
     final controller = CameraController(
       camera,
-      ResolutionPreset.veryHigh, // 🔥 Optimized: veryHigh (1080p) instead of max (4K+) for faster init
+      ResolutionPreset.veryHigh, // 🔥 Restored to High Quality (1080p+) as requested
       enableAudio: true,
       imageFormatGroup: ImageFormatGroup.jpeg,
     );
@@ -116,20 +120,27 @@ class CameraRepositoryImpl implements CameraRepository {
     _controller = controller;
 
     try {
-      await controller.initialize();
+      // Start initialization
+      final initFuture = controller.initialize();
+      
+      // 🔥 PRE-WARM: While waiting for full initialization, prepare for video
+      // This forces the camera pipeline to stabilize and allocate buffers earlier.
+      unawaited(controller.prepareForVideoRecording());
+
+      await initFuture;
 
       // Initial quality settings - only if supported
       if (controller.value.isInitialized) {
         try {
           await controller.setFocusMode(FocusMode.auto);
         } catch (e) {
-          print("Focus mode auto not supported: $e");
+          debugPrint("Focus mode auto not supported: $e");
         }
         
         try {
           await controller.setExposureMode(ExposureMode.auto);
         } catch (e) {
-          print("Exposure mode auto not supported: $e");
+          debugPrint("Exposure mode auto not supported: $e");
         }
       }
     } catch (e) {
@@ -186,7 +197,7 @@ class CameraRepositoryImpl implements CameraRepository {
       try {
         await _controller!.dispose();
       } catch (e) {
-        print("Error disposing camera controller: $e");
+        debugPrint("Error disposing camera controller: $e");
       }
       _controller = null;
     }

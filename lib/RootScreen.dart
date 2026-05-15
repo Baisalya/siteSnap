@@ -11,6 +11,7 @@ import 'package:safe_device/safe_device.dart';
 import 'package:surveycam/privacypolicy/SplashScreen.dart';
 import 'package:surveycam/privacypolicy/privacyProvider.dart';
 import 'features/camera/presentation/camera_screen.dart';
+import 'features/camera/presentation/camera_viewmodel.dart';
 
 class AppLauncher extends ConsumerStatefulWidget {
   const AppLauncher({super.key});
@@ -258,6 +259,11 @@ class _AppLauncherState extends ConsumerState<AppLauncher> {
     if (status == false) {
       return const SplashScreen();
     }
+
+    // Trigger early initialization of camera
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      ref.read(cameraViewModelProvider.notifier).initialize();
+    });
 
     return const CameraScreen();
   }

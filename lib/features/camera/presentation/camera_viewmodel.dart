@@ -51,7 +51,7 @@ class CameraViewModel extends StateNotifier<CameraState>
       : super( const CameraState(isReady: false)) {
     WidgetsBinding.instance.addObserver(this);
     _initBackgroundService();
-    initialize();
+    // Removed automatic initialize() to allow manual/early trigger
   }
 
   void _initBackgroundService() {
@@ -82,18 +82,21 @@ class CameraViewModel extends StateNotifier<CameraState>
     state = state.copyWith(error: null);
 
     try {
-      await PermissionService.requestCameraAndLocation();
-      ref.invalidate(locationStreamProvider);
+      // Parallelize permission check and repository preparation
+      await Future.wait([
+        PermissionService.requestCameraAndLocation(),
+        Future.microtask(() => ref.invalidate(locationStreamProvider)),
+      ]);
 
       final repo = ref.read(cameraRepositoryProvider);
       
       try {
-        await repo.initialize(CameraLensType.normal);
+        await repo.initialize(state.currentLens);
       } catch (e) {
         debugPrint('Repo init error: $e');
         // Try one retry if it fails immediately with a smaller delay
-        await Future.delayed(const Duration(milliseconds: 200));
-        await repo.initialize(CameraLensType.normal);
+        await Future.delayed(const Duration(milliseconds: 100));
+        await repo.initialize(state.currentLens);
       }
 
       final controller = repo.controller;
@@ -107,32 +110,30 @@ class CameraViewModel extends StateNotifier<CameraState>
         await controller.initialize();
       }
 
-      // Set to auto focus and exposure by default
-      try {
-        if (controller.value.isInitialized) {
-          await controller.setFocusMode(FocusMode.auto);
-          await controller.setExposureMode(ExposureMode.auto);
-          await controller.setFlashMode(FlashMode.off);
-        }
-      } catch (e) {
-        debugPrint("Initial focus/exposure mode error: $e");
-      }
-
-      try {
-        if (controller.value.isInitialized) {
-          await controller.setFocusPoint(const Offset(0.5, 0.5));
-          await controller.setExposurePoint(const Offset(0.5, 0.5));
-        }
-      } catch (e) {
-        debugPrint("Initial focus/exposure point error: $e");
+      // Set to auto focus and exposure by default in parallel
+      if (controller.value.isInitialized) {
+        await Future.wait([
+          controller.setFocusMode(FocusMode.auto).catchError((e) => debugPrint("Initial focus mode error: $e")),
+          controller.setExposureMode(ExposureMode.auto).catchError((e) => debugPrint("Initial exposure mode error: $e")),
+          controller.setFlashMode(FlashMode.off).catchError((e) => debugPrint("Initial flash mode error: $e")),
+          controller.setFocusPoint(const Offset(0.5, 0.5)).catchError((e) => debugPrint("Initial focus point error: $e")),
+          controller.setExposurePoint(const Offset(0.5, 0.5)).catchError((e) => debugPrint("Initial exposure point error: $e")),
+        ]);
       }
 
       if (controller.value.isInitialized) {
-        _minExposure = await controller.getMinExposureOffset();
-        _maxExposure = await controller.getMaxExposureOffset();
+        // Fetch capabilities in parallel
+        final caps = await Future.wait([
+          controller.getMinExposureOffset(),
+          controller.getMaxExposureOffset(),
+          controller.getMinZoomLevel(),
+          controller.getMaxZoomLevel(),
+        ]);
 
-        final minZoom = await controller.getMinZoomLevel();
-        final maxZoom = await controller.getMaxZoomLevel();
+        _minExposure = caps[0];
+        _maxExposure = caps[1];
+        final minZoom = caps[2];
+        final maxZoom = caps[3];
 
         // Set exposure offset to 0.0 (Neutral) to minimize ISO noise in low light
         _currentExposure = 0.0.clamp(_minExposure, _maxExposure);
@@ -193,28 +194,44 @@ class CameraViewModel extends StateNotifier<CameraState>
       try {
         final controller = this.state.controller;
         if (controller != null) {
-          // Soft quench flash immediately to prevent it staying on
+          // Soft quench flash immediately
           await _softFlashQuench(controller);
           
           if (appState == AppLifecycleState.paused || appState == AppLifecycleState.hidden) {
-            _isDisposing = true;
-            // Full disposal on backgrounding/hiding to free up hardware
-            await ref.read(cameraRepositoryProvider).dispose();
-            this.state = this.state.copyWith(controller: null, isReady: false);
-            _isDisposing = false;
+            // 🔥 INSTAGRAM-STYLE OPTIMIZATION:
+            // Instead of fully disposing, we only pause the preview.
+            // This keeps the hardware "warmed up" and the OS session alive
+            // so resuming is near-instant.
+            try {
+              await controller.pausePreview();
+              debugPrint("Camera preview paused for backgrounding.");
+            } catch (e) {
+              debugPrint("Error pausing preview: $e. Falling back to dispose.");
+              _isDisposing = true;
+              await ref.read(cameraRepositoryProvider).dispose();
+              this.state = this.state.copyWith(controller: null, isReady: false);
+              _isDisposing = false;
+            }
           }
         }
       } catch (e) {
         debugPrint("Error on backgrounding: $e");
-        _isDisposing = false;
       }
     }
 
     if (appState == AppLifecycleState.resumed) {
-      // Add a small delay to ensure the OS has fully released the camera from background tasks
-      await Future.delayed(const Duration(milliseconds: 300));
-      // Immediate initialize for instant resume (Repository handles re-acquisition check)
-      await initialize();
+      final controller = this.state.controller;
+      if (controller != null && controller.value.isInitialized) {
+        try {
+          await controller.resumePreview();
+          debugPrint("Camera preview resumed instantly.");
+        } catch (e) {
+          debugPrint("Instant resume failed: $e. Re-initializing...");
+          await initialize();
+        }
+      } else {
+        await initialize();
+      }
     }
   }
 

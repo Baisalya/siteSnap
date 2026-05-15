@@ -57,6 +57,8 @@ class _CameraScreenState extends ConsumerState<CameraScreen> with WidgetsBinding
       if (mounted) {
         await RateUsService.showRateDialogIfMeetsCriteria(context);
       }
+      // Ensure camera is initializing
+      ref.read(cameraViewModelProvider.notifier).initialize();
     });
 
     /// DATE TIME UPDATE TIMER
