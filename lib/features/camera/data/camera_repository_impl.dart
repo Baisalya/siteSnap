@@ -12,86 +12,103 @@ class CameraRepositoryImpl implements CameraRepository {
 
   @override
   Future<void> initialize(CameraLensType lens) async {
-    // Skip if already initialized with the correct lens to avoid "Disposed CameraController" errors
-    // BUT check if hardware is actually responsive (it might have been seized by another app)
+    // 1. If we are already initialized with the correct lens, perform a health check
     if (_controller != null && _controller!.value.isInitialized && _currentLens == lens) {
       try {
-        // Quick pulse check - if this fails, hardware was lost
+        // Pulse check: if this fails, the hardware is locked/lost
         await _controller!.getMinZoomLevel();
         return; 
       } catch (e) {
-        debugPrint("Camera hardware lost or unresponsive: $e. Forcing re-init.");
+        debugPrint("Camera hardware health check failed: $e. Re-initializing...");
       }
     }
 
-    // Ensure previous controller is fully disposed before attempting to open a new one
+    // 2. Aggressive Cleanup
     if (_controller != null) {
-      await dispose();
-      // Add a tiny breather for the hardware to release
-      await Future.delayed(const Duration(milliseconds: 50));
+      try {
+        await dispose();
+      } catch (e) {
+        debugPrint("Cleanup of old controller failed: $e");
+      }
+      // Breathing room for the OS/Driver to release resources
+      await Future.delayed(const Duration(milliseconds: 200));
     }
 
-    final cameras = _cachedCameras ??= await availableCameras();
+    // 3. Initialize with Retry Logic
+    int retryCount = 0;
+    const maxRetries = 3;
+    
+    while (retryCount < maxRetries) {
+      try {
+        // Proactive Discovery within the retry loop
+        final cameras = await availableCameras();
+        _cachedCameras = cameras;
+        
+        if (cameras.isEmpty) {
+          throw Exception('No cameras detected on this device');
+        }
 
-    final backCameras = cameras
-        .where((c) => c.lensDirection == CameraLensDirection.back)
-        .toList();
+        final backCameras = cameras
+            .where((c) => c.lensDirection == CameraLensDirection.back)
+            .toList();
 
-    if (backCameras.isEmpty) {
-      throw Exception('No back camera found');
+        final frontCameras = cameras
+            .where((c) => c.lensDirection == CameraLensDirection.front)
+            .toList();
+
+        if (backCameras.isEmpty && frontCameras.isEmpty) {
+          throw Exception('No usable camera lenses found');
+        }
+
+        // Re-map available lenses based on latest hardware discovery
+        final Map<CameraLensType, CameraDescription> newMap = {};
+        
+        if (backCameras.isNotEmpty) {
+          newMap[CameraLensType.normal] = backCameras.first;
+          if (backCameras.length > 1) {
+            newMap[CameraLensType.ultraWide] = backCameras.last;
+          }
+          if (backCameras.length > 2) {
+            newMap[CameraLensType.macro] = backCameras[1];
+          }
+        }
+        
+        if (frontCameras.isNotEmpty) {
+          newMap[CameraLensType.front] = frontCameras.first;
+        }
+
+        _cameraMap = newMap;
+        _currentLens = lens;
+
+        final cameraDesc = _cameraMap[lens];
+        if (cameraDesc == null) {
+          // If requested lens is gone (e.g. hardware error), fallback to normal back camera
+          if (lens != CameraLensType.normal && _cameraMap.containsKey(CameraLensType.normal)) {
+             debugPrint("Requested lens $lens not available, falling back to normal");
+             await _initController(_cameraMap[CameraLensType.normal]!);
+          } else {
+             throw Exception('Lens $lens not found and no fallback available');
+          }
+        } else {
+          await _initController(cameraDesc);
+        }
+        
+        return; // Success!
+      } catch (e) {
+        retryCount++;
+        debugPrint("Camera init attempt $retryCount failed: $e");
+        
+        if (retryCount >= maxRetries) rethrow;
+        
+        await Future.delayed(Duration(milliseconds: 300 * retryCount));
+      }
     }
-
-    final frontCameras = cameras
-        .where((c) => c.lensDirection == CameraLensDirection.front)
-        .toList();
-
-    // Usually, the first back camera is the primary one.
-    // Some devices have multiple back cameras (Wide, Telephoto, etc.)
-    // We try to stick to the primary one for the 'normal' lens.
-    final mainCamera = backCameras.first;
-
-    CameraDescription? ultraWide;
-    CameraDescription? macro;
-    CameraDescription? frontCamera;
-
-    if (backCameras.length > 1) {
-      // This is a heuristic, real implementation might need device-specific logic
-      // or using a package like camera_android_camerax
-      ultraWide = backCameras.last; 
-    }
-
-    if (backCameras.length > 2) {
-      macro = backCameras[1];
-    }
-
-    if (frontCameras.isNotEmpty) {
-      frontCamera = frontCameras.first;
-    }
-
-    _cameraMap = {
-      CameraLensType.normal: mainCamera,
-      if (ultraWide != null)
-        CameraLensType.ultraWide: ultraWide,
-      if (macro != null)
-        CameraLensType.macro: macro,
-      if (frontCamera != null)
-        CameraLensType.front: frontCamera,
-    };
-
-    _currentLens = lens;
-
-    final cameraDesc = _cameraMap[lens];
-    if (cameraDesc == null) {
-      throw Exception('Camera lens not found: $lens');
-    }
-
-    await _initController(cameraDesc);
   }
 
   Future<void> _initController(CameraDescription camera) async {
     final controller = CameraController(
       camera,
-      ResolutionPreset.max, // 🔥 Use MAX for highest possible quality
+      ResolutionPreset.veryHigh, // 🔥 Optimized: veryHigh (1080p) instead of max (4K+) for faster init
       enableAudio: true,
       imageFormatGroup: ImageFormatGroup.jpeg,
     );

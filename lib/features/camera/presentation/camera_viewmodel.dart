@@ -39,6 +39,7 @@ class CameraViewModel extends StateNotifier<CameraState>
 
   bool _isCameraStable = false;
   bool _isInitializing = false;
+  bool _isDisposing = false;
   bool _isRestarting = false;
   Timer? _videoHistoryTimer;
   ReceivePort? _receivePort;
@@ -75,7 +76,7 @@ class CameraViewModel extends StateNotifier<CameraState>
   // ================= INIT =================
 
   Future<void> initialize() async {
-    if (_isInitializing) return;
+    if (_isInitializing || _isDisposing) return;
     _isInitializing = true;
 
     state = state.copyWith(error: null);
@@ -192,24 +193,26 @@ class CameraViewModel extends StateNotifier<CameraState>
       try {
         final controller = this.state.controller;
         if (controller != null) {
-          if (this.state.flashMode == FlashMode.always) {
-            await _nuclearFlashKill(controller);
-          } else {
-            await _softFlashQuench(controller);
-          }
+          // Soft quench flash immediately to prevent it staying on
+          await _softFlashQuench(controller);
           
           if (appState == AppLifecycleState.paused || appState == AppLifecycleState.hidden) {
+            _isDisposing = true;
             // Full disposal on backgrounding/hiding to free up hardware
             await ref.read(cameraRepositoryProvider).dispose();
             this.state = this.state.copyWith(controller: null, isReady: false);
+            _isDisposing = false;
           }
         }
       } catch (e) {
         debugPrint("Error on backgrounding: $e");
+        _isDisposing = false;
       }
     }
 
     if (appState == AppLifecycleState.resumed) {
+      // Add a small delay to ensure the OS has fully released the camera from background tasks
+      await Future.delayed(const Duration(milliseconds: 300));
       // Immediate initialize for instant resume (Repository handles re-acquisition check)
       await initialize();
     }
@@ -464,6 +467,13 @@ class CameraViewModel extends StateNotifier<CameraState>
         controller.value.isTakingPicture ||
         state.isCapturing ||
         state.isRecording) {
+      
+      // HEALTH CHECK: If we think we are ready but controller is null or not init, trigger recovery
+      if (state.isReady && (controller == null || !controller.value.isInitialized)) {
+        debugPrint("Camera state desync detected during capture. Triggering recovery...");
+        await refreshCamera();
+      }
+
       if (state.isRecording) {
         await stopVideoRecording(context);
       }
@@ -559,6 +569,11 @@ class CameraViewModel extends StateNotifier<CameraState>
 
     } catch (e) {
       debugPrint('Capture error: $e');
+      // BULLETPROOF: If a camera exception happens, try to refresh/recover automatically
+      if (e.toString().contains('CameraException')) {
+        debugPrint("Critical camera exception during capture. Attempting automatic recovery...");
+        await refreshCamera();
+      }
     } finally {
       // 🔓 RESTORATION
       try {

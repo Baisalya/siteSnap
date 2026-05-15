@@ -5,19 +5,31 @@ class PermissionService {
 
   /// CAMERA + LOCATION + MICROPHONE (used on camera start)
   static Future<void> requestCameraAndLocation() async {
-    final cameraStatus = await Permission.camera.request();
-    final locationStatus = await Permission.locationWhenInUse.request();
-    final micStatus = await Permission.microphone.request();
-
-    if (cameraStatus.isPermanentlyDenied ||
-        locationStatus.isPermanentlyDenied ||
-        micStatus.isPermanentlyDenied) {
-      await openAppSettings();
-      throw Exception('Permissions permanently denied');
-    }
+    final cameraStatus = await Permission.camera.status;
+    final locationStatus = await Permission.locationWhenInUse.status;
+    final micStatus = await Permission.microphone.status;
 
     if (!cameraStatus.isGranted || !locationStatus.isGranted || !micStatus.isGranted) {
-      throw Exception('Required permissions not granted');
+      final statuses = await [
+        Permission.camera,
+        Permission.locationWhenInUse,
+        Permission.microphone,
+      ].request();
+
+      final newCameraStatus = statuses[Permission.camera]!;
+      final newLocationStatus = statuses[Permission.locationWhenInUse]!;
+      final newMicStatus = statuses[Permission.microphone]!;
+
+      if (newCameraStatus.isPermanentlyDenied ||
+          newLocationStatus.isPermanentlyDenied ||
+          newMicStatus.isPermanentlyDenied) {
+        await openAppSettings();
+        throw Exception('Permissions permanently denied');
+      }
+
+      if (!newCameraStatus.isGranted || !newLocationStatus.isGranted || !newMicStatus.isGranted) {
+        throw Exception('Required permissions not granted');
+      }
     }
   }
 
