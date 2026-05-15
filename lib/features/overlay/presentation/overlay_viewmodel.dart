@@ -1,5 +1,4 @@
 import 'dart:io';
-import 'dart:ui' as ui;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -31,7 +30,6 @@ class OverlayViewModel extends StateNotifier<void> {
         required OverlayData overlayData,
         bool showOverlay = true,
         bool showWatermark = true,
-        ui.Image? decodedImage,
         CameraAspectRatio? aspectRatio,
         bool mirror = false,
       }) async {
@@ -45,7 +43,6 @@ class OverlayViewModel extends StateNotifier<void> {
         orientation,
         showOverlay: showOverlay,
         showWatermark: showWatermark,
-        decodedImage: decodedImage,
         aspectRatio: aspectRatio,
         mirror: mirror,
         settings: settings,
@@ -67,7 +64,6 @@ class OverlayViewModel extends StateNotifier<void> {
     required OverlayData overlayData,
     bool showOverlay = true,
     bool showWatermark = true,
-    ui.Image? decodedImage,
     CameraAspectRatio? aspectRatio,
     bool mirror = false,
   }) async {
@@ -79,7 +75,6 @@ class OverlayViewModel extends StateNotifier<void> {
         overlayData: overlayData,
         showOverlay: showOverlay,
         showWatermark: showWatermark,
-        decodedImage: decodedImage,
         aspectRatio: aspectRatio,
         mirror: mirror,
       );

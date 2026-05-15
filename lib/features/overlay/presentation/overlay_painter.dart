@@ -72,20 +72,15 @@ class WatermarkProcessor {
       DeviceOrientation orientation, {
         bool showOverlay = true,
         bool showWatermark = true,
-        ui.Image? decodedImage,
         CameraAspectRatio? aspectRatio,
         bool mirror = false,
         OverlaySettings settings = const OverlaySettings(),
       }) async {
     final ui.Image uiImage;
-    if (decodedImage != null) {
-      uiImage = decodedImage;
-    } else {
-      final bytes = await file.readAsBytes();
-      final codec = await ui.instantiateImageCodec(bytes);
-      final frame = await codec.getNextFrame();
-      uiImage = frame.image;
-    }
+    final bytes = await file.readAsBytes();
+    final codec = await ui.instantiateImageCodec(bytes);
+    final frame = await codec.getNextFrame();
+    uiImage = frame.image;
 
     final svgString = await rootBundle.loadString(assetName);
     final PictureInfo pictureInfo = await svg.vg.loadPicture(
@@ -242,12 +237,12 @@ class WatermarkProcessor {
     await finalImage.toByteData(format: ui.ImageByteFormat.rawRgba);
 
     // Dispose UI images as early as possible
-    if (decodedImage == null) {
-      uiImage.dispose();
-    }
+    uiImage.dispose();
     finalImage.dispose();
 
     if (byteData == null) return Uint8List(0);
+
+    debugPrint("📸 Processing Image: ${finalImage.width}x${finalImage.height}");
 
     return await compute(_encodeJpgTask, {
       'width': finalImage.width,
@@ -270,7 +265,11 @@ class WatermarkProcessor {
     );
 
     return Uint8List.fromList(
-      img.encodeJpg(processedImage, quality: 100),
+      img.encodeJpg(
+        processedImage,
+        quality: 100,
+        chroma: img.JpegChroma.yuv444, // 🔥 No chroma subsampling for maximum clarity
+      ),
     );
   }
 }

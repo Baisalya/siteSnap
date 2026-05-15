@@ -37,7 +37,6 @@ class _ImagePreviewScreenState
       TransformationController();
   TapDownDetails? _doubleTapDetails;
 
-  ui.Image? _decodedImage;
   bool _saving = false;
   bool _showUI = true;
   double? _aspectRatio;
@@ -68,7 +67,8 @@ class _ImagePreviewScreenState
         if (mounted) {
           setState(() {
             _aspectRatio = info.image.width / info.image.height;
-            _decodedImage = info.image;
+            // Note: We don't store _decodedImage anymore to avoid passing downscaled images
+            // to the saving logic. The saving logic will re-decode at full resolution.
           });
         }
       }),
@@ -127,7 +127,6 @@ class _ImagePreviewScreenState
             overlayData: overlayData,
             showOverlay: _showOverlay,
             showWatermark: _showTextWatermark,
-            decodedImage: _decodedImage,
             aspectRatio: aspectRatio,
             mirror: isMirror,
           );
@@ -164,7 +163,6 @@ class _ImagePreviewScreenState
             overlayData: overlayData,
             showOverlay: _showOverlay,
             showWatermark: _showTextWatermark,
-            decodedImage: _decodedImage,
             aspectRatio: aspectRatio,
             mirror: isMirror,
           );
