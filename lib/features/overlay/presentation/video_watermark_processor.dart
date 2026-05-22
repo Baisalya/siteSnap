@@ -472,9 +472,10 @@ class VideoWatermarkProcessor {
     }
   }
 
-  static Future<String?> mergeVideos(List<String> paths) async {
+  static Future<String?> mergeVideos(List<String> paths, {List<bool>? mirrorMap}) async {
     if (paths.isEmpty) return null;
-    if (paths.length == 1) return paths.first;
+    // If only one segment and NO mirroring needed, we can return as is
+    if (paths.length == 1 && (mirrorMap == null || !mirrorMap[0])) return paths.first;
 
     try {
       final tempDir = await getTemporaryDirectory();
@@ -484,7 +485,11 @@ class VideoWatermarkProcessor {
       String filterComplex = '';
       for (int i = 0; i < paths.length; i++) {
         inputArgs += '-i "${paths[i]}" ';
-        filterComplex += '[$i:v]scale=1080:1920:force_original_aspect_ratio=decrease,pad=1080:1920:(1080-iw)/2:(1920-ih)/2,setsar=1[v$i];';
+        
+        final bool isMirrored = (mirrorMap != null && i < mirrorMap.length) ? mirrorMap[i] : false;
+        final String hflip = isMirrored ? 'hflip,' : '';
+
+        filterComplex += '[$i:v]${hflip}scale=1080:1920:force_original_aspect_ratio=decrease,pad=1080:1920:(1080-iw)/2:(1920-ih)/2,setsar=1[v$i];';
       }
 
       for (int i = 0; i < paths.length; i++) {

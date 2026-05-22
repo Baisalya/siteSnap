@@ -46,6 +46,12 @@ enum CameraMode {
   video,
 }
 
+class VideoSegment {
+  final String path;
+  final CameraLensType lens;
+  VideoSegment({required this.path, required this.lens});
+}
+
 /// =======================================================
 /// ✅ CAMERA STATE
 /// =======================================================
@@ -76,7 +82,7 @@ class CameraState {
 
   final String? error;
 
-  final List<XFile> videoSegments;
+  final List<VideoSegment> videoSegments;
   final double? processingProgress;
 
   final String? videoSequenceDir;
@@ -126,7 +132,7 @@ class CameraState {
     DeviceOrientation? orientation,
     DeviceOrientation? captureOrientation,
     CameraLensType? captureLens,
-    List<XFile>? videoSegments,
+    List<VideoSegment>? videoSegments,
     double? processingProgress,
     bool clearProcessingProgress = false,
     String? videoSequenceDir,

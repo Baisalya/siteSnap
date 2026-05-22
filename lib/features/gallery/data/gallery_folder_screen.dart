@@ -26,8 +26,12 @@ class _GalleryFolderScreenState extends ConsumerState<GalleryFolderScreen> {
   }
 
   Future<void> _checkPermissions() async {
-    final status = await Permission.photos.status;
-    if (status.isDenied) {
+    if (Platform.isAndroid) {
+      await [
+        Permission.photos,
+        Permission.videos,
+      ].request();
+    } else {
       await Permission.photos.request();
     }
   }

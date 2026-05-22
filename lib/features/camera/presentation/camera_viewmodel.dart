@@ -442,7 +442,8 @@ class CameraViewModel extends StateNotifier<CameraState>
     if (wasRecording) {
       try {
         final repo = ref.read(cameraRepositoryProvider);
-        final segment = await repo.stopVideoRecording();
+        final segmentFile = await repo.stopVideoRecording();
+        final segment = VideoSegment(path: segmentFile.path, lens: state.currentLens);
         state = state.copyWith(
           videoSegments: [...state.videoSegments, segment],
         );
@@ -727,7 +728,7 @@ class CameraViewModel extends StateNotifier<CameraState>
 
       state = state.copyWith(
         isRecording: true,
-        videoSegments: clearSegments ? [] : state.videoSegments,
+        videoSegments: clearSegments ? <VideoSegment>[] : state.videoSegments,
       );
       unawaited(HapticFeedback.heavyImpact());
     } catch (e) {
@@ -748,7 +749,8 @@ class CameraViewModel extends StateNotifier<CameraState>
       _videoHistoryTimer?.cancel();
       _videoHistoryTimer = null;
 
-      final lastSegment = await repo.stopVideoRecording();
+      final lastSegmentFile = await repo.stopVideoRecording();
+      final lastSegment = VideoSegment(path: lastSegmentFile.path, lens: state.currentLens);
       final allSegments = [...state.videoSegments, lastSegment];
       final totalDurationMs =
           DateTime.now().difference(_recordingStartTime!).inMilliseconds;
@@ -776,12 +778,15 @@ class CameraViewModel extends StateNotifier<CameraState>
         );
       }
 
-      // 1. Merge segments if necessary
+      // 1. Merge segments and Apply Mirroring (hflip) where necessary
       String finalVideoPath = lastSegment.path;
-      if (allSegments.length > 1) {
-        debugPrint("Merging ${allSegments.length} segments...");
+      final bool hasFrontCamera = allSegments.any((s) => s.lens == CameraLensType.front);
+
+      if (allSegments.length > 1 || hasFrontCamera) {
+        debugPrint("Merging/Processing ${allSegments.length} segments...");
         final mergedPath = await VideoWatermarkProcessor.mergeVideos(
           allSegments.map((s) => s.path).toList(),
+          mirrorMap: allSegments.map((s) => s.lens == CameraLensType.front).toList(),
         );
         if (mergedPath != null) {
           finalVideoPath = mergedPath;

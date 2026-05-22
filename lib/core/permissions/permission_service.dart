@@ -70,13 +70,20 @@ class PermissionService {
     }
   }
 
-  /// GALLERY / STORAGE (used when saving image)
+  /// GALLERY / STORAGE (used when saving image/video)
   static Future<void> requestGalleryPermission() async {
     PermissionStatus status;
 
     if (Platform.isAndroid) {
-      // Android 13+
-      status = await Permission.photos.request();
+      // Android 13+ requires specific permissions for photos and videos
+      final statuses = await [
+        Permission.photos,
+        Permission.videos,
+      ].request();
+      
+      status = statuses[Permission.photos]!.isGranted || statuses[Permission.videos]!.isGranted 
+          ? PermissionStatus.granted 
+          : PermissionStatus.denied;
 
       // fallback for older Android
       if (!status.isGranted) {
