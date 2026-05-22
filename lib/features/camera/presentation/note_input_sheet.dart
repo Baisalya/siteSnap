@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:surveycam/core/services/location_service.dart';
 import 'package:surveycam/features/overlay/domain/WatermarkPosition.dart';
+import 'package:surveycam/features/overlay/domain/overlay_settings.dart';
 import 'package:surveycam/features/overlay/presentation/overlay_preview_state.dart';
 import 'package:surveycam/features/overlay/presentation/overlay_settings_provider.dart';
 import 'package:surveycam/features/overlay/presentation/saved_notes_provider.dart';
@@ -84,6 +85,13 @@ class _NoteInputSheetState extends ConsumerState<NoteInputSheet> {
 
                   const SizedBox(height: 24),
 
+                  // ───── LOCALIZATION & UNITS (NEW) ─────
+                  _buildSectionLabel("LOCALIZATION & UNITS"),
+                  const SizedBox(height: 12),
+                  _buildLocalizationUnitsCard(overlaySettings, settingsNotifier),
+
+                  const SizedBox(height: 24),
+
                   // ───── APPEARANCE & CONTENT (EXPANDABLE) ─────
                   _buildAppearanceCard(context, overlaySettings, settingsNotifier),
 
@@ -117,6 +125,80 @@ class _NoteInputSheetState extends ConsumerState<NoteInputSheet> {
           
           // ───── FIXED BOTTOM ACTION ─────
           _buildBottomAction(context),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildLocalizationUnitsCard(OverlaySettings settings, OverlaySettingsNotifier notifier) {
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: Colors.white.withOpacity(0.03),
+        borderRadius: BorderRadius.circular(20),
+        border: Border.all(color: Colors.white.withOpacity(0.05)),
+      ),
+      child: Column(
+        children: [
+          _buildSettingRow(
+            "App Language",
+            DropdownButton<AppLanguage>(
+              value: settings.language,
+              dropdownColor: const Color(0xFF2A2A2A),
+              underline: const SizedBox(),
+              style: const TextStyle(color: Colors.blueAccent, fontWeight: FontWeight.bold),
+              items: AppLanguage.values.map((l) {
+                return DropdownMenuItem(
+                  value: l,
+                  child: Text(l.name.toUpperCase()),
+                );
+              }).toList(),
+              onChanged: (v) {
+                if (v != null) notifier.setLanguage(v);
+              },
+            ),
+          ),
+          const Divider(color: Colors.white10),
+          _buildSettingRow(
+            "Coordinate Format",
+            DropdownButton<CoordinateFormat>(
+              value: settings.coordinateFormat,
+              dropdownColor: const Color(0xFF2A2A2A),
+              underline: const SizedBox(),
+              style: const TextStyle(color: Colors.blueAccent, fontWeight: FontWeight.bold),
+              items: CoordinateFormat.values.map((f) {
+                return DropdownMenuItem(
+                  value: f,
+                  child: Text(f == CoordinateFormat.decimal ? "Decimal" : "DMS (Deg Min Sec)"),
+                );
+              }).toList(),
+              onChanged: (v) {
+                if (v != null) notifier.setCoordinateFormat(v);
+              },
+            ),
+          ),
+          const Divider(color: Colors.white10),
+          _buildSettingRow(
+            "Use 24-Hour Time",
+            Switch(
+              value: settings.use24HourTime,
+              activeColor: Colors.blueAccent,
+              onChanged: (v) => notifier.setUse24HourTime(v),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildSettingRow(String label, Widget trailing) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 4),
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+        children: [
+          Text(label, style: const TextStyle(color: Colors.white70, fontSize: 14)),
+          trailing,
         ],
       ),
     );
@@ -291,8 +373,8 @@ class _NoteInputSheetState extends ConsumerState<NoteInputSheet> {
         child: ExpansionTile(
           key: const PageStorageKey('appearance_tile'),
           leading: const Icon(Icons.tune_rounded, color: Colors.blueAccent),
-          title: const Text("Overlay Settings", style: TextStyle(color: Colors.white, fontWeight: FontWeight.w600)),
-          subtitle: const Text("Visual appearance & visible info", style: TextStyle(color: Colors.white38, fontSize: 12)),
+          title: const Text("Visual Appearance", style: TextStyle(color: Colors.white, fontWeight: FontWeight.w600)),
+          subtitle: const Text("Background, colors & opacity", style: TextStyle(color: Colors.white38, fontSize: 12)),
           trailing: const Icon(Icons.expand_more_rounded, color: Colors.white24),
           childrenPadding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
           children: [
@@ -397,6 +479,10 @@ class _NoteInputSheetState extends ConsumerState<NoteInputSheet> {
         _toggleChip("Altitude", Icons.height_rounded, settings.showAltitude, (v) => notifier.setShowAltitude(v)),
         _toggleChip("Compass", Icons.explore_rounded, settings.showDirection, (v) => notifier.setShowDirection(v)),
         _toggleChip("Address/Note", Icons.notes_rounded, settings.showNote, (v) => notifier.setShowNote(v)),
+        _toggleChip("Weather", Icons.cloud_outlined, settings.showWeather, (v) => notifier.setShowWeather(v)),
+        _toggleChip("Humidity", Icons.water_drop_outlined, settings.showHumidity, (v) => notifier.setShowHumidity(v)),
+        _toggleChip("Air Quality", Icons.air_outlined, settings.showAir, (v) => notifier.setShowAir(v)),
+        _toggleChip("Pressure", Icons.speed_outlined, settings.showPressure, (v) => notifier.setShowPressure(v)),
       ],
     );
   }

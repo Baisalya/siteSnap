@@ -13,6 +13,7 @@ class OverlayData {
   final String? weather;
   final String? humidity;
   final String? air;
+  final String? pressure;
 
   final WatermarkPosition position;
 
@@ -28,6 +29,7 @@ class OverlayData {
     this.weather,
     this.humidity,
     this.air,
+    this.pressure,
     this.position = WatermarkPosition.bottomLeft,
   });
 
@@ -44,6 +46,7 @@ class OverlayData {
     String? weather,
     String? humidity,
     String? air,
+    String? pressure,
     WatermarkPosition? position,
   }) {
     return OverlayData(
@@ -54,14 +57,13 @@ class OverlayData {
       heading: heading ?? this.heading,
       direction: direction ?? this.direction,
       note: note ?? this.note,
-
-      /// ✅ IMPORTANT FIX
       locationWarning: clearLocationWarning
           ? null
           : (locationWarning ?? this.locationWarning),
       weather: weather ?? this.weather,
       humidity: humidity ?? this.humidity,
       air: air ?? this.air,
+      pressure: pressure ?? this.pressure,
       position: position ?? this.position,
     );
   }

@@ -7,7 +7,8 @@ import 'package:geolocator/geolocator.dart';
 import 'package:surveycam/core/services/location_service.dart';
 import 'package:surveycam/core/services/rate_us_service.dart';
 import 'package:surveycam/core/services/weather_service.dart';
-import 'package:surveycam/core/utils/datetime_utils.dart';
+import 'package:surveycam/core/utils/overlay_utils.dart';
+import 'package:surveycam/features/overlay/domain/overlay_settings.dart';
 import 'package:surveycam/core/utils/developer_info_dialog.dart';
 import 'package:surveycam/core/utils/device_orientation_provider.dart';
 import 'package:surveycam/core/utils/direction_utils.dart';
@@ -64,9 +65,14 @@ class _CameraScreenState extends ConsumerState<CameraScreen>
       const Duration(seconds: 1),
       (_) {
         final current = ref.read(overlayPreviewProvider);
+        final settings = ref.read(overlaySettingsProvider);
 
         ref.read(overlayPreviewProvider.notifier).state = current.copyWith(
-          dateTime: DateTimeUtils.formattedNow(),
+          dateTime: OverlayUtils.formatDateTime(
+            DateTime.now(),
+            settings.language,
+            settings.use24HourTime,
+          ),
         );
       },
     );
@@ -192,6 +198,7 @@ class _CameraScreenState extends ConsumerState<CameraScreen>
                       weather: weatherData.temp,
                       humidity: weatherData.humidity,
                       air: weatherData.airQuality,
+                      pressure: weatherData.pressure,
                     );
           }
 

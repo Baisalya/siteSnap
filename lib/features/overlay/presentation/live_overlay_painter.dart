@@ -5,6 +5,7 @@ import 'package:flutter/services.dart';
 import 'package:surveycam/features/overlay/domain/overlay_model.dart';
 import 'package:surveycam/features/overlay/domain/WatermarkPosition.dart';
 import 'package:surveycam/features/overlay/domain/overlay_settings.dart';
+import 'package:surveycam/core/utils/overlay_utils.dart';
 
 class LiveOverlayPainter extends CustomPainter {
   final OverlayData data;
@@ -61,7 +62,7 @@ class LiveOverlayPainter extends CustomPainter {
     // ===============================
     final textStyle = TextStyle(
       color: settings.textColor,
-      fontSize: baseSize * 0.032, // More refined size
+      fontSize: baseSize * 0.032,
       fontWeight: FontWeight.w600,
       height: 1.2,
       letterSpacing: 0.2,
@@ -86,33 +87,48 @@ class LiveOverlayPainter extends CustomPainter {
     if (data.locationWarning != null) {
       spans.add(TextSpan(text: "${data.locationWarning}\n", style: warningStyle));
     } else if (settings.showCoordinates) {
+      final latLabel = OverlayUtils.getLabel('latitude', settings.language);
+      final lonLabel = OverlayUtils.getLabel('longitude', settings.language);
+      final latVal = OverlayUtils.formatCoordinate(data.latitude, true, settings.coordinateFormat);
+      final lonVal = OverlayUtils.formatCoordinate(data.longitude, false, settings.coordinateFormat);
+      
       spans.add(TextSpan(
-        text: "Latitude: ${data.latitude.toStringAsFixed(6)}\nLongitude: ${data.longitude.toStringAsFixed(6)}\n",
+        text: "$latLabel: $latVal\n$lonLabel: $lonVal\n",
         style: textStyle,
       ));
     }
 
     String altDirText = "";
     if (settings.showAltitude) {
-      altDirText += "ALT: ${data.altitude.toStringAsFixed(1)}m  ";
+      final altLabel = OverlayUtils.getLabel('altitude', settings.language);
+      altDirText += "$altLabel: ${data.altitude.toStringAsFixed(1)}m  ";
     }
     if (settings.showDirection) {
-      altDirText += "DIR: ${data.direction} ${data.heading.toStringAsFixed(0)}°";
+      final dirLabel = OverlayUtils.getLabel('direction', settings.language);
+      altDirText += "$dirLabel: ${data.direction} ${data.heading.toStringAsFixed(0)}°";
     }
     if (altDirText.isNotEmpty) {
       spans.add(TextSpan(text: "$altDirText\n", style: textStyle));
     }
 
     if (settings.showWeather && data.weather != null) {
-      spans.add(TextSpan(text: "Weather: ${data.weather}\n", style: textStyle));
+      final label = OverlayUtils.getLabel('weather', settings.language);
+      spans.add(TextSpan(text: "$label: ${data.weather}\n", style: textStyle));
     }
 
     if (settings.showHumidity && data.humidity != null) {
-      spans.add(TextSpan(text: "Humidity: ${data.humidity}\n", style: textStyle));
+      final label = OverlayUtils.getLabel('humidity', settings.language);
+      spans.add(TextSpan(text: "$label: ${data.humidity}\n", style: textStyle));
+    }
+
+    if (settings.showPressure && data.pressure != null) {
+      final label = OverlayUtils.getLabel('pressure', settings.language);
+      spans.add(TextSpan(text: "$label: ${data.pressure}\n", style: textStyle));
     }
 
     if (settings.showAir && data.air != null) {
-      spans.add(TextSpan(text: "Air: ${data.air}\n", style: textStyle));
+      final label = OverlayUtils.getLabel('air', settings.language);
+      spans.add(TextSpan(text: "$label: ${data.air}\n", style: textStyle));
     }
 
     if (settings.showNote && data.note.isNotEmpty) {
@@ -126,13 +142,13 @@ class LiveOverlayPainter extends CustomPainter {
       ellipsis: '...',
     );
 
-    textPainter.layout(maxWidth: baseSize * 0.75); // Consistent wrapping regardless of orientation
+    textPainter.layout(maxWidth: baseSize * 0.75);
 
     // ===============================
     // POSITION
     // ===============================
     final paddingH = baseSize * 0.03;
-    final paddingV = baseSize * 0.02; // Using baseSize for consistent padding
+    final paddingV = baseSize * 0.02;
     final marginX = baseSize * 0.04;
     final marginY = baseSize * 0.04;
 
@@ -153,7 +169,6 @@ class LiveOverlayPainter extends CustomPainter {
     final bgPaint = Paint()
       ..color = settings.backgroundColor.withOpacity(settings.backgroundOpacity);
 
-    // Subtle Border
     final borderPaint = Paint()
       ..color = Colors.black.withOpacity(0.1)
       ..style = PaintingStyle.stroke
