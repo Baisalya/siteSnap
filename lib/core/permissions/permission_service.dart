@@ -2,6 +2,39 @@ import 'dart:io';
 import 'package:permission_handler/permission_handler.dart';
 
 class PermissionService {
+  /// CAMERA + MICROPHONE (minimum needed to open camera/video quickly)
+  static Future<void> requestCameraAndMicrophone() async {
+    final cameraStatus = await Permission.camera.status;
+    final micStatus = await Permission.microphone.status;
+
+    if (!cameraStatus.isGranted || !micStatus.isGranted) {
+      final statuses = await [
+        Permission.camera,
+        Permission.microphone,
+      ].request();
+
+      final newCameraStatus = statuses[Permission.camera]!;
+      final newMicStatus = statuses[Permission.microphone]!;
+
+      if (newCameraStatus.isPermanentlyDenied ||
+          newMicStatus.isPermanentlyDenied) {
+        await openAppSettings();
+        throw Exception('Camera or microphone permission permanently denied');
+      }
+
+      if (!newCameraStatus.isGranted || !newMicStatus.isGranted) {
+        throw Exception('Camera or microphone permission not granted');
+      }
+    }
+  }
+
+  /// Location improves the watermark but should not block camera startup.
+  static Future<void> requestLocationIfNeeded() async {
+    final locationStatus = await Permission.locationWhenInUse.status;
+    if (locationStatus.isGranted || locationStatus.isPermanentlyDenied) return;
+
+    await Permission.locationWhenInUse.request();
+  }
 
   /// CAMERA + LOCATION + MICROPHONE (used on camera start)
   static Future<void> requestCameraAndLocation() async {
@@ -9,7 +42,9 @@ class PermissionService {
     final locationStatus = await Permission.locationWhenInUse.status;
     final micStatus = await Permission.microphone.status;
 
-    if (!cameraStatus.isGranted || !locationStatus.isGranted || !micStatus.isGranted) {
+    if (!cameraStatus.isGranted ||
+        !locationStatus.isGranted ||
+        !micStatus.isGranted) {
       final statuses = await [
         Permission.camera,
         Permission.locationWhenInUse,
@@ -27,7 +62,9 @@ class PermissionService {
         throw Exception('Permissions permanently denied');
       }
 
-      if (!newCameraStatus.isGranted || !newLocationStatus.isGranted || !newMicStatus.isGranted) {
+      if (!newCameraStatus.isGranted ||
+          !newLocationStatus.isGranted ||
+          !newMicStatus.isGranted) {
         throw Exception('Required permissions not granted');
       }
     }

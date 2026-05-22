@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:io';
 import 'dart:math';
 import 'dart:typed_data';
@@ -10,16 +11,22 @@ import 'package:flutter_svg/flutter_svg.dart' as svg;
 import 'package:image/image.dart' as img;
 import 'package:vector_graphics/vector_graphics.dart';
 import 'package:ffmpeg_kit_flutter_new_https_gpl/ffmpeg_kit.dart';
+import 'package:ffmpeg_kit_flutter_new_https_gpl/ffmpeg_session.dart';
 import 'package:ffmpeg_kit_flutter_new_https_gpl/return_code.dart';
+import 'package:ffmpeg_kit_flutter_new_https_gpl/statistics.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:path/path.dart' as p;
 
 import 'package:surveycam/features/overlay/domain/overlay_model.dart';
 import 'package:surveycam/features/overlay/domain/overlay_settings.dart';
+import 'package:surveycam/features/overlay/domain/video_overlay_sample.dart';
 import 'package:surveycam/features/overlay/presentation/live_overlay_painter.dart';
 
 class VideoWatermarkProcessor {
   static const String assetName = 'Assets/app_logo.svg';
+  static const double overlaySampleFps = 2.0;
+  static const double overlayWidth = 540;
+  static const double overlayHeight = 960;
 
   static void _undoOrientationForVideoWatermark(
     Canvas canvas,
@@ -46,19 +53,29 @@ class VideoWatermarkProcessor {
   }
 
   static Future<String?> generateVideoOverlaySequence({
-    required List<OverlayData> history,
-    required DeviceOrientation orientation,
+    required List<VideoOverlaySample> samples,
     required double width,
     required double height,
     bool showOverlay = true,
     bool showWatermark = true,
-    OverlaySettings settings = const OverlaySettings(),
     Function(double)? onProgress,
+    String? customDir,
   }) async {
     try {
-      final tempDir = await getTemporaryDirectory();
-      final sequenceDir = Directory(p.join(tempDir.path, 'overlay_seq_${DateTime.now().millisecondsSinceEpoch}'));
-      await sequenceDir.create(recursive: true);
+      if (samples.isEmpty) return null;
+
+      final String dirPath;
+      if (customDir != null) {
+        dirPath = customDir;
+      } else {
+        final tempDir = await getTemporaryDirectory();
+        dirPath = p.join(tempDir.path, 'overlay_seq_${DateTime.now().millisecondsSinceEpoch}');
+      }
+      
+      final sequenceDir = Directory(dirPath);
+      if (!await sequenceDir.exists()) {
+        await sequenceDir.create(recursive: true);
+      }
 
       final svgString = await rootBundle.loadString(assetName);
       final PictureInfo pictureInfo = await svg.vg.loadPicture(
@@ -66,84 +83,49 @@ class VideoWatermarkProcessor {
         null,
       );
 
-      for (int i = 0; i < history.length; i++) {
-        final data = history[i];
-        final recorder = ui.PictureRecorder();
-        final canvas = Canvas(recorder);
+      // 🔥 OPTIMIZATION: Parallel batch generation to maximize CPU/GPU utilization
+      const int batchSize = 4;
+      for (int i = 0; i < samples.length; i += batchSize) {
+        final List<Future<void>> batchTasks = [];
+        
+        for (int j = 0; j < batchSize && (i + j) < samples.length; j++) {
+          final int index = i + j;
+          batchTasks.add(Future(() async {
+            final sample = samples[index];
+            final pngBytes = await generateSingleFrameBytes(
+              data: sample.data,
+              orientation: sample.orientation,
+              width: width,
+              height: height,
+              showOverlay: showOverlay,
+              showWatermark: showWatermark,
+              settings: sample.settings,
+              pictureInfo: pictureInfo,
+            );
 
-        if (showOverlay) {
-          final overlayPainter = LiveOverlayPainter(data, orientation, settings: settings);
-          overlayPainter.paint(canvas, Size(width, height));
+            if (pngBytes != null) {
+              final file = File(p.join(
+                sequenceDir.path,
+                'frame_${index.toString().padLeft(5, '0')}.png',
+              ));
+              await file.writeAsBytes(pngBytes, flush: false);
+            }
+          }));
         }
 
-        if (showWatermark) {
-          canvas.save();
-          _undoOrientationForVideoWatermark(canvas, orientation, width, height);
-
-          final double baseSize = min(width, height);
-          final double padding = baseSize * 0.04;
-
-          final textPainter = TextPainter(
-            text: TextSpan(
-              text: "SurveyCam",
-              style: TextStyle(
-                color: Colors.white,
-                fontSize: baseSize * 0.045,
-                fontWeight: FontWeight.bold,
-                shadows: [
-                  Shadow(
-                    blurRadius: 6,
-                    color: Colors.black.withValues(alpha: 0.5),
-                    offset: const Offset(1, 1),
-                  ),
-                ],
-              ),
-            ),
-            textDirection: TextDirection.ltr,
-          )..layout();
-
-          final double svgSize = textPainter.height;
-          const double spacing = 10;
-          final double totalWidth = svgSize + spacing + textPainter.width;
-
-          double dx, dy;
-          if (orientation == DeviceOrientation.landscapeLeft || orientation == DeviceOrientation.landscapeRight) {
-            dx = padding; dy = padding;
-          } else {
-            dx = width - totalWidth - padding; dy = padding;
-          }
-
-          canvas.save();
-          canvas.translate(dx, dy);
-          final double scale = svgSize / pictureInfo.size.height;
-          canvas.scale(scale, scale);
-          canvas.drawPicture(pictureInfo.picture);
-          canvas.restore();
-
-          textPainter.paint(canvas, Offset(dx + svgSize + spacing, dy));
-          canvas.restore();
-        }
-
-        final picture = recorder.endRecording();
-        final finalImage = await picture.toImage(width.toInt(), height.toInt());
-        final byteData = await finalImage.toByteData(format: ui.ImageByteFormat.rawRgba);
-        finalImage.dispose();
-
-        if (byteData != null) {
-          final pngBytes = await compute(_encodePngTask, {
-            'width': finalImage.width,
-            'height': finalImage.height,
-            'buffer': byteData.buffer,
-          });
-          final file = File(p.join(sequenceDir.path, 'frame_$i.png'));
-          await file.writeAsBytes(pngBytes);
-        }
+        await Future.wait(batchTasks);
 
         // Report progress for image generation (0% to 40%)
         if (onProgress != null) {
-          onProgress((i + 1) / history.length * 0.4);
+          final currentProgress = min(1.0, (i + batchSize) / samples.length);
+          onProgress(currentProgress);
+        }
+
+        if (i % 8 == 0) {
+          await Future<void>.delayed(Duration.zero);
         }
       }
+
       return sequenceDir.path;
     } catch (e) {
       debugPrint("Error generating sequence: $e");
@@ -151,44 +133,173 @@ class VideoWatermarkProcessor {
     }
   }
 
+  static Future<Uint8List?> generateSingleFrameBytes({
+    required OverlayData data,
+    required DeviceOrientation orientation,
+    required double width,
+    required double height,
+    required PictureInfo pictureInfo,
+    bool showOverlay = true,
+    bool showWatermark = true,
+    OverlaySettings settings = const OverlaySettings(),
+  }) async {
+    final recorder = ui.PictureRecorder();
+    final canvas = Canvas(recorder);
+
+    if (showOverlay) {
+      final overlayPainter = LiveOverlayPainter(data, orientation, settings: settings);
+      overlayPainter.paint(canvas, Size(width, height));
+    }
+
+    if (showWatermark) {
+      canvas.save();
+      _undoOrientationForVideoWatermark(canvas, orientation, width, height);
+
+      final double baseSize = min(width, height);
+      final double padding = baseSize * 0.04;
+
+      final textPainter = TextPainter(
+        text: TextSpan(
+          text: "SurveyCam",
+          style: TextStyle(
+            color: Colors.white,
+            fontSize: baseSize * 0.045,
+            fontWeight: FontWeight.bold,
+            shadows: [
+              Shadow(
+                blurRadius: 6,
+                color: Colors.black.withValues(alpha: 0.5),
+                offset: const Offset(1, 1),
+              ),
+            ],
+          ),
+        ),
+        textDirection: TextDirection.ltr,
+      )..layout();
+
+      final double svgSize = textPainter.height;
+      const double spacing = 10;
+      final double totalWidth = svgSize + spacing + textPainter.width;
+
+      double dx, dy;
+      if (orientation == DeviceOrientation.landscapeLeft || orientation == DeviceOrientation.landscapeRight) {
+        dx = padding; dy = padding;
+      } else {
+        dx = width - totalWidth - padding; dy = padding;
+      }
+
+      canvas.save();
+      canvas.translate(dx, dy);
+      final double scale = svgSize / pictureInfo.size.height;
+      canvas.scale(scale, scale);
+      canvas.drawPicture(pictureInfo.picture);
+      canvas.restore();
+
+      textPainter.paint(canvas, Offset(dx + svgSize + spacing, dy));
+      canvas.restore();
+    }
+
+    final picture = recorder.endRecording();
+    final finalImage = await picture.toImage(width.toInt(), height.toInt());
+    
+    // 🔥 OPTIMIZATION: Use native PNG encoding instead of the pure-dart image package
+    final byteData = await finalImage.toByteData(format: ui.ImageByteFormat.png);
+    finalImage.dispose();
+
+    return byteData?.buffer.asUint8List();
+  }
+
   static Future<String?> applyOverlaySequenceToVideo({
     required String videoPath,
     required String sequenceDir,
     required int frameCount,
+    required int durationMs,
+    double sampleFps = overlaySampleFps,
     Function(double)? onProgress,
   }) async {
     try {
       final tempDir = await getTemporaryDirectory();
-      final outputPath = p.join(tempDir.path, 'processed_video_${DateTime.now().millisecondsSinceEpoch}.mp4');
+      final outputPath = p.join(tempDir.path,
+          'processed_video_${DateTime.now().millisecondsSinceEpoch}.mp4');
 
-      // FFmpeg command to use image sequence as overlay
-      final command = '-i "$videoPath" -framerate 1 -i "$sequenceDir/frame_%d.png" '
+      // 🔥 HARDWARE ACCELERATION: Use mediacodec (Android) or videotoolbox (iOS) for near-instant encoding
+      String encoder = 'libx264';
+      String extraArgs =
+          '-preset ultrafast -crf 23'; // Ultrafast for software fallback
+
+      if (Platform.isAndroid) {
+        encoder = 'h264_mediacodec';
+        extraArgs = '-b:v 8M -profile:v high'; // High performance profile
+      } else if (Platform.isIOS) {
+        encoder = 'h264_videotoolbox';
+        extraArgs = '-b:v 8M -profile:v high';
+      }
+
+      // FFmpeg command optimized for speed
+      // [1:v]fps=$sampleFps ensures the overlay frames match the expected timing
+      final command =
+          '-i "$videoPath" -framerate $sampleFps -i "$sequenceDir/frame_%05d.png" '
           '-filter_complex "[0:v]scale=1080:1920:force_original_aspect_ratio=decrease,pad=1080:1920:(1080-iw)/2:(1920-ih)/2,setsar=1[v];'
           '[1:v]setpts=PTS-STARTPTS[ov];[v][ov]overlay=0:0" '
-          '-c:v libx264 -preset ultrafast -crf 23 -codec:a copy -y "$outputPath"';
+          '-c:v $encoder $extraArgs -codec:a copy -y "$outputPath"';
 
       debugPrint("Executing FFmpeg: $command");
-      
-      // We use FFmpegKit.execute (synchronous wait) which is safe in an async function 
-      // as it runs the heavy lifting in native threads.
-      final session = await FFmpegKit.execute(command);
-      final returnCode = await session.getReturnCode();
-      
-      debugPrint("FFmpeg finished with return code: $returnCode");
 
-      // Cleanup sequence dir
-      try {
-        await Directory(sequenceDir).delete(recursive: true);
-      } catch (_) {}
+      final Completer<String?> completer = Completer();
 
-      if (ReturnCode.isSuccess(returnCode)) {
-        if (onProgress != null) onProgress(1.0);
-        return outputPath;
-      } else {
-        final logs = await session.getAllLogsAsString();
-        debugPrint("FFmpeg failed. Logs: $logs");
-        return null;
-      }
+      await FFmpegKit.executeAsync(
+        command,
+        (session) async {
+          final returnCode = await session.getReturnCode();
+          debugPrint("FFmpeg finished with return code: $returnCode");
+
+          // Cleanup sequence dir
+          try {
+            await Directory(sequenceDir).delete(recursive: true);
+          } catch (_) {}
+
+          if (ReturnCode.isSuccess(returnCode)) {
+            if (onProgress != null) onProgress(1.0);
+            completer.complete(outputPath);
+          } else {
+            final logs = await session.getAllLogsAsString();
+            debugPrint("FFmpeg failed with hardware encoder. Logs: $logs");
+
+            // FALLBACK to software encoding if hardware failed
+            if (encoder != 'libx264') {
+              debugPrint("Retrying with software encoder (libx264)...");
+              final softwareCommand =
+                  '-i "$videoPath" -framerate $sampleFps -i "$sequenceDir/frame_%05d.png" '
+                  '-filter_complex "[0:v]scale=1080:1920:force_original_aspect_ratio=decrease,pad=1080:1920:(1080-iw)/2:(1920-ih)/2,setsar=1[v];'
+                  '[1:v]setpts=PTS-STARTPTS[ov];[v][ov]overlay=0:0" '
+                  '-c:v libx264 -preset ultrafast -crf 23 -codec:a copy -y "$outputPath"';
+
+              final swSession = await FFmpegKit.execute(softwareCommand);
+              final swReturnCode = await swSession.getReturnCode();
+
+              if (ReturnCode.isSuccess(swReturnCode)) {
+                completer.complete(outputPath);
+              } else {
+                completer.complete(null);
+              }
+            } else {
+              completer.complete(null);
+            }
+          }
+        },
+        (log) => debugPrint(log.getMessage()),
+        (statistics) {
+          if (onProgress != null && durationMs > 0) {
+            final time = statistics.getTime();
+            if (time > 0) {
+              final progress = (time / durationMs).clamp(0.0, 1.0);
+              onProgress(progress);
+            }
+          }
+        },
+      );
+
+      return completer.future;
     } catch (e) {
       debugPrint("Error applying sequence: $e");
       return null;

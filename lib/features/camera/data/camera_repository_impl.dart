@@ -14,15 +14,18 @@ class CameraRepositoryImpl implements CameraRepository {
   @override
   Future<void> initialize(CameraLensType lens) async {
     // 1. If we are already initialized with the correct lens, perform a health check
-    if (_controller != null && _controller!.value.isInitialized && _currentLens == lens) {
+    if (_controller != null &&
+        _controller!.value.isInitialized &&
+        _currentLens == lens) {
       try {
         // Health check: if preview is paused, just resume it
         if (!_controller!.value.isPreviewPaused) {
-           await _controller!.getMinZoomLevel();
+          await _controller!.getMinZoomLevel();
         }
-        return; 
+        return;
       } catch (e) {
-        debugPrint("Camera hardware health check failed: $e. Re-initializing...");
+        debugPrint(
+            "Camera hardware health check failed: $e. Re-initializing...");
       }
     }
 
@@ -40,13 +43,13 @@ class CameraRepositoryImpl implements CameraRepository {
     // 3. Initialize with Retry Logic
     int retryCount = 0;
     const maxRetries = 2; // Reduced retries for faster failure/recovery
-    
+
     while (retryCount < maxRetries) {
       try {
         // Proactive Discovery within the retry loop - use cache if available
         final cameras = _cachedCameras ?? await availableCameras();
         _cachedCameras = cameras;
-        
+
         if (cameras.isEmpty) {
           _cachedCameras = null; // Clear cache on failure to force refresh
           throw Exception('No cameras detected on this device');
@@ -66,7 +69,7 @@ class CameraRepositoryImpl implements CameraRepository {
 
         // Re-map available lenses based on latest hardware discovery
         final Map<CameraLensType, CameraDescription> newMap = {};
-        
+
         if (backCameras.isNotEmpty) {
           newMap[CameraLensType.normal] = backCameras.first;
           if (backCameras.length > 1) {
@@ -76,7 +79,7 @@ class CameraRepositoryImpl implements CameraRepository {
             newMap[CameraLensType.macro] = backCameras[1];
           }
         }
-        
+
         if (frontCameras.isNotEmpty) {
           newMap[CameraLensType.front] = frontCameras.first;
         }
@@ -87,23 +90,25 @@ class CameraRepositoryImpl implements CameraRepository {
         final cameraDesc = _cameraMap[lens];
         if (cameraDesc == null) {
           // If requested lens is gone (e.g. hardware error), fallback to normal back camera
-          if (lens != CameraLensType.normal && _cameraMap.containsKey(CameraLensType.normal)) {
-             debugPrint("Requested lens $lens not available, falling back to normal");
-             await _initController(_cameraMap[CameraLensType.normal]!);
+          if (lens != CameraLensType.normal &&
+              _cameraMap.containsKey(CameraLensType.normal)) {
+            debugPrint(
+                "Requested lens $lens not available, falling back to normal");
+            await _initController(_cameraMap[CameraLensType.normal]!);
           } else {
-             throw Exception('Lens $lens not found and no fallback available');
+            throw Exception('Lens $lens not found and no fallback available');
           }
         } else {
           await _initController(cameraDesc);
         }
-        
+
         return; // Success!
       } catch (e) {
         retryCount++;
         debugPrint("Camera init attempt $retryCount failed: $e");
-        
+
         if (retryCount >= maxRetries) rethrow;
-        
+
         await Future.delayed(Duration(milliseconds: 300 * retryCount));
       }
     }
@@ -112,7 +117,7 @@ class CameraRepositoryImpl implements CameraRepository {
   Future<void> _initController(CameraDescription camera) async {
     final controller = CameraController(
       camera,
-      ResolutionPreset.veryHigh, // 🔥 Restored to High Quality (1080p+) as requested
+      ResolutionPreset.max,
       enableAudio: true,
       imageFormatGroup: ImageFormatGroup.jpeg,
     );
@@ -120,23 +125,20 @@ class CameraRepositoryImpl implements CameraRepository {
     _controller = controller;
 
     try {
-      // Start initialization
-      final initFuture = controller.initialize();
-      
-      // 🔥 PRE-WARM: While waiting for full initialization, prepare for video
-      // This forces the camera pipeline to stabilize and allocate buffers earlier.
-      unawaited(controller.prepareForVideoRecording());
-
-      await initFuture;
+      await controller.initialize();
 
       // Initial quality settings - only if supported
       if (controller.value.isInitialized) {
+        unawaited(controller.prepareForVideoRecording().catchError((e) {
+          debugPrint("Video pre-warm skipped: $e");
+        }));
+
         try {
           await controller.setFocusMode(FocusMode.auto);
         } catch (e) {
           debugPrint("Focus mode auto not supported: $e");
         }
-        
+
         try {
           await controller.setExposureMode(ExposureMode.auto);
         } catch (e) {
@@ -154,7 +156,8 @@ class CameraRepositoryImpl implements CameraRepository {
   @override
   Future<String> takePicture() async {
     final controller = _controller;
-    if (controller == null || !controller.value.isInitialized ||
+    if (controller == null ||
+        !controller.value.isInitialized ||
         controller.value.isTakingPicture) {
       throw Exception("Camera not ready");
     }
@@ -166,7 +169,9 @@ class CameraRepositoryImpl implements CameraRepository {
   @override
   Future<void> startVideoRecording() async {
     final controller = _controller;
-    if (controller == null || !controller.value.isInitialized || controller.value.isRecordingVideo) {
+    if (controller == null ||
+        !controller.value.isInitialized ||
+        controller.value.isRecordingVideo) {
       return;
     }
     await controller.startVideoRecording();
@@ -175,7 +180,9 @@ class CameraRepositoryImpl implements CameraRepository {
   @override
   Future<XFile> stopVideoRecording() async {
     final controller = _controller;
-    if (controller == null || !controller.value.isInitialized || !controller.value.isRecordingVideo) {
+    if (controller == null ||
+        !controller.value.isInitialized ||
+        !controller.value.isRecordingVideo) {
       throw Exception("No recording in progress");
     }
     return await controller.stopVideoRecording();

@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:surveycam/features/gallery/data/sitesnap_gallery_repository.dart';
+import 'package:surveycam/features/gallery/presentation/last_image_provider.dart';
 import 'package:surveycam/core/utils/gallery_saver.dart';
 
 import 'package:surveycam/features/overlay/domain/overlay_model.dart';
@@ -12,7 +13,7 @@ import 'package:surveycam/features/overlay/presentation/overlay_settings_provide
 import '../../camera/data/CameraState.dart';
 
 final overlayViewModelProvider =
-StateNotifierProvider<OverlayViewModel, void>((ref) {
+    StateNotifierProvider<OverlayViewModel, void>((ref) {
   return OverlayViewModel(ref);
 });
 
@@ -25,14 +26,14 @@ class OverlayViewModel extends StateNotifier<void> {
   /// PROCESS IMAGE (OPTIMIZED FOR SPEED)
   /// =======================================================
   Future<Uint8List> processImage(
-      File original,
-      DeviceOrientation orientation, {
-        required OverlayData overlayData,
-        bool showOverlay = true,
-        bool showWatermark = true,
-        CameraAspectRatio? aspectRatio,
-        bool mirror = false,
-      }) async {
+    File original,
+    DeviceOrientation orientation, {
+    required OverlayData overlayData,
+    bool showOverlay = true,
+    bool showWatermark = true,
+    CameraAspectRatio? aspectRatio,
+    bool mirror = false,
+  }) async {
     try {
       final settings = ref.read(overlaySettingsProvider);
 
@@ -58,7 +59,7 @@ class OverlayViewModel extends StateNotifier<void> {
   /// =======================================================
   /// SAVE IN BACKGROUND (NON-BLOCKING)
   /// =======================================================
-  Future<void> saveCapturedImage({
+  Future<File?> saveCapturedImage({
     required File original,
     required DeviceOrientation orientation,
     required OverlayData overlayData,
@@ -79,11 +80,14 @@ class OverlayViewModel extends StateNotifier<void> {
         mirror: mirror,
       );
 
-      await GallerySaver.saveImageBytes(bytes);
+      final savedFile = await GallerySaver.saveImageBytes(bytes);
+      ref.read(lastImageProvider.notifier).state = savedFile;
       ref.invalidate(galleryFilesProvider);
       debugPrint("✅ Background Save Complete");
+      return savedFile;
     } catch (e) {
       debugPrint("❌ Background Save Failed: $e");
+      return null;
     }
   }
 }

@@ -9,6 +9,38 @@ enum CameraAspectRatio {
   ratio16_9,
 }
 
+extension CameraAspectRatioX on CameraAspectRatio {
+  double get portraitValue {
+    switch (this) {
+      case CameraAspectRatio.ratio4_3:
+        return 3 / 4;
+      case CameraAspectRatio.ratio16_9:
+        return 9 / 16;
+    }
+  }
+
+  double forOrientation(DeviceOrientation orientation) {
+    final value = portraitValue;
+    switch (orientation) {
+      case DeviceOrientation.landscapeLeft:
+      case DeviceOrientation.landscapeRight:
+        return 1 / value;
+      case DeviceOrientation.portraitUp:
+      case DeviceOrientation.portraitDown:
+        return value;
+    }
+  }
+
+  String get label {
+    switch (this) {
+      case CameraAspectRatio.ratio4_3:
+        return '3:4';
+      case CameraAspectRatio.ratio16_9:
+        return '9:16';
+    }
+  }
+}
+
 enum CameraMode {
   photo,
   video,
@@ -45,8 +77,9 @@ class CameraState {
   final String? error;
 
   final List<XFile> videoSegments;
-  final List<OverlayData> videoDataHistory;
   final double? processingProgress;
+
+  final String? videoSequenceDir;
 
   const CameraState({
     required this.isReady,
@@ -60,7 +93,6 @@ class CameraState {
     this.aspectRatio = CameraAspectRatio.ratio16_9,
     this.error,
     this.videoSegments = const [],
-    this.videoDataHistory = const [],
     this.processingProgress,
     this.exposure = 0.0,
     this.minExposure = -2.0,
@@ -71,6 +103,7 @@ class CameraState {
     this.orientation = DeviceOrientation.portraitUp,
     this.captureOrientation,
     this.captureLens,
+    this.videoSequenceDir,
   });
 
   CameraState copyWith({
@@ -94,9 +127,9 @@ class CameraState {
     DeviceOrientation? captureOrientation,
     CameraLensType? captureLens,
     List<XFile>? videoSegments,
-    List<OverlayData>? videoDataHistory,
     double? processingProgress,
     bool clearProcessingProgress = false,
+    String? videoSequenceDir,
   }) {
     return CameraState(
       isReady: isReady ?? this.isReady,
@@ -110,8 +143,9 @@ class CameraState {
       aspectRatio: aspectRatio ?? this.aspectRatio,
       error: error ?? this.error,
       videoSegments: videoSegments ?? this.videoSegments,
-      videoDataHistory: videoDataHistory ?? this.videoDataHistory,
-      processingProgress: clearProcessingProgress ? null : (processingProgress ?? this.processingProgress),
+      processingProgress: clearProcessingProgress
+          ? null
+          : (processingProgress ?? this.processingProgress),
       exposure: exposure ?? this.exposure,
       minExposure: minExposure ?? this.minExposure,
       maxExposure: maxExposure ?? this.maxExposure,
@@ -121,6 +155,7 @@ class CameraState {
       orientation: orientation ?? this.orientation,
       captureOrientation: captureOrientation ?? this.captureOrientation,
       captureLens: captureLens ?? this.captureLens,
+      videoSequenceDir: videoSequenceDir ?? this.videoSequenceDir,
     );
   }
 }

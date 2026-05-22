@@ -2,8 +2,10 @@ import 'dart:io';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:path/path.dart' as p;
+import 'package:surveycam/core/utils/gallery_saver.dart';
 
-final galleryRepositoryProvider = Provider((ref) => SurveyCamGalleryRepository());
+final galleryRepositoryProvider =
+    Provider((ref) => SurveyCamGalleryRepository());
 
 final galleryFilesProvider = FutureProvider<List<File>>((ref) async {
   final repo = ref.watch(galleryRepositoryProvider);
@@ -13,6 +15,7 @@ final galleryFilesProvider = FutureProvider<List<File>>((ref) async {
 class SurveyCamGalleryRepository {
   Future<List<File>> loadImages() async {
     final List<Directory> directories = [];
+    directories.add(await GallerySaver.localAlbumDirectory());
 
     if (Platform.isAndroid) {
       // ✅ Check common Pictures and Movies folders
@@ -20,7 +23,7 @@ class SurveyCamGalleryRepository {
       directories.add(Directory('/storage/emulated/0/Pictures/survaycam'));
       directories.add(Directory('/storage/emulated/0/Movies/surveycam'));
       directories.add(Directory('/storage/emulated/0/Movies/survaycam'));
-      
+
       // Also check standard DCIM and common camera folders
       directories.add(Directory('/storage/emulated/0/DCIM/surveycam'));
       directories.add(Directory('/storage/emulated/0/DCIM/Camera/surveycam'));
@@ -31,15 +34,16 @@ class SurveyCamGalleryRepository {
       directories.add(Directory('${docDir.path}/survaycam'));
     }
 
-    final List<File> allFiles = [];
+    final Map<String, File> allFilesByName = {};
 
     // Parallelize directory listing
     final results = await Future.wait(directories.map((directory) async {
       try {
         if (await directory.exists()) {
-          final isSurveyCam = directory.path.toLowerCase().contains('surveycam') || 
-                             directory.path.toLowerCase().contains('survaycam');
-          
+          final isSurveyCam =
+              directory.path.toLowerCase().contains('surveycam') ||
+                  directory.path.toLowerCase().contains('survaycam');
+
           final List<File> files = [];
           await for (var entity in directory.list(recursive: isSurveyCam)) {
             if (entity is File) {
@@ -69,11 +73,14 @@ class SurveyCamGalleryRepository {
     }));
 
     for (var files in results) {
-      allFiles.addAll(files);
+      for (final file in files) {
+        allFilesByName[p.basename(file.path).toLowerCase()] = file;
+      }
     }
 
     // ✅ newest first across all folders - use async lastModified for sorting
-    final fileWithDates = await Future.wait(allFiles.map((file) async {
+    final fileWithDates =
+        await Future.wait(allFilesByName.values.map((file) async {
       try {
         final date = await file.lastModified();
         return _FileWithDate(file, date);

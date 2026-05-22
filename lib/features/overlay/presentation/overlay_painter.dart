@@ -17,13 +17,14 @@ import 'package:surveycam/features/overlay/presentation/live_overlay_painter.dar
 
 class WatermarkProcessor {
   static const String assetName = 'Assets/app_logo.svg';
+  static String? _cachedSvgString;
 
   static void _applyOrientation(
-      Canvas canvas,
-      DeviceOrientation orientation,
-      double w,
-      double h,
-      ) {
+    Canvas canvas,
+    DeviceOrientation orientation,
+    double w,
+    double h,
+  ) {
     switch (orientation) {
       case DeviceOrientation.portraitUp:
         break;
@@ -43,11 +44,11 @@ class WatermarkProcessor {
   }
 
   static void _undoOrientationForWatermark(
-      Canvas canvas,
-      DeviceOrientation orientation,
-      double w,
-      double h,
-      ) {
+    Canvas canvas,
+    DeviceOrientation orientation,
+    double w,
+    double h,
+  ) {
     switch (orientation) {
       case DeviceOrientation.portraitUp:
         break;
@@ -67,24 +68,24 @@ class WatermarkProcessor {
   }
 
   static Future<Uint8List> drawOverlay(
-      File file,
-      OverlayData data,
-      DeviceOrientation orientation, {
-        bool showOverlay = true,
-        bool showWatermark = true,
-        CameraAspectRatio? aspectRatio,
-        bool mirror = false,
-        OverlaySettings settings = const OverlaySettings(),
-      }) async {
+    File file,
+    OverlayData data,
+    DeviceOrientation orientation, {
+    bool showOverlay = true,
+    bool showWatermark = true,
+    CameraAspectRatio? aspectRatio,
+    bool mirror = false,
+    OverlaySettings settings = const OverlaySettings(),
+  }) async {
     final ui.Image uiImage;
     final bytes = await file.readAsBytes();
     final codec = await ui.instantiateImageCodec(bytes);
     final frame = await codec.getNextFrame();
     uiImage = frame.image;
 
-    final svgString = await rootBundle.loadString(assetName);
+    _cachedSvgString ??= await rootBundle.loadString(assetName);
     final PictureInfo pictureInfo = await svg.vg.loadPicture(
-      svg.SvgStringLoader(svgString),
+      svg.SvgStringLoader(_cachedSvgString!),
       null,
     );
 
@@ -94,8 +95,7 @@ class WatermarkProcessor {
     Rect srcRect = Rect.fromLTWH(0, 0, srcW, srcH);
 
     if (aspectRatio != null) {
-      final double targetRatio =
-      aspectRatio == CameraAspectRatio.ratio4_3 ? 3 / 4 : 9 / 16;
+      final double targetRatio = aspectRatio.portraitValue;
       final double currentRatio = srcW / srcH;
 
       if (currentRatio > targetRatio) {
@@ -153,7 +153,8 @@ class WatermarkProcessor {
 
     // Overlay
     if (showOverlay) {
-      final overlayPainter = LiveOverlayPainter(data, orientation, settings: settings);
+      final overlayPainter =
+          LiveOverlayPainter(data, orientation, settings: settings);
       overlayPainter.paint(
         canvas,
         Size(srcRect.width, srcRect.height),
@@ -199,9 +200,8 @@ class WatermarkProcessor {
       final double totalWidth = svgSize + spacing + textPainter.width;
 
       /// ✅ RESTORED OLD POSITION LOGIC FOR PHOTOS
-      final bool isLandscape =
-          orientation == DeviceOrientation.landscapeLeft ||
-              orientation == DeviceOrientation.landscapeRight;
+      final bool isLandscape = orientation == DeviceOrientation.landscapeLeft ||
+          orientation == DeviceOrientation.landscapeRight;
 
       final double dx = isLandscape
           ? padding // landscape → left
@@ -232,9 +232,11 @@ class WatermarkProcessor {
 
     final picture = recorder.endRecording();
     final finalImage = await picture.toImage(dstW.toInt(), dstH.toInt());
+    final finalWidth = finalImage.width;
+    final finalHeight = finalImage.height;
 
     final byteData =
-    await finalImage.toByteData(format: ui.ImageByteFormat.rawRgba);
+        await finalImage.toByteData(format: ui.ImageByteFormat.rawRgba);
 
     // Dispose UI images as early as possible
     uiImage.dispose();
@@ -242,11 +244,11 @@ class WatermarkProcessor {
 
     if (byteData == null) return Uint8List(0);
 
-    debugPrint("📸 Processing Image: ${finalImage.width}x${finalImage.height}");
+    debugPrint("Processing Image: ${finalWidth}x$finalHeight");
 
     return await compute(_encodeJpgTask, {
-      'width': finalImage.width,
-      'height': finalImage.height,
+      'width': finalWidth,
+      'height': finalHeight,
       'buffer': byteData.buffer,
     });
   }
@@ -268,7 +270,8 @@ class WatermarkProcessor {
       img.encodeJpg(
         processedImage,
         quality: 100,
-        chroma: img.JpegChroma.yuv444, // 🔥 No chroma subsampling for maximum clarity
+        chroma: img
+            .JpegChroma.yuv444, // 🔥 No chroma subsampling for maximum clarity
       ),
     );
   }

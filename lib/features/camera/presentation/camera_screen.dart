@@ -22,7 +22,6 @@ import 'package:surveycam/features/overlay/presentation/overlay_settings_provide
 import 'package:surveycam/privacypolicy/privacyProvider.dart';
 import '../domain/camera_lens_type.dart';
 
-
 import 'package:surveycam/features/camera/data/CameraState.dart';
 import 'camera_settings_provider.dart';
 import 'camera_viewmodel.dart';
@@ -33,12 +32,11 @@ class CameraScreen extends ConsumerStatefulWidget {
   const CameraScreen({super.key});
 
   @override
-  ConsumerState<CameraScreen> createState() =>
-      _CameraScreenState();
+  ConsumerState<CameraScreen> createState() => _CameraScreenState();
 }
 
-class _CameraScreenState extends ConsumerState<CameraScreen> with WidgetsBindingObserver {
-
+class _CameraScreenState extends ConsumerState<CameraScreen>
+    with WidgetsBindingObserver {
   bool _showExposure = false;
   Timer? _dateTimer;
   Timer? _focusTimer;
@@ -64,14 +62,12 @@ class _CameraScreenState extends ConsumerState<CameraScreen> with WidgetsBinding
     /// DATE TIME UPDATE TIMER
     _dateTimer = Timer.periodic(
       const Duration(seconds: 1),
-          (_) {
-        final current =
-        ref.read(overlayPreviewProvider);
+      (_) {
+        final current = ref.read(overlayPreviewProvider);
 
-        ref.read(overlayPreviewProvider.notifier).state =
-            current.copyWith(
-              dateTime: DateTimeUtils.formattedNow(),
-            );
+        ref.read(overlayPreviewProvider.notifier).state = current.copyWith(
+          dateTime: DateTimeUtils.formattedNow(),
+        );
       },
     );
   }
@@ -127,10 +123,12 @@ class _CameraScreenState extends ConsumerState<CameraScreen> with WidgetsBinding
 
     final CameraController? controller = cameraState.controller;
 
-    final isSelfieFlashActive = cameraState.currentLens == CameraLensType.front &&
-        cameraState.flashMode == FlashMode.always;
+    final isSelfieFlashActive =
+        cameraState.currentLens == CameraLensType.front &&
+            cameraState.flashMode == FlashMode.always;
     final uiColor = isSelfieFlashActive ? Colors.black87 : Colors.white;
-    final backgroundColor = isSelfieFlashActive ? const Color(0xFFFEF7FF) : Colors.black;
+    final backgroundColor =
+        isSelfieFlashActive ? const Color(0xFFFEF7FF) : Colors.black;
 
     /// ===============================
     /// LISTENERS
@@ -141,53 +139,47 @@ class _CameraScreenState extends ConsumerState<CameraScreen> with WidgetsBinding
         next.whenData((position) async {
           final current = ref.read(overlayPreviewProvider);
 
-          final serviceEnabled =
-          await Geolocator.isLocationServiceEnabled();
+          final serviceEnabled = await Geolocator.isLocationServiceEnabled();
 
-          final permission =
-          await Geolocator.checkPermission();
+          final permission = await Geolocator.checkPermission();
 
           if (!serviceEnabled) {
-            ref.read(overlayPreviewProvider.notifier).state =
-                current.copyWith(
-                  latitude: 0,
-                  longitude: 0,
-                  altitude: 0,
-                  locationWarning: "GPS turned off",
-                );
+            ref.read(overlayPreviewProvider.notifier).state = current.copyWith(
+              latitude: 0,
+              longitude: 0,
+              altitude: 0,
+              locationWarning: "GPS turned off",
+            );
             return;
           }
 
           if (permission == LocationPermission.denied ||
               permission == LocationPermission.deniedForever) {
-            ref.read(overlayPreviewProvider.notifier).state =
-                current.copyWith(
-                  latitude: 0,
-                  longitude: 0,
-                  altitude: 0,
-                  locationWarning: "Give location permission",
-                );
+            ref.read(overlayPreviewProvider.notifier).state = current.copyWith(
+              latitude: 0,
+              longitude: 0,
+              altitude: 0,
+              locationWarning: "Give location permission",
+            );
             return;
           }
 
           if (position == null) {
-            ref.read(overlayPreviewProvider.notifier).state =
-                current.copyWith(
-                  latitude: 0,
-                  longitude: 0,
-                  altitude: 0,
-                  locationWarning: "Fetching location...",
-                );
+            ref.read(overlayPreviewProvider.notifier).state = current.copyWith(
+              latitude: 0,
+              longitude: 0,
+              altitude: 0,
+              locationWarning: "Fetching location...",
+            );
             return;
           }
 
-          ref.read(overlayPreviewProvider.notifier).state =
-              current.copyWith(
-                latitude: position.latitude,
-                longitude: position.longitude,
-                altitude: position.altitude,
-                clearLocationWarning: true,
-              );
+          ref.read(overlayPreviewProvider.notifier).state = current.copyWith(
+            latitude: position.latitude,
+            longitude: position.longitude,
+            altitude: position.altitude,
+            clearLocationWarning: true,
+          );
 
           // Fetch Weather, Humidity, Air Quality
           final weatherData = await WeatherService.fetchWeather(
@@ -197,10 +189,10 @@ class _CameraScreenState extends ConsumerState<CameraScreen> with WidgetsBinding
           if (weatherData != null && mounted) {
             ref.read(overlayPreviewProvider.notifier).state =
                 ref.read(overlayPreviewProvider.notifier).state.copyWith(
-                  weather: weatherData.temp,
-                  humidity: weatherData.humidity,
-                  air: weatherData.airQuality,
-                );
+                      weather: weatherData.temp,
+                      humidity: weatherData.humidity,
+                      air: weatherData.airQuality,
+                    );
           }
 
           final settings = ref.read(cameraSettingsProvider);
@@ -212,8 +204,8 @@ class _CameraScreenState extends ConsumerState<CameraScreen> with WidgetsBinding
             if (name != null && mounted) {
               ref.read(overlayPreviewProvider.notifier).state =
                   ref.read(overlayPreviewProvider.notifier).state.copyWith(
-                    note: name,
-                  );
+                        note: name,
+                      );
             }
           }
         });
@@ -222,17 +214,16 @@ class _CameraScreenState extends ConsumerState<CameraScreen> with WidgetsBinding
     ref.listen(compassHeadingProvider, (_, next) {
       next.whenData((heading) {
         final current = ref.read(overlayPreviewProvider);
-        ref.read(overlayPreviewProvider.notifier).state =
-            current.copyWith(
-              heading: heading,
-              direction: DirectionUtils.toCardinal(heading),
-            );
+        ref.read(overlayPreviewProvider.notifier).state = current.copyWith(
+          heading: heading,
+          direction: DirectionUtils.toCardinal(heading),
+        );
       });
     });
 
     ref.listen<DeviceOrientation>(
       deviceOrientationProvider,
-          (_, next) {
+      (_, next) {
         cameraVM.updateOrientation(next);
       },
     );
@@ -252,7 +243,8 @@ class _CameraScreenState extends ConsumerState<CameraScreen> with WidgetsBinding
                         constraints.maxHeight,
                       );
 
-                      final double targetAspectRatio = cameraState.aspectRatio == CameraAspectRatio.ratio4_3 ? 3 / 4 : 9 / 16;
+                      final double targetAspectRatio =
+                          cameraState.aspectRatio.portraitValue;
 
                       return Stack(
                         children: [
@@ -268,26 +260,33 @@ class _CameraScreenState extends ConsumerState<CameraScreen> with WidgetsBinding
                               final tapPosition = details.localPosition;
                               _focusTimer?.cancel();
 
-                              ref.read(focusPointProvider.notifier).state = tapPosition;
+                              ref.read(focusPointProvider.notifier).state =
+                                  tapPosition;
                               cameraVM.setFocusPoint(tapPosition, previewSize);
 
                               setState(() => _showExposure = true);
 
-                              _focusTimer = Timer(const Duration(seconds: 5), () {
+                              _focusTimer =
+                                  Timer(const Duration(seconds: 5), () {
                                 if (!mounted) return;
-                                if (ref.read(focusPointProvider) == tapPosition) {
+                                if (ref.read(focusPointProvider) ==
+                                    tapPosition) {
                                   cameraVM.resetFocus();
-                                  ref.read(focusPointProvider.notifier).state = null;
+                                  ref.read(focusPointProvider.notifier).state =
+                                      null;
                                   setState(() => _showExposure = false);
                                 }
                               });
                             },
                             onScaleUpdate: (details) {
-                              if (controller == null || !controller.value.isInitialized) return;
+                              if (controller == null ||
+                                  !controller.value.isInitialized) return;
                               if (details.scale != 1.0) {
-                                cameraVM.setZoom(cameraState.zoom * details.scale);
+                                cameraVM
+                                    .setZoom(cameraState.zoom * details.scale);
                               } else {
-                                final delta = -details.focalPointDelta.dy * 0.02;
+                                final delta =
+                                    -details.focalPointDelta.dy * 0.02;
                                 if (delta != 0) {
                                   cameraVM.changeExposure(delta);
                                   if (!_showExposure) {
@@ -303,67 +302,80 @@ class _CameraScreenState extends ConsumerState<CameraScreen> with WidgetsBinding
                                     cameraState.isReady)
                                   SizedBox.expand(
                                       child: Center(
-                                        child: AnimatedPadding(
-                                          duration: const Duration(milliseconds: 300),
+                                    child: AnimatedPadding(
+                                      duration:
+                                          const Duration(milliseconds: 300),
+                                      curve: Curves.easeInOut,
+                                      padding: isSelfieFlashActive
+                                          ? const EdgeInsets.all(24.0)
+                                          : EdgeInsets.zero,
+                                      child: ClipRRect(
+                                        borderRadius: BorderRadius.circular(
+                                            isSelfieFlashActive ? 24 : 0),
+                                        child: AnimatedContainer(
+                                          duration:
+                                              const Duration(milliseconds: 300),
                                           curve: Curves.easeInOut,
-                                          padding: isSelfieFlashActive
-                                              ? const EdgeInsets.all(24.0)
-                                              : EdgeInsets.zero,
-                                          child: ClipRRect(
-                                            borderRadius: BorderRadius.circular(isSelfieFlashActive ? 24 : 0),
-                                            child: AnimatedContainer(
-                                              duration: const Duration(milliseconds: 300),
-                                              curve: Curves.easeInOut,
-                                              width: double.infinity,
-                                              child: AspectRatio(
-                                                aspectRatio: targetAspectRatio,
-                                                child: Stack(
-                                                  fit: StackFit.expand,
-                                                  children: [
-                                                    FittedBox(
-                                                      fit: BoxFit.cover,
-                                                      child: SizedBox(
-                                                        width: controller.value.previewSize!.height,
-                                                        height: controller.value.previewSize!.width,
-                                                        child: CameraPreview(
-                                                          controller,
-                                                          key: ValueKey(controller.description.name),
-                                                        ),
-                                                      ),
+                                          width: double.infinity,
+                                          child: AspectRatio(
+                                            aspectRatio: targetAspectRatio,
+                                            child: Stack(
+                                              fit: StackFit.expand,
+                                              children: [
+                                                FittedBox(
+                                                  fit: BoxFit.cover,
+                                                  child: SizedBox(
+                                                    width: controller.value
+                                                        .previewSize!.height,
+                                                    height: controller.value
+                                                        .previewSize!.width,
+                                                    child: CameraPreview(
+                                                      controller,
+                                                      key: ValueKey(controller
+                                                          .description.name),
                                                     ),
-
-                                                    /// OVERLAY (CONSTRAINED TO PREVIEW)
-                                                    IgnorePointer(
-                                                      child: Consumer(
-                                                        builder: (context, ref, child) {
-                                                          final overlayData = ref.watch(overlayPreviewProvider);
-                                                          final orientation = ref.watch(deviceOrientationProvider);
-                                                          final settings = ref.watch(overlaySettingsProvider);
-                                                          return CustomPaint(
-                                                            painter: LiveOverlayPainter(
-                                                              overlayData,
-                                                              orientation,
-                                                              settings: settings,
-                                                            ),
-                                                          );
-                                                        },
-                                                      ),
-                                                    ),
-                                                  ],
+                                                  ),
                                                 ),
-                                              ),
+
+                                                /// OVERLAY (CONSTRAINED TO PREVIEW)
+                                                IgnorePointer(
+                                                  child: Consumer(
+                                                    builder:
+                                                        (context, ref, child) {
+                                                      final overlayData = ref.watch(
+                                                          overlayPreviewProvider);
+                                                      final orientation = ref.watch(
+                                                          deviceOrientationProvider);
+                                                      final settings = ref.watch(
+                                                          overlaySettingsProvider);
+                                                      return CustomPaint(
+                                                        painter:
+                                                            LiveOverlayPainter(
+                                                          overlayData,
+                                                          orientation,
+                                                          settings: settings,
+                                                        ),
+                                                      );
+                                                    },
+                                                  ),
+                                                ),
+                                              ],
                                             ),
                                           ),
                                         ),
-                                      )
-                                  )
+                                      ),
+                                    ),
+                                  ))
                                 else
                                   const SizedBox.expand(
                                     child: ColoredBox(color: Colors.black),
                                   ),
-
                                 AnimatedOpacity(
-                                  opacity: (cameraState.isReady && controller != null && cameraState.error == null) ? 0 : 1,
+                                  opacity: (cameraState.isReady &&
+                                          controller != null &&
+                                          cameraState.error == null)
+                                      ? 0
+                                      : 1,
                                   duration: const Duration(milliseconds: 250),
                                   child: Container(
                                     color: Colors.black,
@@ -371,16 +383,21 @@ class _CameraScreenState extends ConsumerState<CameraScreen> with WidgetsBinding
                                       child: Column(
                                         mainAxisSize: MainAxisSize.min,
                                         children: [
-                                          const Icon(Icons.camera_alt, color: Colors.white24, size: 50),
+                                          const Icon(Icons.camera_alt,
+                                              color: Colors.white24, size: 50),
                                           if (cameraState.error != null) ...[
                                             const SizedBox(height: 16),
                                             Text(
                                               "Camera Error: ${cameraState.error}",
-                                              style: const TextStyle(color: Colors.white70),
+                                              style: const TextStyle(
+                                                  color: Colors.white70),
                                               textAlign: TextAlign.center,
                                             ),
                                             TextButton(
-                                              onPressed: () => ref.read(cameraViewModelProvider.notifier).initialize(),
+                                              onPressed: () => ref
+                                                  .read(cameraViewModelProvider
+                                                      .notifier)
+                                                  .initialize(),
                                               child: const Text("Retry"),
                                             ),
                                           ],
@@ -401,11 +418,14 @@ class _CameraScreenState extends ConsumerState<CameraScreen> with WidgetsBinding
                               child: Stack(
                                 children: [
                                   Positioned(
-                                    left: (focusPoint.dx - 35).clamp(8.0, constraints.maxWidth - 120),
-                                    top: (focusPoint.dy - 35).clamp(8.0, constraints.maxHeight - 200),
+                                    left: (focusPoint.dx - 35)
+                                        .clamp(8.0, constraints.maxWidth - 120),
+                                    top: (focusPoint.dy - 35).clamp(
+                                        8.0, constraints.maxHeight - 200),
                                     child: TweenAnimationBuilder<double>(
                                       tween: Tween(begin: 0.0, end: 1.0),
-                                      duration: const Duration(milliseconds: 200),
+                                      duration:
+                                          const Duration(milliseconds: 200),
                                       builder: (context, value, child) {
                                         return Transform.scale(
                                           scale: 0.8 + (0.2 * value),
@@ -416,7 +436,8 @@ class _CameraScreenState extends ConsumerState<CameraScreen> with WidgetsBinding
                                         );
                                       },
                                       child: Column(
-                                        crossAxisAlignment: CrossAxisAlignment.start,
+                                        crossAxisAlignment:
+                                            CrossAxisAlignment.start,
                                         children: [
                                           Row(
                                             mainAxisSize: MainAxisSize.min,
@@ -426,7 +447,8 @@ class _CameraScreenState extends ConsumerState<CameraScreen> with WidgetsBinding
                                                 height: 70,
                                                 decoration: BoxDecoration(
                                                   border: Border.all(
-                                                    color: Colors.yellow.withValues(alpha: 0.8),
+                                                    color: Colors.yellow
+                                                        .withValues(alpha: 0.8),
                                                     width: 1.0,
                                                   ),
                                                 ),
@@ -434,7 +456,8 @@ class _CameraScreenState extends ConsumerState<CameraScreen> with WidgetsBinding
                                                   child: Container(
                                                     width: 4,
                                                     height: 4,
-                                                    decoration: const BoxDecoration(
+                                                    decoration:
+                                                        const BoxDecoration(
                                                       color: Colors.yellow,
                                                       shape: BoxShape.circle,
                                                     ),
@@ -445,22 +468,41 @@ class _CameraScreenState extends ConsumerState<CameraScreen> with WidgetsBinding
                                                 const SizedBox(width: 12),
                                                 Column(
                                                   children: [
-                                                    const Icon(Icons.wb_sunny, color: Colors.yellow, size: 18),
+                                                    const Icon(Icons.wb_sunny,
+                                                        color: Colors.yellow,
+                                                        size: 18),
                                                     const SizedBox(height: 8),
                                                     Container(
                                                       width: 2,
                                                       height: 100,
                                                       decoration: BoxDecoration(
                                                         color: Colors.white24,
-                                                        borderRadius: BorderRadius.circular(1),
+                                                        borderRadius:
+                                                            BorderRadius
+                                                                .circular(1),
                                                       ),
-                                                      child: FractionallySizedBox(
-                                                        alignment: Alignment.bottomCenter,
-                                                        heightFactor: ((cameraState.exposure - cameraState.minExposure) / (cameraState.maxExposure - cameraState.minExposure)).clamp(0.0, 1.0),
+                                                      child:
+                                                          FractionallySizedBox(
+                                                        alignment: Alignment
+                                                            .bottomCenter,
+                                                        heightFactor: ((cameraState
+                                                                        .exposure -
+                                                                    cameraState
+                                                                        .minExposure) /
+                                                                (cameraState
+                                                                        .maxExposure -
+                                                                    cameraState
+                                                                        .minExposure))
+                                                            .clamp(0.0, 1.0),
                                                         child: Container(
-                                                          decoration: BoxDecoration(
-                                                            color: Colors.yellow,
-                                                            borderRadius: BorderRadius.circular(1),
+                                                          decoration:
+                                                              BoxDecoration(
+                                                            color:
+                                                                Colors.yellow,
+                                                            borderRadius:
+                                                                BorderRadius
+                                                                    .circular(
+                                                                        1),
                                                           ),
                                                         ),
                                                       ),
@@ -475,22 +517,42 @@ class _CameraScreenState extends ConsumerState<CameraScreen> with WidgetsBinding
                                             onTap: () {
                                               _focusTimer?.cancel();
                                               cameraVM.resetFocus();
-                                              ref.read(focusPointProvider.notifier).state = null;
-                                              setState(() => _showExposure = false);
+                                              ref
+                                                  .read(focusPointProvider
+                                                      .notifier)
+                                                  .state = null;
+                                              setState(
+                                                  () => _showExposure = false);
                                             },
                                             child: Container(
-                                              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                                              padding:
+                                                  const EdgeInsets.symmetric(
+                                                      horizontal: 10,
+                                                      vertical: 6),
                                               decoration: BoxDecoration(
                                                 color: Colors.black54,
-                                                borderRadius: BorderRadius.circular(20),
-                                                border: Border.all(color: Colors.yellow.withValues(alpha: 0.5), width: 0.5),
+                                                borderRadius:
+                                                    BorderRadius.circular(20),
+                                                border: Border.all(
+                                                    color: Colors.yellow
+                                                        .withValues(alpha: 0.5),
+                                                    width: 0.5),
                                               ),
                                               child: const Row(
                                                 mainAxisSize: MainAxisSize.min,
                                                 children: [
-                                                  Icon(Icons.filter_center_focus, color: Colors.yellow, size: 12),
+                                                  Icon(
+                                                      Icons.filter_center_focus,
+                                                      color: Colors.yellow,
+                                                      size: 12),
                                                   SizedBox(width: 4),
-                                                  Text("AUTO", style: TextStyle(color: Colors.yellow, fontSize: 9, fontWeight: FontWeight.bold, letterSpacing: 0.5)),
+                                                  Text("AUTO",
+                                                      style: TextStyle(
+                                                          color: Colors.yellow,
+                                                          fontSize: 9,
+                                                          fontWeight:
+                                                              FontWeight.bold,
+                                                          letterSpacing: 0.5)),
                                                 ],
                                               ),
                                             ),
@@ -510,7 +572,9 @@ class _CameraScreenState extends ConsumerState<CameraScreen> with WidgetsBinding
                             child: IconButton(
                               icon: Icon(
                                 Icons.info_outline,
-                                color: isSelfieFlashActive ? Colors.black54 : Colors.amberAccent,
+                                color: isSelfieFlashActive
+                                    ? Colors.black54
+                                    : Colors.amberAccent,
                               ),
                               onPressed: () {
                                 showDialog(
@@ -529,7 +593,8 @@ class _CameraScreenState extends ConsumerState<CameraScreen> with WidgetsBinding
                               children: [
                                 if (cameraState.isRecording)
                                   Container(
-                                    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                                    padding: const EdgeInsets.symmetric(
+                                        horizontal: 10, vertical: 4),
                                     decoration: BoxDecoration(
                                       color: Colors.red,
                                       borderRadius: BorderRadius.circular(16),
@@ -560,20 +625,23 @@ class _CameraScreenState extends ConsumerState<CameraScreen> with WidgetsBinding
                                 else ...[
                                   IconButton(
                                     icon: Icon(
-                                      cameraState.aspectRatio == CameraAspectRatio.ratio4_3
+                                      cameraState.aspectRatio ==
+                                              CameraAspectRatio.ratio4_3
                                           ? Icons.crop_3_2
                                           : Icons.crop_16_9,
                                       color: uiColor,
                                     ),
                                     onPressed: () {
-                                      final nextRatio = cameraState.aspectRatio == CameraAspectRatio.ratio4_3
-                                          ? CameraAspectRatio.ratio16_9
-                                          : CameraAspectRatio.ratio4_3;
+                                      final nextRatio =
+                                          cameraState.aspectRatio ==
+                                                  CameraAspectRatio.ratio4_3
+                                              ? CameraAspectRatio.ratio16_9
+                                              : CameraAspectRatio.ratio4_3;
                                       cameraVM.setAspectRatio(nextRatio);
                                     },
                                   ),
                                   Text(
-                                    cameraState.aspectRatio == CameraAspectRatio.ratio4_3 ? "3:4" : "9:16",
+                                    cameraState.aspectRatio.label,
                                     style: TextStyle(
                                       color: uiColor,
                                       fontSize: 10,
@@ -631,9 +699,12 @@ class _CameraScreenState extends ConsumerState<CameraScreen> with WidgetsBinding
                     children: [
                       // Mode Selector
                       Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 16, vertical: 4),
                         decoration: BoxDecoration(
-                          color: isSelfieFlashActive ? Colors.black.withValues(alpha: 0.05) : Colors.white.withValues(alpha: 0.05),
+                          color: isSelfieFlashActive
+                              ? Colors.black.withValues(alpha: 0.05)
+                              : Colors.white.withValues(alpha: 0.05),
                           borderRadius: BorderRadius.circular(20),
                         ),
                         child: Row(
@@ -641,15 +712,19 @@ class _CameraScreenState extends ConsumerState<CameraScreen> with WidgetsBinding
                           children: [
                             _buildModeButton(
                               label: "PHOTO",
-                              active: cameraState.cameraMode == CameraMode.photo,
-                              onTap: () => cameraVM.setCameraMode(CameraMode.photo),
+                              active:
+                                  cameraState.cameraMode == CameraMode.photo,
+                              onTap: () =>
+                                  cameraVM.setCameraMode(CameraMode.photo),
                               uiColor: uiColor,
                             ),
                             const SizedBox(width: 32),
                             _buildModeButton(
                               label: "VIDEO",
-                              active: cameraState.cameraMode == CameraMode.video,
-                              onTap: () => cameraVM.setCameraMode(CameraMode.video),
+                              active:
+                                  cameraState.cameraMode == CameraMode.video,
+                              onTap: () =>
+                                  cameraVM.setCameraMode(CameraMode.video),
                               uiColor: uiColor,
                             ),
                           ],
@@ -669,13 +744,16 @@ class _CameraScreenState extends ConsumerState<CameraScreen> with WidgetsBinding
                                 children: [
                                   IconButton(
                                     icon: AnimatedSwitcher(
-                                      duration: const Duration(milliseconds: 200),
+                                      duration:
+                                          const Duration(milliseconds: 200),
                                       child: Icon(
-                                        cameraState.flashMode == FlashMode.always
+                                        cameraState.flashMode ==
+                                                FlashMode.always
                                             ? Icons.flash_on
                                             : Icons.flash_off,
                                         key: ValueKey(cameraState.flashMode),
-                                        color: cameraState.flashMode == FlashMode.off
+                                        color: cameraState.flashMode ==
+                                                FlashMode.off
                                             ? uiColor.withValues(alpha: 0.4)
                                             : Colors.amberAccent,
                                       ),
@@ -683,7 +761,9 @@ class _CameraScreenState extends ConsumerState<CameraScreen> with WidgetsBinding
                                     onPressed: cameraVM.cycleFlashMode,
                                   ),
                                   Text(
-                                    cameraState.flashMode == FlashMode.always ? "FLASH ON" : "FLASH OFF",
+                                    cameraState.flashMode == FlashMode.always
+                                        ? "FLASH ON"
+                                        : "FLASH OFF",
                                     style: TextStyle(
                                       color: uiColor.withValues(alpha: 0.6),
                                       fontSize: 8,
@@ -701,12 +781,15 @@ class _CameraScreenState extends ConsumerState<CameraScreen> with WidgetsBinding
                                   isRecording: cameraState.isRecording,
                                   mode: cameraState.cameraMode,
                                   onCapture: () async {
-                                    if (!cameraState.isReady || _isCapturing) return;
+                                    if (!cameraState.isReady || _isCapturing)
+                                      return;
 
-                                    if (cameraState.cameraMode == CameraMode.video) {
+                                    if (cameraState.cameraMode ==
+                                        CameraMode.video) {
                                       if (cameraState.isRecording) {
                                         _stopRecordingTimer();
-                                        await cameraVM.stopVideoRecording(context);
+                                        await cameraVM
+                                            .stopVideoRecording(context);
                                       } else {
                                         _startRecordingTimer();
                                         await cameraVM.startVideoRecording();
@@ -717,14 +800,24 @@ class _CameraScreenState extends ConsumerState<CameraScreen> with WidgetsBinding
                                     setState(() => _isCapturing = true);
                                     SystemSound.play(SystemSoundType.click);
                                     HapticFeedback.mediumImpact();
+
                                     try {
-                                      await cameraVM.capture(context);
+                                      final path = await cameraVM.capture();
+                                      
+                                      // Instant shutter feedback removal
+                                      if (mounted) {
+                                        setState(() => _isCapturing = false);
+                                      }
+
+                                      if (path != null && mounted) {
+                                        // Fire-and-forget navigation for zero-lag feeling
+                                        unawaited(cameraVM.handlePostCapture(path, context));
+                                      }
                                     } catch (e) {
                                       debugPrint("Capture error: $e");
-                                    }
-                                    await Future.delayed(const Duration(milliseconds: 100));
-                                    if (mounted) {
-                                      setState(() => _isCapturing = false);
+                                      if (mounted) {
+                                        setState(() => _isCapturing = false);
+                                      }
                                     }
                                   },
                                 ),
@@ -738,7 +831,8 @@ class _CameraScreenState extends ConsumerState<CameraScreen> with WidgetsBinding
                                     await Navigator.push(
                                       context,
                                       MaterialPageRoute(
-                                        builder: (_) => const GalleryFolderScreen(),
+                                        builder: (_) =>
+                                            const GalleryFolderScreen(),
                                       ),
                                     );
                                   },
@@ -746,13 +840,24 @@ class _CameraScreenState extends ConsumerState<CameraScreen> with WidgetsBinding
                                     padding: const EdgeInsets.all(2),
                                     decoration: BoxDecoration(
                                       shape: BoxShape.circle,
-                                      border: Border.all(color: uiColor.withValues(alpha: 0.2), width: 1),
+                                      border: Border.all(
+                                          color: uiColor.withValues(alpha: 0.2),
+                                          width: 1),
                                     ),
                                     child: CircleAvatar(
                                       radius: 20,
-                                      backgroundColor: isSelfieFlashActive ? Colors.black12 : Colors.grey.shade900,
-                                      backgroundImage: lastImage != null ? FileImage(lastImage) : null,
-                                      child: lastImage == null ? Icon(Icons.image, color: uiColor.withValues(alpha: 0.5), size: 20) : null,
+                                      backgroundColor: isSelfieFlashActive
+                                          ? Colors.black12
+                                          : Colors.grey.shade900,
+                                      backgroundImage: lastImage != null
+                                          ? FileImage(lastImage)
+                                          : null,
+                                      child: lastImage == null
+                                          ? Icon(Icons.image,
+                                              color: uiColor.withValues(
+                                                  alpha: 0.5),
+                                              size: 20)
+                                          : null,
                                     ),
                                   ),
                                 ),
@@ -771,7 +876,7 @@ class _CameraScreenState extends ConsumerState<CameraScreen> with WidgetsBinding
                 child: IgnorePointer(
                   child: Container(
                     color: (cameraState.currentLens == CameraLensType.front &&
-                        cameraState.flashMode == FlashMode.always)
+                            cameraState.flashMode == FlashMode.always)
                         ? Colors.white
                         : Colors.black.withValues(alpha: 0.3),
                   ),
@@ -797,7 +902,8 @@ class _CameraScreenState extends ConsumerState<CameraScreen> with WidgetsBinding
           Text(
             label,
             style: TextStyle(
-              color: active ? Colors.amberAccent : uiColor.withValues(alpha: 0.5),
+              color:
+                  active ? Colors.amberAccent : uiColor.withValues(alpha: 0.5),
               fontWeight: FontWeight.bold,
               fontSize: 12,
               letterSpacing: 1.2,
