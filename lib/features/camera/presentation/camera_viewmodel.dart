@@ -408,12 +408,15 @@ class CameraViewModel extends StateNotifier<CameraState>
 
     try {
       if (mode == FlashMode.off) {
-        // Just set to off, no nuclear kill needed here as it causes a flicker
         await controller.setFlashMode(FlashMode.off);
       } else {
-        // When user selects ON, we keep the controller's flash OFF for now
-        // and only enable it during the actual capture to prevent "sticking"
-        await controller.setFlashMode(FlashMode.off);
+        // If recording video, enable torch immediately
+        if (state.isRecording && state.currentLens != CameraLensType.front) {
+          await controller.setFlashMode(FlashMode.torch);
+        } else {
+          // For photos, we keep it OFF and only enable it during capture to prevent "sticking"
+          await controller.setFlashMode(FlashMode.off);
+        }
       }
     } catch (e) {
       debugPrint("Error setting flash mode: $e");
@@ -521,7 +524,8 @@ class CameraViewModel extends StateNotifier<CameraState>
         !controller.value.isInitialized ||
         controller.value.isTakingPicture ||
         state.isCapturing ||
-        state.isRecording) {
+        state.isRecording ||
+        (state.processingProgress != null)) {
       // HEALTH CHECK: If we think we are ready but controller is null or not init, trigger recovery
       if (state.isReady &&
           (controller == null || !controller.value.isInitialized)) {
@@ -668,7 +672,8 @@ class CameraViewModel extends StateNotifier<CameraState>
     final controller = state.controller;
     if (controller == null ||
         !controller.value.isInitialized ||
-        state.isRecording) {
+        state.isRecording ||
+        (state.processingProgress != null)) {
       return;
     }
 
@@ -861,6 +866,10 @@ class CameraViewModel extends StateNotifier<CameraState>
     try {
       // 1. Generate Overlay Sequence
       _updateNotification("Generating watermark frames...");
+      
+      // OPTIMIZATION: Small delay to let UI update before heavy sequence generation
+      await Future.delayed(const Duration(milliseconds: 100));
+
       final sequenceDir =
           await VideoWatermarkProcessor.generateVideoOverlaySequence(
         samples: history,
