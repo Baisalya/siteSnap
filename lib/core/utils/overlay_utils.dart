@@ -1,7 +1,26 @@
+import 'dart:ui' as ui;
 import 'package:intl/intl.dart';
 import '../../features/overlay/domain/overlay_settings.dart';
 
 class OverlayUtils {
+  static AppLanguage resolveLanguage(AppLanguage language) {
+    if (language != AppLanguage.auto) return language;
+
+    // Detect system language
+    final String systemLocale = ui.PlatformDispatcher.instance.locale.languageCode.toLowerCase();
+    
+    switch (systemLocale) {
+      case 'de': return AppLanguage.de;
+      case 'ru': return AppLanguage.ru;
+      case 'hi': return AppLanguage.hi;
+      case 'es': return AppLanguage.es;
+      case 'fr': return AppLanguage.fr;
+      case 'pt': return AppLanguage.pt;
+      case 'it': return AppLanguage.it;
+      default: return AppLanguage.en;
+    }
+  }
+
   static String formatCoordinate(double value, bool isLatitude, CoordinateFormat format) {
     if (format == CoordinateFormat.decimal) {
       return value.toStringAsFixed(6);
@@ -24,6 +43,7 @@ class OverlayUtils {
   }
 
   static String getLabel(String key, AppLanguage language) {
+    final resolved = resolveLanguage(language);
     const translations = {
       'latitude': {
         AppLanguage.en: 'Latitude',
@@ -107,20 +127,21 @@ class OverlayUtils {
       },
     };
 
-    return translations[key]?[language] ?? translations[key]?[AppLanguage.en] ?? key;
+    return translations[key]?[resolved] ?? translations[key]?[AppLanguage.en] ?? key;
   }
 
   static String formatDateTime(DateTime dateTime, AppLanguage language, bool use24Hour) {
+    final resolved = resolveLanguage(language);
     String pattern = "dd/MM/yyyy HH:mm:ss";
     
-    if (language == AppLanguage.de || language == AppLanguage.ru || language == AppLanguage.it) {
+    if (resolved == AppLanguage.de || resolved == AppLanguage.ru || resolved == AppLanguage.it) {
       pattern = "dd.MM.yyyy ${use24Hour ? 'HH:mm:ss' : 'hh:mm:ss a'}";
-    } else if (language == AppLanguage.fr) {
+    } else if (resolved == AppLanguage.fr) {
       pattern = "dd/MM/yyyy ${use24Hour ? 'HH:mm:ss' : 'hh:mm:ss a'}";
     } else {
       pattern = "dd/MM/yyyy ${use24Hour ? 'HH:mm:ss' : 'hh:mm:ss a'}";
     }
     
-    return DateFormat(pattern).format(dateTime);
+    return DateFormat(pattern, resolved == AppLanguage.en ? 'en' : resolved.name).format(dateTime);
   }
 }

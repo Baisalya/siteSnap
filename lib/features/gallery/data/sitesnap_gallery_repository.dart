@@ -7,9 +7,10 @@ import 'package:surveycam/core/utils/gallery_saver.dart';
 final galleryRepositoryProvider =
     Provider((ref) => SurveyCamGalleryRepository());
 
-final galleryFilesProvider = FutureProvider<List<File>>((ref) async {
+final galleryFilesProvider = FutureProvider.autoDispose<List<File>>((ref) async {
   final repo = ref.watch(galleryRepositoryProvider);
-  return repo.loadImages();
+  // Force a fresh load when the provider is first accessed or refreshed
+  return repo.loadImages(forceRefresh: true);
 });
 
 class SurveyCamGalleryRepository {
@@ -17,9 +18,10 @@ class SurveyCamGalleryRepository {
   DateTime? _lastFetchTime;
 
   Future<List<File>> loadImages({bool forceRefresh = false}) async {
-    // Return cached results if they are fresh (less than 30 seconds old)
+    // Return cached results only if they are very fresh (less than 2 seconds old)
+    // to prevent redundant disk IO during rapid UI rebuilds.
     if (!forceRefresh && _cachedFiles != null && _lastFetchTime != null) {
-      if (DateTime.now().difference(_lastFetchTime!) < const Duration(seconds: 30)) {
+      if (DateTime.now().difference(_lastFetchTime!) < const Duration(seconds: 2)) {
         return _cachedFiles!;
       }
     }

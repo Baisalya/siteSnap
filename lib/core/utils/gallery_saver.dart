@@ -40,7 +40,7 @@ class GallerySaver {
       final localDir = await localAlbumDirectory();
       final localFile = File(p.join(localDir.path, name));
 
-      await localFile.writeAsBytes(bytes, flush: false);
+      await localFile.writeAsBytes(bytes, flush: true);
       unawaited(_putImageInSystemGallery(localFile.path));
 
       return localFile;

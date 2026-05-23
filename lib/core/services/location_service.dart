@@ -1,10 +1,20 @@
 import 'package:flutter/material.dart';
 import 'package:geocoding/geocoding.dart';
+import 'package:surveycam/features/overlay/domain/overlay_settings.dart';
+import 'package:surveycam/core/utils/overlay_utils.dart';
 
 class LocationService {
-  static Future<String?> getLocationName(double lat, double lng) async {
+  static Future<String?> getLocationName(double lat, double lng, {AppLanguage? language}) async {
     try {
-      List<Placemark> placemarks = await placemarkFromCoordinates(lat, lng);
+      if (language != null) {
+        final resolved = OverlayUtils.resolveLanguage(language);
+        await setLocaleIdentifier(resolved.name);
+      }
+
+      List<Placemark> placemarks = await placemarkFromCoordinates(
+        lat, 
+        lng,
+      );
       if (placemarks.isNotEmpty) {
         Placemark place = placemarks[0];
 

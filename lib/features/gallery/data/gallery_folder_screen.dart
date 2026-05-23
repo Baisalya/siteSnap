@@ -18,11 +18,29 @@ class GalleryFolderScreen extends ConsumerStatefulWidget {
       _GalleryFolderScreenState();
 }
 
-class _GalleryFolderScreenState extends ConsumerState<GalleryFolderScreen> {
+class _GalleryFolderScreenState extends ConsumerState<GalleryFolderScreen> with WidgetsBindingObserver {
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     _checkPermissions();
+    
+    // 🔥 Force a refresh when entering the gallery to ensure new images are shown
+    Future.microtask(() => ref.invalidate(galleryFilesProvider));
+  }
+
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    // 🔥 Refresh when returning to the app (e.g. from system settings or another app)
+    if (state == AppLifecycleState.resumed) {
+      ref.invalidate(galleryFilesProvider);
+    }
   }
 
   Future<void> _checkPermissions() async {

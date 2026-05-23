@@ -150,7 +150,7 @@ class _NoteInputSheetState extends ConsumerState<NoteInputSheet> {
               items: AppLanguage.values.map((l) {
                 return DropdownMenuItem(
                   value: l,
-                  child: Text(l.name.toUpperCase()),
+                  child: Text(l == AppLanguage.auto ? "AUTOMATIC" : l.name.toUpperCase()),
                 );
               }).toList(),
               onChanged: (v) {
@@ -646,7 +646,8 @@ class _NoteInputSheetState extends ConsumerState<NoteInputSheet> {
       builder: (context) => const Center(child: CircularProgressIndicator(color: Colors.blueAccent)),
     );
 
-    final name = await LocationService.getLocationName(lat, lng);
+    final overlaySettings = ref.read(overlaySettingsProvider);
+    final name = await LocationService.getLocationName(lat, lng, language: overlaySettings.language);
 
     if (context.mounted) {
       Navigator.pop(context);

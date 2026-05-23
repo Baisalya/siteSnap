@@ -204,9 +204,11 @@ class _CameraScreenState extends ConsumerState<CameraScreen>
 
           final settings = ref.read(cameraSettingsProvider);
           if (settings.autoFetchLocation) {
+            final overlaySettings = ref.read(overlaySettingsProvider);
             final name = await LocationService.getLocationName(
               position.latitude,
               position.longitude,
+              language: overlaySettings.language,
             );
             if (name != null && mounted) {
               ref.read(overlayPreviewProvider.notifier).state =

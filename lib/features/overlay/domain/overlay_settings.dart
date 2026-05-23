@@ -2,7 +2,7 @@ import 'package:flutter/material.dart';
 
 enum CoordinateFormat { decimal, dms }
 
-enum AppLanguage { en, de, ru, hi, es, fr, pt, it }
+enum AppLanguage { auto, en, de, ru, hi, es, fr, pt, it }
 
 class OverlaySettings {
   final Color backgroundColor;
@@ -36,7 +36,7 @@ class OverlaySettings {
     this.showAir = false,
     this.showPressure = false,
     this.coordinateFormat = CoordinateFormat.decimal,
-    this.language = AppLanguage.en,
+    this.language = AppLanguage.auto,
     this.use24HourTime = true,
   });
 
