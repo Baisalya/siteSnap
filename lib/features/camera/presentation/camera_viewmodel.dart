@@ -10,8 +10,8 @@ import 'package:surveycam/core/permissions/permission_service.dart';
 import 'package:surveycam/core/utils/device_orientation_provider.dart';
 import 'package:flutter_foreground_task/flutter_foreground_task.dart';
 import 'package:surveycam/core/services/background_video_task.dart';
+import 'package:surveycam/core/services/video_processing_job.dart';
 import 'package:surveycam/core/utils/gallery_saver.dart';
-import 'package:surveycam/core/utils/thumbnail_utils.dart';
 import 'package:surveycam/features/camera/data/CameraState.dart';
 import 'package:surveycam/features/camera/domain/camera_lens_type.dart';
 import 'package:surveycam/features/overlay/presentation/overlay_settings_provider.dart';
@@ -22,8 +22,6 @@ import 'package:surveycam/features/overlay/presentation/captured_overlay_provide
 import 'package:surveycam/features/overlay/presentation/overlay_preview_state.dart';
 import 'package:surveycam/features/gallery/data/sitesnap_gallery_repository.dart';
 import 'package:surveycam/features/overlay/domain/video_overlay_sample.dart';
-
-import '../../overlay/presentation/video_watermark_processor.dart';
 
 final cameraViewModelProvider =
     StateNotifierProvider<CameraViewModel, CameraState>((ref) {
@@ -55,6 +53,7 @@ class CameraViewModel extends StateNotifier<CameraState>
   CameraViewModel(this.ref) : super(const CameraState(isReady: false)) {
     WidgetsBinding.instance.addObserver(this);
     _initBackgroundService();
+    unawaited(_resumePendingVideoProcessing());
     // Removed automatic initialize() to allow manual/early trigger
   }
 
@@ -222,6 +221,13 @@ class CameraViewModel extends StateNotifier<CameraState>
       try {
         final controller = this.state.controller;
         if (controller != null) {
+          if ((appState == AppLifecycleState.paused ||
+                  appState == AppLifecycleState.hidden) &&
+              this.state.isRecording) {
+            await stopVideoRecordingInBackground();
+            return;
+          }
+
           // Soft quench flash immediately
           await _softFlashQuench(controller);
 
@@ -443,7 +449,8 @@ class CameraViewModel extends StateNotifier<CameraState>
       try {
         final repo = ref.read(cameraRepositoryProvider);
         final segmentFile = await repo.stopVideoRecording();
-        final segment = VideoSegment(path: segmentFile.path, lens: state.currentLens);
+        final segment =
+            VideoSegment(path: segmentFile.path, lens: state.currentLens);
         state = state.copyWith(
           videoSegments: [...state.videoSegments, segment],
         );
@@ -556,9 +563,14 @@ class CameraViewModel extends StateNotifier<CameraState>
       // 1. Prepare hardware (Parallelized)
       if (controller.value.isInitialized) {
         await Future.wait([
-          controller.setFocusMode(FocusMode.auto).catchError((e) => debugPrint("Capture focus mode error: $e")),
-          controller.setExposureMode(ExposureMode.auto).catchError((e) => debugPrint("Capture exposure mode error: $e")),
-          controller.setExposurePoint(const Offset(0.5, 0.5)).catchError((e) => debugPrint("Capture exposure point error: $e")),
+          controller
+              .setFocusMode(FocusMode.auto)
+              .catchError((e) => debugPrint("Capture focus mode error: $e")),
+          controller
+              .setExposureMode(ExposureMode.auto)
+              .catchError((e) => debugPrint("Capture exposure mode error: $e")),
+          controller.setExposurePoint(const Offset(0.5, 0.5)).catchError(
+              (e) => debugPrint("Capture exposure point error: $e")),
         ]);
       }
 
@@ -581,8 +593,12 @@ class CameraViewModel extends StateNotifier<CameraState>
       // 2.5 LOCK Focus and Exposure for full clarity (Parallelized)
       if (controller.value.isInitialized) {
         await Future.wait([
-          controller.setFocusMode(FocusMode.locked).catchError((e) => debugPrint("Locking focus error: $e")),
-          controller.setExposureMode(ExposureMode.locked).catchError((e) => debugPrint("Locking exposure error: $e")),
+          controller
+              .setFocusMode(FocusMode.locked)
+              .catchError((e) => debugPrint("Locking focus error: $e")),
+          controller
+              .setExposureMode(ExposureMode.locked)
+              .catchError((e) => debugPrint("Locking exposure error: $e")),
         ]);
       }
 
@@ -737,6 +753,14 @@ class CameraViewModel extends StateNotifier<CameraState>
   }
 
   Future<void> stopVideoRecording(BuildContext context) async {
+    await _stopVideoRecording(context: context);
+  }
+
+  Future<void> stopVideoRecordingInBackground() async {
+    await _stopVideoRecording();
+  }
+
+  Future<void> _stopVideoRecording({BuildContext? context}) async {
     final controller = state.controller;
     if (controller == null ||
         !controller.value.isInitialized ||
@@ -750,13 +774,23 @@ class CameraViewModel extends StateNotifier<CameraState>
       _videoHistoryTimer = null;
 
       final lastSegmentFile = await repo.stopVideoRecording();
-      final lastSegment = VideoSegment(path: lastSegmentFile.path, lens: state.currentLens);
+      final lastSegment =
+          VideoSegment(path: lastSegmentFile.path, lens: state.currentLens);
       final allSegments = [...state.videoSegments, lastSegment];
-      final totalDurationMs =
-          DateTime.now().difference(_recordingStartTime!).inMilliseconds;
+      final totalDurationMs = _recordingStartTime == null
+          ? 0
+          : DateTime.now().difference(_recordingStartTime!).inMilliseconds;
 
       // Capture data needed for processing before clearing local state
       final history = List<VideoOverlaySample>.from(_videoDataHistory);
+      if (history.isEmpty) {
+        history.add(VideoOverlaySample(
+          data: ref.read(overlayPreviewProvider),
+          orientation: state.orientation,
+          settings: ref.read(overlaySettingsProvider),
+          timestampMs: 0,
+        ));
+      }
 
       // Update state: stop recording and start processing overlay
       state = state.copyWith(
@@ -769,7 +803,7 @@ class CameraViewModel extends StateNotifier<CameraState>
         await _softFlashQuench(controller);
       }
 
-      if (context.mounted) {
+      if (context != null && context.mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
             content: Text("Processing video..."),
@@ -778,45 +812,34 @@ class CameraViewModel extends StateNotifier<CameraState>
         );
       }
 
-      // 1. Merge segments and Apply Mirroring (hflip) where necessary
-      String finalVideoPath = lastSegment.path;
-      final bool hasFrontCamera = allSegments.any((s) => s.lens == CameraLensType.front);
-
-      if (allSegments.length > 1 || hasFrontCamera) {
-        debugPrint("Merging/Processing ${allSegments.length} segments...");
-        final mergedPath = await VideoWatermarkProcessor.mergeVideos(
-          allSegments.map((s) => s.path).toList(),
-          mirrorMap: allSegments.map((s) => s.lens == CameraLensType.front).toList(),
-        );
-        if (mergedPath != null) {
-          finalVideoPath = mergedPath;
-          debugPrint("Merged video saved at: $finalVideoPath");
-        } else {
-          debugPrint("Merging failed, using last segment.");
-        }
-      }
-
-      // 2. Start foreground service
-      await _startForegroundService();
-
-      // 3. Orchestrate processing on main isolate
-      unawaited(_processVideoOnMainIsolate(
-        videoPath: finalVideoPath,
+      final now = DateTime.now();
+      final job = VideoProcessingJob(
+        id: 'video_${now.microsecondsSinceEpoch}',
+        segments: allSegments
+            .map((segment) => VideoProcessingSegment(
+                  path: segment.path,
+                  lens: segment.lens,
+                ))
+            .toList(),
         history: history,
         durationMs: totalDurationMs,
-      ));
+        createdAtMs: now.millisecondsSinceEpoch,
+      );
 
-      // 4. Cleanup local segments state
+      await VideoProcessingTaskHandler.enqueueJob(job);
+      await _startForegroundService();
+
       state = state.copyWith(
         videoSegments: [],
         videoSequenceDir: null,
       );
       _videoDataHistory.clear();
+      _recordingStartTime = null;
     } catch (e) {
       debugPrint("Stop recording error: $e");
       state = state.copyWith(isRecording: false, clearProcessingProgress: true);
       await FlutterForegroundTask.stopService();
-      if (context.mounted) {
+      if (context != null && context.mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(content: Text("Error saving video: $e")),
         );
@@ -855,89 +878,32 @@ class CameraViewModel extends StateNotifier<CameraState>
       ),
     );
 
-    // 2. Start service
-    await FlutterForegroundTask.startService(
-      notificationTitle: 'SurveyCam',
-      notificationText: 'Preparing video watermark...',
-      callback: startCallback,
-    );
-  }
-
-  Future<void> _processVideoOnMainIsolate({
-    required String videoPath,
-    required List<VideoOverlaySample> history,
-    required int durationMs,
-  }) async {
-    try {
-      // 1. Generate Overlay Sequence
-      _updateNotification("Generating watermark frames...");
-      
-      // OPTIMIZATION: Small delay to let UI update before heavy sequence generation
-      await Future.delayed(const Duration(milliseconds: 100));
-
-      final sequenceDir =
-          await VideoWatermarkProcessor.generateVideoOverlaySequence(
-        samples: history,
-        width: 1080,
-        height: 1920,
-        onProgress: (p) {
-          final progress = 0.1 + (p * 0.3); // 10% to 40%
-          state = state.copyWith(processingProgress: progress);
-        },
+    final isRunning = await FlutterForegroundTask.isRunningService;
+    if (isRunning) {
+      await FlutterForegroundTask.updateService(
+        notificationTitle: 'SurveyCam',
+        notificationText: 'Preparing video watermark...',
+        callback: startCallback,
       );
-
-      if (sequenceDir == null) {
-        throw Exception("Failed to generate overlay sequence");
-      }
-
-      // 2. Apply Sequence (Heavy FFmpeg part)
-      final processedPath =
-          await VideoWatermarkProcessor.applyOverlaySequenceToVideo(
-        videoPath: videoPath,
-        sequenceDir: sequenceDir,
-        frameCount: history.length,
-        durationMs: durationMs,
-        onProgress: (p) {
-          final progress = 0.4 + (p * 0.5); // 40% to 90%
-          state = state.copyWith(processingProgress: progress);
-          _updateNotification(
-              "Applying watermark... ${(progress * 100).toInt()}%");
-        },
+    } else {
+      await FlutterForegroundTask.startService(
+        notificationTitle: 'SurveyCam',
+        notificationText: 'Preparing video watermark...',
+        callback: startCallback,
       );
-
-      if (processedPath == null) throw Exception("FFmpeg processing failed");
-
-      state = state.copyWith(processingProgress: 0.95);
-      _updateNotification("Saving to gallery... 95%");
-
-      // 3. Save to Gallery
-      final savedPath = await GallerySaver.saveVideo(processedPath);
-      await ThumbnailUtils.generateVideoThumbnail(savedPath);
-
-      _updateNotification("Video saved successfully!", isFinished: true);
-
-      state = state.copyWith(clearProcessingProgress: true);
-      ref.invalidate(galleryFilesProvider);
-    } catch (e) {
-      debugPrint("Process video on main isolate error: $e");
-      _updateNotification("Error: ${e.toString()}", isFinished: true);
-      state =
-          state.copyWith(clearProcessingProgress: true, error: e.toString());
-    } finally {
-      // Stop service after a delay to show success/error
-      Future.delayed(const Duration(seconds: 3), () {
-        FlutterForegroundTask.stopService();
-      });
     }
   }
 
-  void _updateNotification(String text, {bool isFinished = false}) {
-    FlutterForegroundTask.updateService(
-      notificationTitle: "SurveyCam - Processing",
-      notificationText: text,
-    );
+  Future<void> _resumePendingVideoProcessing() async {
+    try {
+      if (await VideoProcessingTaskHandler.hasPendingJob()) {
+        state = state.copyWith(processingProgress: 0.05);
+        await _startForegroundService();
+      }
+    } catch (e) {
+      debugPrint('Pending video resume skipped: $e');
+    }
   }
-
 
   // ================= DISPOSE =================
 

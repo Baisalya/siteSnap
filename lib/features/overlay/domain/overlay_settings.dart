@@ -40,6 +40,52 @@ class OverlaySettings {
     this.use24HourTime = true,
   });
 
+  factory OverlaySettings.fromJson(Map<String, dynamic> json) {
+    return OverlaySettings(
+      backgroundColor:
+          Color(json['backgroundColor'] as int? ?? Colors.white.toARGB32()),
+      textColor: Color(json['textColor'] as int? ?? Colors.black.toARGB32()),
+      backgroundOpacity:
+          (json['backgroundOpacity'] as num?)?.toDouble() ?? 0.85,
+      showDateTime: json['showDateTime'] as bool? ?? true,
+      showCoordinates: json['showCoordinates'] as bool? ?? true,
+      showAltitude: json['showAltitude'] as bool? ?? true,
+      showDirection: json['showDirection'] as bool? ?? true,
+      showNote: json['showNote'] as bool? ?? true,
+      showWeather: json['showWeather'] as bool? ?? false,
+      showHumidity: json['showHumidity'] as bool? ?? false,
+      showAir: json['showAir'] as bool? ?? false,
+      showPressure: json['showPressure'] as bool? ?? false,
+      coordinateFormat: CoordinateFormat.values[
+          (json['coordinateFormat'] as int? ?? CoordinateFormat.decimal.index)
+              .clamp(0, CoordinateFormat.values.length - 1)],
+      language: AppLanguage.values[
+          (json['language'] as int? ?? AppLanguage.auto.index)
+              .clamp(0, AppLanguage.values.length - 1)],
+      use24HourTime: json['use24HourTime'] as bool? ?? true,
+    );
+  }
+
+  Map<String, dynamic> toJson() {
+    return {
+      'backgroundColor': backgroundColor.toARGB32(),
+      'textColor': textColor.toARGB32(),
+      'backgroundOpacity': backgroundOpacity,
+      'showDateTime': showDateTime,
+      'showCoordinates': showCoordinates,
+      'showAltitude': showAltitude,
+      'showDirection': showDirection,
+      'showNote': showNote,
+      'showWeather': showWeather,
+      'showHumidity': showHumidity,
+      'showAir': showAir,
+      'showPressure': showPressure,
+      'coordinateFormat': coordinateFormat.index,
+      'language': language.index,
+      'use24HourTime': use24HourTime,
+    };
+  }
+
   OverlaySettings copyWith({
     Color? backgroundColor,
     Color? textColor,

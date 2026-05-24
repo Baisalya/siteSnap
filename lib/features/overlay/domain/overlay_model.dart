@@ -33,6 +33,44 @@ class OverlayData {
     this.position = WatermarkPosition.bottomLeft,
   });
 
+  factory OverlayData.fromJson(Map<String, dynamic> json) {
+    return OverlayData(
+      dateTime: json['dateTime'] as String? ?? '',
+      latitude: (json['latitude'] as num?)?.toDouble() ?? 0,
+      longitude: (json['longitude'] as num?)?.toDouble() ?? 0,
+      altitude: (json['altitude'] as num?)?.toDouble() ?? 0,
+      heading: (json['heading'] as num?)?.toDouble() ?? 0,
+      direction: json['direction'] as String? ?? '',
+      note: json['note'] as String? ?? '',
+      locationWarning: json['locationWarning'] as String?,
+      weather: json['weather'] as String?,
+      humidity: json['humidity'] as String?,
+      air: json['air'] as String?,
+      pressure: json['pressure'] as String?,
+      position: WatermarkPosition.values[
+          (json['position'] as int? ?? WatermarkPosition.bottomLeft.index)
+              .clamp(0, WatermarkPosition.values.length - 1)],
+    );
+  }
+
+  Map<String, dynamic> toJson() {
+    return {
+      'dateTime': dateTime,
+      'latitude': latitude,
+      'longitude': longitude,
+      'altitude': altitude,
+      'heading': heading,
+      'direction': direction,
+      'note': note,
+      'locationWarning': locationWarning,
+      'weather': weather,
+      'humidity': humidity,
+      'air': air,
+      'pressure': pressure,
+      'position': position.index,
+    };
+  }
+
   OverlayData copyWith({
     String? dateTime,
     double? latitude,
