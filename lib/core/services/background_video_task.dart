@@ -67,12 +67,11 @@ class VideoProcessingTaskHandler extends TaskHandler {
       job = VideoProcessingJob.fromJson(
         Map<String, dynamic>.from(jsonDecode(jobJson) as Map),
       );
-      if (job.segments.isEmpty || job.history.isEmpty) {
+      if (job.segments.isEmpty) {
         await FlutterForegroundTask.removeData(key: pendingJobKey);
         return;
       }
       if (_lastFailedJobId == job.id) {
-        await FlutterForegroundTask.removeData(key: pendingJobKey);
         _send(sendPort, {
           'type': 'error',
           'error': 'Previous video processing attempt failed.',
@@ -85,67 +84,95 @@ class VideoProcessingTaskHandler extends TaskHandler {
       _send(sendPort, {'type': 'progress', 'value': 0.05});
       await _updateNotification('Preparing video watermark... 5%');
 
-      String sourcePath = job.segments.last.path;
+      String? sourcePath =
+          job.segments.length == 1 ? job.segments.single.path : null;
+      String? mergedPath;
+      var canProcessOverlay = job.history.isNotEmpty;
       final needsMirror = job.segments.any((segment) => segment.mirror);
       if (job.segments.length > 1 || needsMirror) {
         await _updateNotification('Merging video segments... 10%');
-        final mergedPath = await VideoWatermarkProcessor.mergeVideos(
+        mergedPath = await VideoWatermarkProcessor.mergeVideos(
           job.segments.map((segment) => segment.path).toList(),
           mirrorMap: job.segments.map((segment) => segment.mirror).toList(),
         );
         if (mergedPath != null) {
           sourcePath = mergedPath;
+        } else {
+          canProcessOverlay = false;
         }
       }
 
-      await _updateNotification('Generating watermark frames... 15%');
-      final videoSize = await VideoWatermarkProcessor.getVideoDimensions(
-        sourcePath,
-      );
-      final sequenceDir =
-          await VideoWatermarkProcessor.generateVideoOverlaySequence(
-        samples: job.history,
-        width: videoSize.width.toDouble(),
-        height: videoSize.height.toDouble(),
-        onProgress: (p) {
-          final progress = 0.15 + (p * 0.25);
-          _send(sendPort, {'type': 'progress', 'value': progress});
-        },
-      );
+      String? processedPath;
+      if (canProcessOverlay && sourcePath != null) {
+        await _updateNotification('Generating watermark frames... 15%');
+        final videoSize = await VideoWatermarkProcessor.getVideoDimensions(
+          sourcePath,
+        );
+        final sequenceDir =
+            await VideoWatermarkProcessor.generateVideoOverlaySequence(
+          samples: job.history,
+          width: videoSize.width.toDouble(),
+          height: videoSize.height.toDouble(),
+          onProgress: (p) {
+            final progress = 0.15 + (p * 0.25);
+            _send(sendPort, {'type': 'progress', 'value': progress});
+          },
+        );
 
-      if (sequenceDir == null) {
-        throw Exception('Failed to generate overlay sequence');
-      }
-
-      final processedPath =
-          await VideoWatermarkProcessor.applyOverlaySequenceToVideo(
-        videoPath: sourcePath,
-        sequenceDir: sequenceDir,
-        frameCount: job.history.length,
-        durationMs: job.durationMs,
-        onProgress: (p) {
-          final progress = 0.4 + (p * 0.5);
-          _send(sendPort, {'type': 'progress', 'value': progress});
-          unawaited(_updateNotification(
-              'Applying watermark... ${(progress * 100).toInt()}%'));
-        },
-      );
-
-      if (processedPath == null) {
-        throw Exception('FFmpeg processing failed');
+        if (sequenceDir != null) {
+          processedPath =
+              await VideoWatermarkProcessor.applyOverlaySequenceToVideo(
+            videoPath: sourcePath,
+            sequenceDir: sequenceDir,
+            frameCount: job.history.length,
+            durationMs: job.durationMs,
+            onProgress: (p) {
+              final progress = 0.4 + (p * 0.5);
+              _send(sendPort, {'type': 'progress', 'value': progress});
+              unawaited(_updateNotification(
+                  'Applying watermark... ${(progress * 100).toInt()}%'));
+            },
+          );
+        }
       }
 
       _send(sendPort, {'type': 'progress', 'value': 0.95});
       await _updateNotification('Saving to gallery... 95%');
 
-      final savedPath = await GallerySaver.saveVideo(processedPath);
-      await ThumbnailUtils.generateVideoThumbnail(savedPath);
+      final List<String> savedPaths = [];
+      var savedWithoutOverlay = false;
+
+      if (processedPath != null) {
+        final savedPath = await GallerySaver.saveVideo(processedPath);
+        await ThumbnailUtils.generateVideoThumbnail(savedPath);
+        savedPaths.add(savedPath);
+      } else {
+        savedWithoutOverlay = true;
+        final rawPaths = VideoProcessingFallback.rawSavePaths(
+          segments: job.segments,
+          mergedPath: mergedPath,
+        );
+        if (rawPaths.isEmpty) {
+          throw Exception('No video file available to save');
+        }
+
+        await _updateNotification('Saving original video without overlay...');
+        for (final rawPath in rawPaths) {
+          final savedPath = await GallerySaver.saveVideo(rawPath);
+          await ThumbnailUtils.generateVideoThumbnail(savedPath);
+          savedPaths.add(savedPath);
+        }
+      }
 
       await FlutterForegroundTask.removeData(key: pendingJobKey);
-      await _updateNotification('Video saved successfully!');
+      await _updateNotification(savedWithoutOverlay
+          ? 'Video saved without overlay'
+          : 'Video saved successfully!');
       _send(sendPort, {
         'type': 'complete',
-        'path': savedPath,
+        'path': savedPaths.isEmpty ? null : savedPaths.first,
+        'paths': savedPaths,
+        'warning': savedWithoutOverlay ? 'Saved without overlay' : null,
       });
 
       unawaited(Future.delayed(const Duration(seconds: 3), () {
@@ -154,7 +181,6 @@ class VideoProcessingTaskHandler extends TaskHandler {
     } catch (e, stackTrace) {
       debugPrint('Background video processing error: $e\n$stackTrace');
       _lastFailedJobId = job?.id;
-      await FlutterForegroundTask.removeData(key: pendingJobKey);
       _send(sendPort, {
         'type': 'error',
         'error': e.toString(),

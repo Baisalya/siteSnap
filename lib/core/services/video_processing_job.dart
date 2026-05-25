@@ -75,3 +75,19 @@ class VideoProcessingJob {
     };
   }
 }
+
+class VideoProcessingFallback {
+  static List<String> rawSavePaths({
+    required List<VideoProcessingSegment> segments,
+    String? mergedPath,
+  }) {
+    if (mergedPath != null && mergedPath.isNotEmpty) {
+      return [mergedPath];
+    }
+
+    return segments
+        .map((segment) => segment.path)
+        .where((path) => path.isNotEmpty)
+        .toList(growable: false);
+  }
+}

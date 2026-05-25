@@ -19,6 +19,8 @@ import 'package:surveycam/features/overlay/presentation/overlay_settings_provide
 import 'package:surveycam/features/gallery/presentation/image_preview_screen.dart';
 import 'package:surveycam/features/gallery/presentation/last_image_provider.dart';
 import 'package:surveycam/features/location/presentation/location_viewmodel.dart';
+import 'package:surveycam/features/overlay/domain/overlay_model.dart';
+import 'package:surveycam/features/overlay/domain/overlay_settings.dart';
 import 'package:surveycam/features/overlay/presentation/captured_overlay_provider.dart';
 import 'package:surveycam/features/overlay/presentation/overlay_preview_state.dart';
 import 'package:surveycam/features/gallery/data/sitesnap_gallery_repository.dart';
@@ -54,6 +56,14 @@ class CameraViewModel extends StateNotifier<CameraState>
 
   CameraViewModel(this.ref) : super(const CameraState(isReady: false)) {
     WidgetsBinding.instance.addObserver(this);
+    ref.listen<OverlayData>(
+      overlayPreviewProvider,
+      (_, __) => _recordCurrentVideoOverlaySample(),
+    );
+    ref.listen<OverlaySettings>(
+      overlaySettingsProvider,
+      (_, __) => _recordCurrentVideoOverlaySample(),
+    );
     _initBackgroundService();
     unawaited(_resumePendingVideoProcessing());
     // Removed automatic initialize() to allow manual/early trigger
@@ -226,7 +236,40 @@ class CameraViewModel extends StateNotifier<CameraState>
   void updateOrientation(DeviceOrientation orientation) {
     if (state.orientation != orientation) {
       state = state.copyWith(orientation: orientation);
+      _recordCurrentVideoOverlaySample();
     }
+  }
+
+  void _recordCurrentVideoOverlaySample({bool force = false}) {
+    final startedAt = _recordingStartTime;
+    if (startedAt == null) return;
+    if (!force && !state.isRecording) return;
+
+    final timestamp = DateTime.now()
+        .difference(startedAt)
+        .inMilliseconds
+        .clamp(0, 1 << 31)
+        .toInt();
+    final data = ref.read(overlayPreviewProvider);
+    final settings = ref.read(overlaySettingsProvider);
+    final orientation = state.orientation;
+
+    if (!force && _videoDataHistory.isNotEmpty) {
+      final previous = _videoDataHistory.last;
+      final duplicateState = previous.data == data &&
+          previous.settings == settings &&
+          previous.orientation == orientation;
+      if (duplicateState && timestamp - previous.timestampMs < 80) {
+        return;
+      }
+    }
+
+    _videoDataHistory.add(VideoOverlaySample(
+      data: data,
+      orientation: orientation,
+      settings: settings,
+      timestampMs: timestamp,
+    ));
   }
 
   // ================= LIFECYCLE =================
@@ -779,27 +822,11 @@ class CameraViewModel extends StateNotifier<CameraState>
         }
 
         // 🔥 FRESH DATA CAPTURE
-        final currentOverlay = ref.read(overlayPreviewProvider);
-        final currentOrientation = state.orientation;
-        final currentSettings = ref.read(overlaySettingsProvider);
-        final timestamp =
-            DateTime.now().difference(_recordingStartTime!).inMilliseconds;
-
-        _videoDataHistory.add(VideoOverlaySample(
-          data: currentOverlay,
-          orientation: currentOrientation,
-          settings: currentSettings,
-          timestampMs: timestamp,
-        ));
+        _recordCurrentVideoOverlaySample(force: true);
       });
 
       // Initial sample
-      _videoDataHistory.add(VideoOverlaySample(
-        data: ref.read(overlayPreviewProvider),
-        orientation: state.orientation,
-        settings: ref.read(overlaySettingsProvider),
-        timestampMs: 0,
-      ));
+      _recordCurrentVideoOverlaySample(force: true);
 
       state = state.copyWith(
         isRecording: true,
@@ -846,6 +873,7 @@ class CameraViewModel extends StateNotifier<CameraState>
           : DateTime.now().difference(_recordingStartTime!).inMilliseconds;
 
       // Capture data needed for processing before clearing local state
+      _recordCurrentVideoOverlaySample(force: true);
       final history = List<VideoOverlaySample>.from(_videoDataHistory);
       if (history.isEmpty) {
         history.add(VideoOverlaySample(

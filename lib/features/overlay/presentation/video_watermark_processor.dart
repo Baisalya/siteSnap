@@ -40,6 +40,30 @@ class VideoWatermarkProcessor {
     height: 1920,
   );
 
+  static DeviceOrientation? preferredOrientationForSamples(
+    List<VideoOverlaySample> samples,
+  ) {
+    if (samples.isEmpty) return null;
+    return samples.first.orientation;
+  }
+
+  static bool shouldRotateVideoOverlayForFrame({
+    required Size frameSize,
+    required DeviceOrientation orientation,
+  }) {
+    final frameIsLandscape = frameSize.width > frameSize.height;
+    final overlayIsLandscape = orientation == DeviceOrientation.landscapeLeft ||
+        orientation == DeviceOrientation.landscapeRight;
+    return frameIsLandscape != overlayIsLandscape;
+  }
+
+  static DeviceOrientation overlayPaintOrientationForFrame({
+    required Size frameSize,
+    required DeviceOrientation orientation,
+  }) {
+    return DeviceOrientation.portraitUp;
+  }
+
   static Future<int> _createNativeSession(
     String method,
     List<String> arguments,
@@ -135,6 +159,43 @@ class VideoWatermarkProcessor {
     return turns.isOdd;
   }
 
+  static double _normalizedRotationDegrees(double rotationDegrees) {
+    final normalized = rotationDegrees % 360;
+    return normalized < 0 ? normalized + 360 : normalized;
+  }
+
+  static String normalizeVideoForOverlayFilter(double rotationDegrees) {
+    switch (_normalizedRotationDegrees(rotationDegrees).round()) {
+      case 90:
+        return 'transpose=clock,';
+      case 180:
+        return 'transpose=clock,transpose=clock,';
+      case 270:
+        return 'transpose=cclock,';
+      default:
+        return '';
+    }
+  }
+
+  static Future<double> getVideoRotationDegrees(String videoPath) async {
+    try {
+      final mediaInfo = await _getNativeMediaInformation(videoPath);
+      final streams = mediaInfo?['streams'] as List? ?? const [];
+
+      for (final stream in streams) {
+        final streamMap = Map<dynamic, dynamic>.from(
+          stream as Map? ?? const {},
+        );
+        if (streamMap['codec_type'] != 'video') continue;
+        return _rotationDegreesForStream(streamMap);
+      }
+    } catch (e) {
+      debugPrint("Video rotation probe failed: $e");
+    }
+
+    return 0;
+  }
+
   static Future<VideoDimensions> getVideoDimensions(String videoPath) async {
     try {
       final mediaInfo = await _getNativeMediaInformation(videoPath);
@@ -178,6 +239,19 @@ class VideoWatermarkProcessor {
       return (encoder: 'h264_videotoolbox', args: '-b:v 8M -profile:v high');
     }
     return (encoder: 'libx264', args: '-preset ultrafast -crf 23');
+  }
+
+  static String fitVideoInsideCanvasFilter({
+    required int width,
+    required int height,
+    bool mirror = false,
+    double rotationDegrees = 0,
+  }) {
+    final normalizeFilter = normalizeVideoForOverlayFilter(rotationDegrees);
+    final hflip = mirror ? 'hflip,' : '';
+    return '$normalizeFilter${hflip}scale=$width:$height:force_original_aspect_ratio=decrease,'
+        'pad=$width:$height:(ow-iw)/2:(oh-ih)/2,'
+        'setsar=1,format=yuv420p';
   }
 
   static void _undoOrientationForVideoWatermark(
@@ -298,16 +372,26 @@ class VideoWatermarkProcessor {
   }) async {
     final recorder = ui.PictureRecorder();
     final canvas = Canvas(recorder);
+    final frameSize = Size(width, height);
+    final paintOrientation = overlayPaintOrientationForFrame(
+      frameSize: frameSize,
+      orientation: orientation,
+    );
 
     if (showOverlay) {
       final overlayPainter =
-          LiveOverlayPainter(data, orientation, settings: settings);
-      overlayPainter.paint(canvas, Size(width, height));
+          LiveOverlayPainter(data, paintOrientation, settings: settings);
+      overlayPainter.paint(canvas, frameSize);
     }
 
     if (showWatermark) {
       canvas.save();
-      _undoOrientationForVideoWatermark(canvas, orientation, width, height);
+      _undoOrientationForVideoWatermark(
+        canvas,
+        paintOrientation,
+        width,
+        height,
+      );
 
       final double baseSize = min(width, height);
       final double padding = 0.0;
@@ -336,8 +420,8 @@ class VideoWatermarkProcessor {
       final double totalWidth = svgSize + spacing + textPainter.width;
 
       double dx, dy;
-      if (orientation == DeviceOrientation.landscapeLeft ||
-          orientation == DeviceOrientation.landscapeRight) {
+      if (paintOrientation == DeviceOrientation.landscapeLeft ||
+          paintOrientation == DeviceOrientation.landscapeRight) {
         dx = padding;
         dy = padding;
       } else {
@@ -387,13 +471,16 @@ class VideoWatermarkProcessor {
 
       // FFmpeg command optimized for speed
       // [1:v]fps=$sampleFps ensures the overlay frames match the expected timing
-      const filter = '[0:v]setsar=1[base];[1:v]setpts=PTS-STARTPTS[ov];'
+      final rotationDegrees = await getVideoRotationDegrees(videoPath);
+      final normalizeFilter = normalizeVideoForOverlayFilter(rotationDegrees);
+      final filter = '[0:v]${normalizeFilter}setsar=1[base];'
+          '[1:v]setpts=PTS-STARTPTS[ov];'
           '[base][ov]overlay=0:0:format=auto,format=yuv420p[v]';
       final command =
-          '-i "$videoPath" -framerate $sampleFps -i "$sequenceDir/frame_%05d.png" '
+          '-noautorotate -i "$videoPath" -framerate $sampleFps -i "$sequenceDir/frame_%05d.png" '
           '-filter_complex "$filter" -map "[v]" -map 0:a? '
           '-c:v $encoder $extraArgs -pix_fmt yuv420p -c:a copy '
-          '-movflags +faststart -y "$outputPath"';
+          '-metadata:s:v:0 rotate=0 -movflags +faststart -y "$outputPath"';
 
       debugPrint("Executing FFmpeg: $command");
 
@@ -412,10 +499,10 @@ class VideoWatermarkProcessor {
         if (encoder != 'libx264') {
           debugPrint("Retrying with software encoder (libx264)...");
           final softwareCommand =
-              '-i "$videoPath" -framerate $sampleFps -i "$sequenceDir/frame_%05d.png" '
+              '-noautorotate -i "$videoPath" -framerate $sampleFps -i "$sequenceDir/frame_%05d.png" '
               '-filter_complex "$filter" -map "[v]" -map 0:a? '
               '-c:v libx264 -preset ultrafast -crf 23 -pix_fmt yuv420p '
-              '-c:a copy -movflags +faststart -y "$outputPath"';
+              '-c:a copy -metadata:s:v:0 rotate=0 -movflags +faststart -y "$outputPath"';
 
           final swReturnCode = await _executeFfmpegCommand(softwareCommand);
 
@@ -625,30 +712,39 @@ class VideoWatermarkProcessor {
 
       if (paths.length == 1) {
         final encoderSettings = _encoderSettings();
+        final rotationDegrees = await getVideoRotationDegrees(paths.first);
+        final normalizeFilter = normalizeVideoForOverlayFilter(rotationDegrees);
         final command =
-            '-i "${paths.first}" -vf "hflip,format=yuv420p" -map 0:a? '
+            '-noautorotate -i "${paths.first}" -vf "${normalizeFilter}hflip,format=yuv420p" -map 0:a? '
             '-c:v ${encoderSettings.encoder} ${encoderSettings.args} '
-            '-pix_fmt yuv420p -c:a copy -movflags +faststart -y "$outputPath"';
+            '-pix_fmt yuv420p -c:a copy -metadata:s:v:0 rotate=0 '
+            '-movflags +faststart -y "$outputPath"';
 
         final returnCode = await _executeFfmpegCommand(command);
         return returnCode == 0 ? outputPath : null;
       }
 
       final targetSize = await getVideoDimensions(paths.first);
+      final rotationMap = await Future.wait(
+        paths.map(getVideoRotationDegrees),
+      );
 
       String inputArgs = '';
       String filterComplex = '';
       for (int i = 0; i < paths.length; i++) {
-        inputArgs += '-i "${paths[i]}" ';
+        inputArgs += '-noautorotate -i "${paths[i]}" ';
 
         final bool isMirrored =
             (mirrorMap != null && i < mirrorMap.length) ? mirrorMap[i] : false;
-        final String hflip = isMirrored ? 'hflip,' : '';
 
-        filterComplex +=
-            '[$i:v]${hflip}scale=${targetSize.width}:${targetSize.height}:force_original_aspect_ratio=increase,'
-            'crop=${targetSize.width}:${targetSize.height}:(iw-${targetSize.width})/2:(ih-${targetSize.height})/2,'
-            'setsar=1,format=yuv420p[v$i];';
+        final fitFilter = fitVideoInsideCanvasFilter(
+          width: targetSize.width,
+          height: targetSize.height,
+          mirror: isMirrored,
+          rotationDegrees: rotationMap[i],
+        );
+
+        filterComplex += '[$i:v]$fitFilter[v$i];';
       }
 
       for (int i = 0; i < paths.length; i++) {
@@ -659,7 +755,8 @@ class VideoWatermarkProcessor {
       final command =
           '$inputArgs -filter_complex "$filterComplex" -map "[outv]" -map "[outa]" '
           '-c:v libx264 -preset ultrafast -crf 23 -pix_fmt yuv420p '
-          '-c:a aac -b:a 128k -movflags +faststart -y "$outputPath"';
+          '-c:a aac -b:a 128k -metadata:s:v:0 rotate=0 '
+          '-movflags +faststart -y "$outputPath"';
 
       final returnCode = await _executeFfmpegCommand(command);
 
