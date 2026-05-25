@@ -164,15 +164,25 @@ class VideoWatermarkProcessor {
   }
 
   static double? _parseRotationValue(Object? value) {
-    if (value is num) return value.toDouble();
-    if (value is String) return double.tryParse(value);
+    if (value is num) {
+      // Handle TIFF/EXIF orientation integers
+      if (value == 3) return 180;
+      if (value == 6) return 90;
+      if (value == 8) return 270;
+      return value.toDouble();
+    }
+    if (value is String) {
+      final doubleValue = double.tryParse(value);
+      if (doubleValue != null) return _parseRotationValue(doubleValue);
+    }
     return null;
   }
 
   static double _rotationDegreesForStream(Map<dynamic, dynamic> streamMap) {
     final tags = streamMap['tags'];
     if (tags is Map) {
-      final rotation = _parseRotationValue(tags['rotate']);
+      final rotation = _parseRotationValue(tags['rotate']) ??
+          _parseRotationValue(tags['orientation']);
       if (rotation != null) return rotation;
     }
 
@@ -180,8 +190,14 @@ class VideoWatermarkProcessor {
     if (sideDataList is List) {
       for (final sideData in sideDataList) {
         if (sideData is! Map) continue;
-        final rotation = _parseRotationValue(sideData['rotation']);
+
+        var rotation = _parseRotationValue(sideData['rotation']);
         if (rotation != null) return rotation;
+
+        if (sideData['side_data_type'] == 'Display Matrix') {
+          rotation = _parseRotationValue(sideData['rotation']);
+          if (rotation != null) return rotation;
+        }
       }
     }
 
@@ -221,7 +237,19 @@ class VideoWatermarkProcessor {
           stream as Map? ?? const {},
         );
         if (streamMap['codec_type'] != 'video') continue;
-        return _rotationDegreesForStream(streamMap);
+        final streamRotation = _rotationDegreesForStream(streamMap);
+        if (streamRotation != 0) return streamRotation;
+      }
+
+      // Fallback to global format tags (sometimes rotate is there)
+      final format = mediaInfo?['format'];
+      if (format is Map) {
+        final tags = format['tags'];
+        if (tags is Map) {
+          final rotation = _parseRotationValue(tags['rotate']) ??
+              _parseRotationValue(tags['orientation']);
+          if (rotation != null) return rotation;
+        }
       }
     } catch (e) {
       debugPrint("Video rotation probe failed: $e");
