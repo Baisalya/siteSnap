@@ -111,7 +111,7 @@ class PreviewOverlayPainter extends CustomPainter {
       textDirection: TextDirection.ltr,
     )..layout();
 
-    final padding = drawWidth * 0.04;
+    final padding = 0.0;
     const spacing = 8.0;
 
     // ===============================

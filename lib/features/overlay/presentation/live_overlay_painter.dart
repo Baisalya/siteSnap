@@ -156,10 +156,10 @@ class LiveOverlayPainter extends CustomPainter {
     final boxHeight = textPainter.height + (paddingV * 2);
 
     final dx = data.position == WatermarkPosition.bottomLeft
-        ? marginX
-        : drawWidth - boxWidth - marginX;
+        ? 0.0
+        : drawWidth - boxWidth;
 
-    final dy = drawHeight - boxHeight - marginY;
+    final dy = drawHeight - boxHeight;
 
     final boxRect = Rect.fromLTWH(dx, dy, boxWidth, boxHeight);
 

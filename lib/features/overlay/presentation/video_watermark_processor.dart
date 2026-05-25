@@ -310,7 +310,7 @@ class VideoWatermarkProcessor {
       _undoOrientationForVideoWatermark(canvas, orientation, width, height);
 
       final double baseSize = min(width, height);
-      final double padding = baseSize * 0.04;
+      final double padding = 0.0;
 
       final textPainter = TextPainter(
         text: TextSpan(
@@ -482,7 +482,7 @@ class VideoWatermarkProcessor {
 
       final double contentW = srcW;
       final double baseSize = min(srcW, srcH);
-      final double padding = baseSize * 0.04;
+      final double padding = 0.0;
 
       final textPainter = TextPainter(
         text: TextSpan(
