@@ -1,7 +1,6 @@
 import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:permission_handler/permission_handler.dart';
 import 'package:share_plus/share_plus.dart';
 import 'package:surveycam/features/gallery/data/sitesnap_gallery_repository.dart';
 import 'package:surveycam/features/gallery/presentation/gallery_image_viewer.dart';
@@ -18,15 +17,15 @@ class GalleryFolderScreen extends ConsumerStatefulWidget {
       _GalleryFolderScreenState();
 }
 
-class _GalleryFolderScreenState extends ConsumerState<GalleryFolderScreen> with WidgetsBindingObserver {
+class _GalleryFolderScreenState extends ConsumerState<GalleryFolderScreen>
+    with WidgetsBindingObserver {
   @override
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
-    _checkPermissions();
-    
-    // 🔥 Force a refresh when entering the gallery to ensure new images are shown
-    Future.microtask(() => ref.invalidate(galleryFilesProvider));
+    Future.microtask(
+      () => ref.read(galleryFilesProvider.notifier).ensureLoaded(),
+    );
   }
 
   @override
@@ -37,20 +36,8 @@ class _GalleryFolderScreenState extends ConsumerState<GalleryFolderScreen> with 
 
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
-    // 🔥 Refresh when returning to the app (e.g. from system settings or another app)
     if (state == AppLifecycleState.resumed) {
-      ref.invalidate(galleryFilesProvider);
-    }
-  }
-
-  Future<void> _checkPermissions() async {
-    if (Platform.isAndroid) {
-      await [
-        Permission.photos,
-        Permission.videos,
-      ].request();
-    } else {
-      await Permission.photos.request();
+      ref.read(galleryFilesProvider.notifier).ensureLoaded();
     }
   }
 
@@ -101,7 +88,8 @@ class _GalleryFolderScreenState extends ConsumerState<GalleryFolderScreen> with 
               )
             : const Text(
                 "SurveyCam Gallery",
-                style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold),
+                style:
+                    TextStyle(color: Colors.white, fontWeight: FontWeight.bold),
               ),
         actions: [
           if (selectionMode) ...[
@@ -124,34 +112,44 @@ class _GalleryFolderScreenState extends ConsumerState<GalleryFolderScreen> with 
         data: (images) {
           if (images.isEmpty) return _emptyView();
 
-          return RefreshIndicator(
-            onRefresh: () => ref.refresh(galleryFilesProvider.future),
-            color: Colors.amberAccent,
-            backgroundColor: Colors.grey[900],
-            child: GridView.builder(
-              padding: const EdgeInsets.all(6),
-              gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-                crossAxisCount: 3,
-                crossAxisSpacing: 6,
-                mainAxisSpacing: 6,
-              ),
-              itemCount: images.length,
-              itemBuilder: (context, i) {
-                final file = images[i];
-                return GalleryItem(
-                  key: ValueKey(file.path),
-                  file: file,
-                  index: i,
-                  allImages: images,
-                );
-              },
-            ),
-          );
+          return _galleryGrid(images);
         },
-        loading: () => _loadingView(),
+        loading: () {
+          final cachedImages =
+              ref.read(galleryRepositoryProvider).cachedFiles ?? const <File>[];
+          return cachedImages.isEmpty
+              ? _loadingView()
+              : _galleryGrid(cachedImages);
+        },
         error: (err, stack) => Center(
           child: Text("Error: $err", style: const TextStyle(color: Colors.red)),
         ),
+      ),
+    );
+  }
+
+  Widget _galleryGrid(List<File> images) {
+    return RefreshIndicator(
+      onRefresh: () => ref.read(galleryFilesProvider.notifier).refresh(),
+      color: Colors.amberAccent,
+      backgroundColor: Colors.grey[900],
+      child: GridView.builder(
+        padding: const EdgeInsets.all(6),
+        gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+          crossAxisCount: 3,
+          crossAxisSpacing: 6,
+          mainAxisSpacing: 6,
+        ),
+        itemCount: images.length,
+        itemBuilder: (context, i) {
+          final file = images[i];
+          return GalleryItem(
+            key: ValueKey(file.path),
+            file: file,
+            index: i,
+            allImages: images,
+          );
+        },
       ),
     );
   }
@@ -179,8 +177,7 @@ class _GalleryFolderScreenState extends ConsumerState<GalleryFolderScreen> with 
       child: Column(
         mainAxisAlignment: MainAxisAlignment.center,
         children: [
-          Icon(Icons.photo_library_outlined,
-              size: 64, color: Colors.white38),
+          Icon(Icons.photo_library_outlined, size: 64, color: Colors.white38),
           SizedBox(height: 12),
           Text(
             "No photos yet",
@@ -224,7 +221,9 @@ class GalleryItem extends ConsumerWidget {
         child: InkWell(
           borderRadius: BorderRadius.circular(12),
           onLongPress: () {
-            ref.read(gallerySelectionProvider.notifier).update((state) => {...state, file});
+            ref
+                .read(gallerySelectionProvider.notifier)
+                .update((state) => {...state, file});
           },
           onTap: () {
             if (selectionMode) {
@@ -263,9 +262,8 @@ class GalleryItem extends ConsumerWidget {
             curve: Curves.easeInOut,
             decoration: BoxDecoration(
               borderRadius: BorderRadius.circular(12),
-              border: isSelected
-                  ? Border.all(color: Colors.blue, width: 2)
-                  : null,
+              border:
+                  isSelected ? Border.all(color: Colors.blue, width: 2) : null,
             ),
             child: Stack(
               children: [

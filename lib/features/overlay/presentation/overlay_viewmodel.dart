@@ -69,6 +69,9 @@ class OverlayViewModel extends StateNotifier<void> {
     bool mirror = false,
   }) async {
     try {
+      ref.read(lastImageProvider.notifier).state = original;
+      ref.read(galleryFilesProvider.notifier).showFileImmediately(original);
+
       // Run the slow processing in the background
       final bytes = await processImage(
         original,
@@ -82,7 +85,9 @@ class OverlayViewModel extends StateNotifier<void> {
 
       final savedFile = await GallerySaver.saveImageBytes(bytes);
       ref.read(lastImageProvider.notifier).state = savedFile;
-      ref.invalidate(galleryFilesProvider);
+      ref
+          .read(galleryFilesProvider.notifier)
+          .showFileImmediately(savedFile, replace: original);
       debugPrint("✅ Background Save Complete");
       return savedFile;
     } catch (e) {

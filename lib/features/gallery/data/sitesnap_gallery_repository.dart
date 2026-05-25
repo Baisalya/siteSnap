@@ -7,21 +7,118 @@ import 'package:surveycam/core/utils/gallery_saver.dart';
 final galleryRepositoryProvider =
     Provider((ref) => SurveyCamGalleryRepository());
 
-final galleryFilesProvider = FutureProvider.autoDispose<List<File>>((ref) async {
+final galleryFilesProvider =
+    StateNotifierProvider<GalleryFilesNotifier, AsyncValue<List<File>>>((ref) {
   final repo = ref.watch(galleryRepositoryProvider);
-  // Force a fresh load when the provider is first accessed or refreshed
-  return repo.loadImages(forceRefresh: true);
+  final notifier = GalleryFilesNotifier(repo);
+  notifier.ensureLoaded();
+  return notifier;
 });
+
+class GalleryFilesNotifier extends StateNotifier<AsyncValue<List<File>>> {
+  GalleryFilesNotifier(this._repo)
+      : super(_repo.cachedFiles == null
+            ? const AsyncValue.loading()
+            : AsyncValue.data(_repo.cachedFiles!));
+
+  final SurveyCamGalleryRepository _repo;
+  Future<void>? _loadFuture;
+
+  Future<void> ensureLoaded({bool forceRefresh = false}) {
+    if (!forceRefresh && state.hasValue) {
+      return Future.value();
+    }
+
+    final cached = _repo.cachedFiles;
+    if (!forceRefresh && cached != null) {
+      state = AsyncValue.data(cached);
+      return Future.value();
+    }
+
+    return _load(forceRefresh: forceRefresh);
+  }
+
+  Future<void> refresh() => _load(forceRefresh: true);
+
+  void showFileImmediately(File file, {File? replace}) {
+    _repo.upsertFile(file, replace: replace);
+    state = AsyncValue.data(_repo.cachedFiles ?? [file]);
+  }
+
+  Future<void> _load({required bool forceRefresh}) {
+    if (_loadFuture != null) {
+      return _loadFuture!;
+    }
+
+    if (!state.hasValue) {
+      state = const AsyncValue.loading();
+    }
+
+    _loadFuture = _repo.loadImages(forceRefresh: forceRefresh).then((files) {
+      if (!mounted) return;
+      state = AsyncValue.data(files);
+    }).catchError((Object error, StackTrace stackTrace) {
+      if (!mounted) return;
+      final cached = _repo.cachedFiles;
+      if (cached != null) {
+        state = AsyncValue.data(cached);
+        return;
+      }
+      state = AsyncValue.error(error, stackTrace);
+    }).whenComplete(() {
+      _loadFuture = null;
+    });
+
+    return _loadFuture!;
+  }
+}
 
 class SurveyCamGalleryRepository {
   List<File>? _cachedFiles;
   DateTime? _lastFetchTime;
+  final Map<String, File> _optimisticFilesByPath = {};
+
+  List<File>? get cachedFiles =>
+      _cachedFiles == null ? null : List<File>.unmodifiable(_cachedFiles!);
+
+  void upsertFile(File file, {File? replace}) {
+    if (replace != null) {
+      _optimisticFilesByPath.remove(replace.path);
+    }
+    _optimisticFilesByPath[file.path] = file;
+
+    final replacePath = replace?.path;
+    final baseFiles = (_cachedFiles ?? const <File>[])
+        .where((existing) => existing.path != replacePath);
+    final files = _mergeOptimisticFiles(baseFiles);
+    _cachedFiles = files;
+    _lastFetchTime = DateTime.now();
+  }
+
+  List<File> _mergeOptimisticFiles(Iterable<File> files) {
+    final merged = <File>[];
+    final seenPaths = <String>{};
+
+    for (final file in _optimisticFilesByPath.values.toList().reversed) {
+      merged.add(file);
+      seenPaths.add(file.path);
+    }
+
+    for (final file in files) {
+      if (seenPaths.add(file.path)) {
+        merged.add(file);
+      }
+    }
+
+    return merged;
+  }
 
   Future<List<File>> loadImages({bool forceRefresh = false}) async {
     // Return cached results only if they are very fresh (less than 2 seconds old)
     // to prevent redundant disk IO during rapid UI rebuilds.
     if (!forceRefresh && _cachedFiles != null && _lastFetchTime != null) {
-      if (DateTime.now().difference(_lastFetchTime!) < const Duration(seconds: 2)) {
+      if (DateTime.now().difference(_lastFetchTime!) <
+          const Duration(seconds: 2)) {
         return _cachedFiles!;
       }
     }
@@ -48,12 +145,14 @@ class SurveyCamGalleryRepository {
     final results = await Future.wait(directories.map((directory) async {
       try {
         if (await directory.exists()) {
-          final isSurveyCam = directory.path.toLowerCase().contains('surveycam');
+          final isSurveyCam =
+              directory.path.toLowerCase().contains('surveycam');
 
           final List<File> files = [];
           // Using listSync for faster processing if the directory exists
-          final List<FileSystemEntity> entities = directory.listSync(recursive: isSurveyCam);
-          
+          final List<FileSystemEntity> entities =
+              directory.listSync(recursive: isSurveyCam);
+
           for (var entity in entities) {
             if (entity is File) {
               final path = entity.path.toLowerCase();
@@ -88,7 +187,14 @@ class SurveyCamGalleryRepository {
     }
 
     // ✅ newest first across all folders - use async lastModified for sorting
-    final fileWithDates = await Future.wait(allFilesByName.values.map((file) async {
+    for (final file in _optimisticFilesByPath.values) {
+      if (await file.exists()) {
+        allFilesByName[p.basename(file.path).toLowerCase()] = file;
+      }
+    }
+
+    final fileWithDates =
+        await Future.wait(allFilesByName.values.map((file) async {
       try {
         final date = await file.lastModified();
         return _FileWithDate(file, date);
@@ -102,7 +208,7 @@ class SurveyCamGalleryRepository {
     final sortedList = fileWithDates.map((fd) => fd.file).toList();
     _cachedFiles = sortedList;
     _lastFetchTime = DateTime.now();
-    
+
     return sortedList;
   }
 }

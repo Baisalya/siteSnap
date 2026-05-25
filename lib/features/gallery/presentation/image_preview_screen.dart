@@ -1,4 +1,3 @@
-import 'dart:async';
 import 'dart:math';
 import 'dart:io';
 import 'dart:ui' as ui;
@@ -66,7 +65,7 @@ class _ImagePreviewScreenState extends ConsumerState<ImagePreviewScreen> {
   void _loadPreviewImage() async {
     try {
       final bytes = await widget.originalFile.readAsBytes();
-      // Use instantiateImageCodec with targetWidth/Height if we want to downsample for preview speed, 
+      // Use instantiateImageCodec with targetWidth/Height if we want to downsample for preview speed,
       // but here we want full quality for CustomPaint. Still, we can do it in background.
       final codec = await ui.instantiateImageCodec(bytes);
       final frame = await codec.getNextFrame();
@@ -143,31 +142,22 @@ class _ImagePreviewScreenState extends ConsumerState<ImagePreviewScreen> {
         cameraState.orientation;
     final aspectRatio = _captureAspectRatio ?? cameraState.aspectRatio;
 
-    // 🔥 INSTANT FEEDBACK:
-    // We trigger the save process in the background and immediately pop the screen.
-    // The user doesn't have to wait for "Processing & Saving..."
-    unawaited(ref.read(overlayViewModelProvider.notifier).saveCapturedImage(
-          original: widget.originalFile,
-          orientation: orientation,
-          overlayData: overlayData,
-          showOverlay: _showOverlay,
-          showWatermark: _showTextWatermark,
-          aspectRatio: aspectRatio,
-          mirror: isMirror,
-        ));
+    // Return the save future so the camera screen can keep the gallery current
+    // while the final watermarked file is produced.
+    final saveFuture =
+        ref.read(overlayViewModelProvider.notifier).saveCapturedImage(
+              original: widget.originalFile,
+              orientation: orientation,
+              overlayData: overlayData,
+              showOverlay: _showOverlay,
+              showWatermark: _showTextWatermark,
+              aspectRatio: aspectRatio,
+              mirror: isMirror,
+            );
 
     if (mounted) {
       HapticFeedback.mediumImpact();
-      Navigator.of(context).pop();
-      
-      // Optional: Show a quick toast or snackbar on the previous screen (Camera)
-      // that the image is being saved in the background.
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text("Saving to gallery..."),
-          duration: Duration(seconds: 1),
-        ),
-      );
+      Navigator.of(context).pop(saveFuture);
     }
   }
 

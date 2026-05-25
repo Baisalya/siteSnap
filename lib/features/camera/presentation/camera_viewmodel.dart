@@ -81,7 +81,7 @@ class CameraViewModel extends StateNotifier<CameraState>
         state = state.copyWith(processingProgress: message['value']);
       } else if (message['type'] == 'complete') {
         state = state.copyWith(clearProcessingProgress: true);
-        ref.invalidate(galleryFilesProvider);
+        unawaited(ref.read(galleryFilesProvider.notifier).refresh());
       } else if (message['type'] == 'error') {
         state = state.copyWith(
             clearProcessingProgress: true, error: message['error']);
@@ -769,18 +769,25 @@ class CameraViewModel extends StateNotifier<CameraState>
 
       if (result is Future<File?>) {
         ref.read(lastImageProvider.notifier).state = originalFile;
+        ref
+            .read(galleryFilesProvider.notifier)
+            .showFileImmediately(originalFile);
         unawaited(result.then((savedFile) {
           if (savedFile != null) {
             ref.read(lastImageProvider.notifier).state = savedFile;
-            ref.invalidate(galleryFilesProvider);
+            ref
+                .read(galleryFilesProvider.notifier)
+                .showFileImmediately(savedFile, replace: originalFile);
           }
         }));
       } else if (result is File) {
         ref.read(lastImageProvider.notifier).state = result;
-        ref.invalidate(galleryFilesProvider);
+        ref.read(galleryFilesProvider.notifier).showFileImmediately(result);
       } else if (result != null) {
         ref.read(lastImageProvider.notifier).state = originalFile;
-        ref.invalidate(galleryFilesProvider);
+        ref
+            .read(galleryFilesProvider.notifier)
+            .showFileImmediately(originalFile);
       }
     } catch (e) {
       debugPrint("Post capture error: $e");
