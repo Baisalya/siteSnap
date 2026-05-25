@@ -1,13 +1,11 @@
 import 'dart:io';
 import 'dart:math';
-import 'dart:typed_data';
 import 'dart:ui' as ui;
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_svg/flutter_svg.dart' as svg;
-import 'package:image/image.dart' as img;
 import 'package:vector_graphics/vector_graphics.dart';
 import 'package:ffmpeg_kit_flutter_new_https_gpl/ffmpeg_kit_config.dart';
 import 'package:path_provider/path_provider.dart';
@@ -61,7 +59,25 @@ class VideoWatermarkProcessor {
     required Size frameSize,
     required DeviceOrientation orientation,
   }) {
-    return DeviceOrientation.portraitUp;
+    final isFrameLandscape = frameSize.width > frameSize.height;
+
+    if (isFrameLandscape) {
+      // If the video frame itself is landscape (e.g. 1920x1080),
+      // we need to translate the device's sensor orientation into a logical
+      // orientation relative to that landscape canvas.
+      switch (orientation) {
+        case DeviceOrientation.landscapeLeft:
+          return DeviceOrientation.portraitDown;
+        case DeviceOrientation.landscapeRight:
+          return DeviceOrientation.portraitUp;
+        case DeviceOrientation.portraitUp:
+          return DeviceOrientation.landscapeLeft;
+        case DeviceOrientation.portraitDown:
+          return DeviceOrientation.landscapeRight;
+      }
+    }
+
+    return orientation;
   }
 
   static Future<int> _createNativeSession(
@@ -446,6 +462,94 @@ class VideoWatermarkProcessor {
     }
   }
 
+  static void _paintWatermark({
+    required Canvas canvas,
+    required Size size,
+    required DeviceOrientation orientation,
+    required PictureInfo pictureInfo,
+  }) {
+    canvas.save();
+    _undoOrientationForVideoWatermark(
+      canvas,
+      orientation,
+      size.width,
+      size.height,
+    );
+
+    final double baseSize = min(size.width, size.height);
+    const double padding = 0.0;
+
+    final textPainter = TextPainter(
+      text: TextSpan(
+        text: "SurveyCam",
+        style: TextStyle(
+          color: Colors.white,
+          fontSize: baseSize * 0.045,
+          fontWeight: FontWeight.bold,
+          shadows: [
+            Shadow(
+              blurRadius: 6,
+              color: Colors.black.withValues(alpha: 0.5),
+              offset: const Offset(1, 1),
+            ),
+          ],
+        ),
+      ),
+      textDirection: TextDirection.ltr,
+    )..layout();
+
+    final double svgSize = textPainter.height;
+    const double spacing = 10;
+    final double totalWidth = svgSize + spacing + textPainter.width;
+
+    double drawWidth = size.width;
+    if (orientation == DeviceOrientation.landscapeLeft ||
+        orientation == DeviceOrientation.landscapeRight) {
+      drawWidth = size.height;
+    }
+
+    double dx, dy;
+    // We always want the watermark at the top-right of the logical view
+    dx = drawWidth - totalWidth - padding;
+    dy = padding;
+
+    canvas.save();
+    canvas.translate(dx, dy);
+    final double scale = svgSize / pictureInfo.size.height;
+    canvas.scale(scale, scale);
+    canvas.drawPicture(pictureInfo.picture);
+    canvas.restore();
+
+    textPainter.paint(canvas, Offset(dx + svgSize + spacing, dy));
+    canvas.restore();
+  }
+
+  static void _paintFrameContent({
+    required Canvas canvas,
+    required Size size,
+    required OverlayData data,
+    required DeviceOrientation orientation,
+    required PictureInfo pictureInfo,
+    bool showOverlay = true,
+    bool showWatermark = true,
+    OverlaySettings settings = const OverlaySettings(),
+  }) {
+    if (showOverlay) {
+      final overlayPainter =
+          LiveOverlayPainter(data, orientation, settings: settings);
+      overlayPainter.paint(canvas, size);
+    }
+
+    if (showWatermark) {
+      _paintWatermark(
+        canvas: canvas,
+        size: size,
+        orientation: orientation,
+        pictureInfo: pictureInfo,
+      );
+    }
+  }
+
   static Future<Uint8List?> generateSingleFrameBytes({
     required OverlayData data,
     required DeviceOrientation orientation,
@@ -464,72 +568,20 @@ class VideoWatermarkProcessor {
       orientation: orientation,
     );
 
-    if (showOverlay) {
-      final overlayPainter =
-          LiveOverlayPainter(data, paintOrientation, settings: settings);
-      overlayPainter.paint(canvas, frameSize);
-    }
-
-    if (showWatermark) {
-      canvas.save();
-      _undoOrientationForVideoWatermark(
-        canvas,
-        paintOrientation,
-        width,
-        height,
-      );
-
-      final double baseSize = min(width, height);
-      final double padding = 0.0;
-
-      final textPainter = TextPainter(
-        text: TextSpan(
-          text: "SurveyCam",
-          style: TextStyle(
-            color: Colors.white,
-            fontSize: baseSize * 0.045,
-            fontWeight: FontWeight.bold,
-            shadows: [
-              Shadow(
-                blurRadius: 6,
-                color: Colors.black.withValues(alpha: 0.5),
-                offset: const Offset(1, 1),
-              ),
-            ],
-          ),
-        ),
-        textDirection: TextDirection.ltr,
-      )..layout();
-
-      final double svgSize = textPainter.height;
-      const double spacing = 10;
-      final double totalWidth = svgSize + spacing + textPainter.width;
-
-      double dx, dy;
-      if (paintOrientation == DeviceOrientation.landscapeLeft ||
-          paintOrientation == DeviceOrientation.landscapeRight) {
-        dx = padding;
-        dy = padding;
-      } else {
-        dx = width - totalWidth - padding;
-        dy = padding;
-      }
-
-      canvas.save();
-      canvas.translate(dx, dy);
-      final double scale = svgSize / pictureInfo.size.height;
-      canvas.scale(scale, scale);
-      canvas.drawPicture(pictureInfo.picture);
-      canvas.restore();
-
-      textPainter.paint(canvas, Offset(dx + svgSize + spacing, dy));
-      canvas.restore();
-    }
+    _paintFrameContent(
+      canvas: canvas,
+      size: frameSize,
+      data: data,
+      orientation: paintOrientation,
+      pictureInfo: pictureInfo,
+      showOverlay: showOverlay,
+      showWatermark: showWatermark,
+      settings: settings,
+    );
 
     final picture = recorder.endRecording();
     final finalImage = await picture.toImage(width.toInt(), height.toInt());
 
-    // 🔥 OPTIMIZATION: Use native PNG encoding instead of the pure-dart image package
     final byteData =
         await finalImage.toByteData(format: ui.ImageByteFormat.png);
     finalImage.dispose();
@@ -569,7 +621,7 @@ class VideoWatermarkProcessor {
           '-noautorotate -i "$videoPath" -framerate $sampleFps -i "$sequenceDir/frame_%05d.png" '
           '-filter_complex "$filter" -map "[v]" -map 0:a? '
           '-c:v $encoder $extraArgs -pix_fmt yuv420p -c:a copy '
-          '-metadata:s:v:0 rotate=0 -movflags +faststart ${durationLimitArg}-y "$outputPath"';
+          '-metadata:s:v:0 rotate=0 -movflags +faststart $durationLimitArg-y "$outputPath"';
 
       debugPrint("Executing FFmpeg: $command");
 
@@ -591,7 +643,7 @@ class VideoWatermarkProcessor {
               '-noautorotate -i "$videoPath" -framerate $sampleFps -i "$sequenceDir/frame_%05d.png" '
               '-filter_complex "$filter" -map "[v]" -map 0:a? '
               '-c:v libx264 -preset ultrafast -crf 23 -pix_fmt yuv420p '
-              '-c:a copy -metadata:s:v:0 rotate=0 -movflags +faststart ${durationLimitArg}-y "$outputPath"';
+              '-c:a copy -metadata:s:v:0 rotate=0 -movflags +faststart $durationLimitArg-y "$outputPath"';
 
           final swReturnCode = await _executeFfmpegCommand(softwareCommand);
 
@@ -630,126 +682,28 @@ class VideoWatermarkProcessor {
 
     final recorder = ui.PictureRecorder();
     final canvas = Canvas(recorder);
+    final frameSize = Size(width, height);
 
-    // Video coordinates are typically fixed (e.g. 1080x1920)
-    final double srcW = width;
-    final double srcH = height;
-
-    // Overlay
-    if (showOverlay) {
-      final overlayPainter =
-          LiveOverlayPainter(data, orientation, settings: settings);
-      overlayPainter.paint(
-        canvas,
-        Size(srcW, srcH),
-      );
-    }
-
-    // ================= WATERMARK =================
-    if (showWatermark) {
-      canvas.save();
-
-      _undoOrientationForVideoWatermark(
-        canvas,
-        orientation,
-        srcW,
-        srcH,
-      );
-
-      final double contentW = srcW;
-      final double baseSize = min(srcW, srcH);
-      final double padding = 0.0;
-
-      final textPainter = TextPainter(
-        text: TextSpan(
-          text: "SurveyCam",
-          style: TextStyle(
-            color: Colors.white,
-            fontSize: baseSize * 0.045,
-            fontWeight: FontWeight.bold,
-            shadows: [
-              Shadow(
-                blurRadius: 6,
-                color: Colors.black.withValues(alpha: 0.5),
-                offset: const Offset(1, 1),
-              ),
-            ],
-          ),
-        ),
-        textDirection: TextDirection.ltr,
-      )..layout();
-
-      final double svgSize = textPainter.height;
-      const double spacing = 10;
-      final double totalWidth = svgSize + spacing + textPainter.width;
-
-      double dx, dy;
-
-      if (orientation == DeviceOrientation.landscapeLeft ||
-          orientation == DeviceOrientation.landscapeRight) {
-        // Landscape -> Top Left
-        dx = padding;
-        dy = padding;
-      } else {
-        // Portrait -> Top Right
-        // Note: contentW and contentH are adjusted by _undoOrientation
-        // For portraitUp, contentW is the short side.
-        dx = contentW - totalWidth - padding;
-        dy = padding;
-      }
-
-      // Draw SVG
-      canvas.save();
-      canvas.translate(dx, dy);
-
-      final double scale = svgSize / pictureInfo.size.height;
-      canvas.scale(scale, scale);
-      canvas.drawPicture(pictureInfo.picture);
-
-      canvas.restore();
-
-      // Draw Text
-      textPainter.paint(
-        canvas,
-        Offset(dx + svgSize + spacing, dy),
-      );
-
-      canvas.restore();
-    }
+    _paintFrameContent(
+      canvas: canvas,
+      size: frameSize,
+      data: data,
+      orientation: orientation,
+      pictureInfo: pictureInfo,
+      showOverlay: showOverlay,
+      showWatermark: showWatermark,
+      settings: settings,
+    );
 
     final picture = recorder.endRecording();
     final finalImage = await picture.toImage(width.toInt(), height.toInt());
 
     final byteData =
-        await finalImage.toByteData(format: ui.ImageByteFormat.rawRgba);
+        await finalImage.toByteData(format: ui.ImageByteFormat.png);
 
     finalImage.dispose();
 
-    if (byteData == null) return Uint8List(0);
-
-    return await compute(_encodePngTask, {
-      'width': finalImage.width,
-      'height': finalImage.height,
-      'buffer': byteData.buffer,
-    });
-  }
-
-  static Uint8List _encodePngTask(Map<String, dynamic> params) {
-    final int width = params['width'];
-    final int height = params['height'];
-    final ByteBuffer buffer = params['buffer'];
-
-    final processedImage = img.Image.fromBytes(
-      width: width,
-      height: height,
-      bytes: buffer,
-      numChannels: 4,
-      order: img.ChannelOrder.rgba,
-    );
-
-    return Uint8List.fromList(
-      img.encodePng(processedImage),
-    );
+    return byteData?.buffer.asUint8List() ?? Uint8List(0);
   }
 
   static Future<String?> applyOverlayToVideo({
