@@ -25,6 +25,7 @@ class _AppLauncherState extends ConsumerState<AppLauncher> {
   String _unauthorizedTitle = "";
   String _unauthorizedMessage = "";
   String _unauthorizedSolution = "";
+  bool _cameraInitRequested = false;
 
   @override
   void initState() {
@@ -260,10 +261,14 @@ class _AppLauncherState extends ConsumerState<AppLauncher> {
       return const SplashScreen();
     }
 
-    // Trigger early initialization of camera
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      ref.read(cameraViewModelProvider.notifier).initialize();
-    });
+    if (!_cameraInitRequested) {
+      _cameraInitRequested = true;
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) {
+          ref.read(cameraViewModelProvider.notifier).initialize();
+        }
+      });
+    }
 
     return const CameraScreen();
   }

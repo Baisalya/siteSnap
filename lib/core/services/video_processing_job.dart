@@ -4,18 +4,23 @@ import 'package:surveycam/features/overlay/domain/video_overlay_sample.dart';
 class VideoProcessingSegment {
   final String path;
   final CameraLensType lens;
+  final bool mirror;
 
   const VideoProcessingSegment({
     required this.path,
     required this.lens,
+    this.mirror = false,
   });
 
   factory VideoProcessingSegment.fromJson(Map<String, dynamic> json) {
+    final lens = CameraLensType.values[
+        (json['lens'] as int? ?? CameraLensType.normal.index)
+            .clamp(0, CameraLensType.values.length - 1)];
+
     return VideoProcessingSegment(
       path: json['path'] as String? ?? '',
-      lens: CameraLensType.values[
-          (json['lens'] as int? ?? CameraLensType.normal.index)
-              .clamp(0, CameraLensType.values.length - 1)],
+      lens: lens,
+      mirror: json['mirror'] as bool? ?? lens == CameraLensType.front,
     );
   }
 
@@ -23,6 +28,7 @@ class VideoProcessingSegment {
     return {
       'path': path,
       'lens': lens.index,
+      'mirror': mirror,
     };
   }
 }

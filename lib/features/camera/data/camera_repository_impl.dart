@@ -1,4 +1,3 @@
-import 'dart:async';
 import 'package:camera/camera.dart';
 import 'package:flutter/foundation.dart';
 import 'package:surveycam/features/camera/domain/camera_lens_type.dart';
@@ -129,10 +128,6 @@ class CameraRepositoryImpl implements CameraRepository {
 
       // Initial quality settings - only if supported
       if (controller.value.isInitialized) {
-        unawaited(controller.prepareForVideoRecording().catchError((e) {
-          debugPrint("Video pre-warm skipped: $e");
-        }));
-
         try {
           await controller.setFocusMode(FocusMode.auto);
         } catch (e) {
@@ -160,6 +155,10 @@ class CameraRepositoryImpl implements CameraRepository {
         !controller.value.isInitialized ||
         controller.value.isTakingPicture) {
       throw Exception("Camera not ready");
+    }
+
+    if (controller.value.isPreviewPaused) {
+      await controller.resumePreview();
     }
 
     final file = await controller.takePicture();

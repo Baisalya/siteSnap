@@ -1,6 +1,5 @@
 import 'package:camera/camera.dart';
 import 'package:flutter/services.dart';
-import '../../overlay/domain/overlay_model.dart';
 
 import '../domain/camera_lens_type.dart';
 
@@ -49,7 +48,13 @@ enum CameraMode {
 class VideoSegment {
   final String path;
   final CameraLensType lens;
-  VideoSegment({required this.path, required this.lens});
+  final bool mirror;
+
+  VideoSegment({
+    required this.path,
+    required this.lens,
+    this.mirror = false,
+  });
 }
 
 /// =======================================================

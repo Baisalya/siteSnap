@@ -14,6 +14,7 @@ import 'package:surveycam/core/services/video_processing_job.dart';
 import 'package:surveycam/core/utils/gallery_saver.dart';
 import 'package:surveycam/features/camera/data/CameraState.dart';
 import 'package:surveycam/features/camera/domain/camera_lens_type.dart';
+import 'package:surveycam/features/camera/presentation/camera_settings_provider.dart';
 import 'package:surveycam/features/overlay/presentation/overlay_settings_provider.dart';
 import 'package:surveycam/features/gallery/presentation/image_preview_screen.dart';
 import 'package:surveycam/features/gallery/presentation/last_image_provider.dart';
@@ -40,6 +41,7 @@ class CameraViewModel extends StateNotifier<CameraState>
   bool _isInitializing = false;
   bool _isDisposing = false;
   bool _isRestarting = false;
+  bool _captureInFlight = false;
   Timer? _videoHistoryTimer;
   ReceivePort? _receivePort;
 
@@ -111,49 +113,7 @@ class CameraViewModel extends StateNotifier<CameraState>
         await controller.initialize();
       }
 
-      // Set to auto focus and exposure by default in parallel
       if (controller.value.isInitialized) {
-        await Future.wait([
-          controller
-              .setFocusMode(FocusMode.auto)
-              .catchError((e) => debugPrint("Initial focus mode error: $e")),
-          controller
-              .setExposureMode(ExposureMode.auto)
-              .catchError((e) => debugPrint("Initial exposure mode error: $e")),
-          controller
-              .setFlashMode(FlashMode.off)
-              .catchError((e) => debugPrint("Initial flash mode error: $e")),
-          controller
-              .setFocusPoint(const Offset(0.5, 0.5))
-              .catchError((e) => debugPrint("Initial focus point error: $e")),
-          controller.setExposurePoint(const Offset(0.5, 0.5)).catchError(
-              (e) => debugPrint("Initial exposure point error: $e")),
-        ]);
-      }
-
-      if (controller.value.isInitialized) {
-        // Fetch capabilities in parallel
-        final caps = await Future.wait([
-          controller.getMinExposureOffset(),
-          controller.getMaxExposureOffset(),
-          controller.getMinZoomLevel(),
-          controller.getMaxZoomLevel(),
-        ]);
-
-        _minExposure = caps[0];
-        _maxExposure = caps[1];
-        final minZoom = caps[2];
-        final maxZoom = caps[3];
-
-        // Set exposure offset to 0.0 (Neutral) to minimize ISO noise in low light
-        _currentExposure = 0.0.clamp(_minExposure, _maxExposure);
-
-        try {
-          await controller.setExposureOffset(_currentExposure);
-        } catch (e) {
-          debugPrint("Initial exposure offset error: $e");
-        }
-
         _isCameraStable = true;
 
         state = state.copyWith(
@@ -163,10 +123,12 @@ class CameraViewModel extends StateNotifier<CameraState>
           minExposure: _minExposure,
           maxExposure: _maxExposure,
           zoom: 1.0,
-          minZoom: minZoom,
-          maxZoom: maxZoom,
+          minZoom: state.minZoom,
+          maxZoom: state.maxZoom,
           error: null,
         );
+
+        unawaited(_configureCameraAfterReady(controller));
         unawaited(_warmUpAfterCameraReady());
       } else {
         state = state.copyWith(
@@ -186,8 +148,67 @@ class CameraViewModel extends StateNotifier<CameraState>
     }
   }
 
+  Future<void> _configureCameraAfterReady(CameraController controller) async {
+    try {
+      if (!mounted || !controller.value.isInitialized) return;
+
+      await controller
+          .setFlashMode(FlashMode.off)
+          .catchError((e) => debugPrint("Initial flash mode error: $e"));
+      await controller
+          .setFocusMode(FocusMode.auto)
+          .catchError((e) => debugPrint("Initial focus mode error: $e"));
+      await controller
+          .setExposureMode(ExposureMode.auto)
+          .catchError((e) => debugPrint("Initial exposure mode error: $e"));
+      await controller
+          .setFocusPoint(const Offset(0.5, 0.5))
+          .catchError((e) => debugPrint("Initial focus point error: $e"));
+      await controller
+          .setExposurePoint(const Offset(0.5, 0.5))
+          .catchError((e) => debugPrint("Initial exposure point error: $e"));
+
+      final caps = await Future.wait([
+        controller.getMinExposureOffset(),
+        controller.getMaxExposureOffset(),
+        controller.getMinZoomLevel(),
+        controller.getMaxZoomLevel(),
+      ]);
+
+      if (!mounted || state.controller != controller) return;
+
+      _minExposure = caps[0];
+      _maxExposure = caps[1];
+      _currentExposure = 0.0.clamp(_minExposure, _maxExposure);
+
+      try {
+        await controller.setExposureOffset(_currentExposure);
+      } catch (e) {
+        debugPrint("Initial exposure offset error: $e");
+      }
+
+      if (!mounted || state.controller != controller) return;
+
+      state = state.copyWith(
+        exposure: _currentExposure,
+        minExposure: _minExposure,
+        maxExposure: _maxExposure,
+        minZoom: caps[2],
+        maxZoom: caps[3],
+      );
+    } catch (e) {
+      debugPrint('Deferred camera setup skipped: $e');
+    }
+  }
+
   Future<void> _warmUpAfterCameraReady() async {
     try {
+      final controller = state.controller;
+      if (controller != null && controller.value.isInitialized) {
+        unawaited(controller.prepareForVideoRecording().catchError((e) {
+          debugPrint("Video pre-warm skipped: $e");
+        }));
+      }
       await GallerySaver.warmUp();
       await Future.delayed(const Duration(milliseconds: 600));
       if (!mounted) return;
@@ -449,8 +470,11 @@ class CameraViewModel extends StateNotifier<CameraState>
       try {
         final repo = ref.read(cameraRepositoryProvider);
         final segmentFile = await repo.stopVideoRecording();
-        final segment =
-            VideoSegment(path: segmentFile.path, lens: state.currentLens);
+        final segment = VideoSegment(
+          path: segmentFile.path,
+          lens: state.currentLens,
+          mirror: _shouldMirrorSegment(state.currentLens),
+        );
         state = state.copyWith(
           videoSegments: [...state.videoSegments, segment],
         );
@@ -524,6 +548,61 @@ class CameraViewModel extends StateNotifier<CameraState>
     state = state.copyWith(cameraMode: mode);
   }
 
+  bool _shouldMirrorSegment(CameraLensType lens) {
+    return lens == CameraLensType.front &&
+        ref.read(cameraSettingsProvider).mirrorFrontVideo;
+  }
+
+  Future<void> setFrontVideoMirroring(bool mirror) async {
+    if (state.currentLens != CameraLensType.front || !state.isRecording) {
+      await ref
+          .read(cameraSettingsProvider.notifier)
+          .setMirrorFrontVideo(mirror);
+      return;
+    }
+
+    final controller = state.controller;
+    if (controller == null || !controller.value.isInitialized) {
+      await ref
+          .read(cameraSettingsProvider.notifier)
+          .setMirrorFrontVideo(mirror);
+      return;
+    }
+
+    var segmentClosed = false;
+
+    try {
+      final repo = ref.read(cameraRepositoryProvider);
+      final segmentFile = await repo.stopVideoRecording();
+      segmentClosed = true;
+      final segment = VideoSegment(
+        path: segmentFile.path,
+        lens: state.currentLens,
+        mirror: _shouldMirrorSegment(state.currentLens),
+      );
+
+      state = state.copyWith(
+        videoSegments: [...state.videoSegments, segment],
+      );
+
+      await ref
+          .read(cameraSettingsProvider.notifier)
+          .setMirrorFrontVideo(mirror);
+
+      await repo.startVideoRecording();
+      state = state.copyWith(isRecording: true);
+    } catch (e) {
+      debugPrint("Mirror toggle while recording failed: $e");
+      await ref
+          .read(cameraSettingsProvider.notifier)
+          .setMirrorFrontVideo(mirror);
+      if (segmentClosed) {
+        _videoHistoryTimer?.cancel();
+        state = state.copyWith(isRecording: false);
+      }
+    }
+  }
+
   Future<String?> capture() async {
     final controller = state.controller;
 
@@ -532,8 +611,8 @@ class CameraViewModel extends StateNotifier<CameraState>
         !controller.value.isInitialized ||
         controller.value.isTakingPicture ||
         state.isCapturing ||
-        state.isRecording ||
-        (state.processingProgress != null)) {
+        _captureInFlight ||
+        state.isRecording) {
       // HEALTH CHECK: If we think we are ready but controller is null or not init, trigger recovery
       if (state.isReady &&
           (controller == null || !controller.value.isInitialized)) {
@@ -545,6 +624,7 @@ class CameraViewModel extends StateNotifier<CameraState>
       return null;
     }
 
+    _captureInFlight = true;
     unawaited(HapticFeedback.mediumImpact());
 
     final overlayData = ref.read(overlayPreviewProvider);
@@ -560,52 +640,28 @@ class CameraViewModel extends StateNotifier<CameraState>
     try {
       final repo = ref.read(cameraRepositoryProvider);
 
-      // 1. Prepare hardware (Parallelized)
       if (controller.value.isInitialized) {
-        await Future.wait([
-          controller
-              .setFocusMode(FocusMode.auto)
-              .catchError((e) => debugPrint("Capture focus mode error: $e")),
-          controller
-              .setExposureMode(ExposureMode.auto)
-              .catchError((e) => debugPrint("Capture exposure mode error: $e")),
-          controller.setExposurePoint(const Offset(0.5, 0.5)).catchError(
-              (e) => debugPrint("Capture exposure point error: $e")),
-        ]);
+        await controller
+            .setExposureMode(ExposureMode.auto)
+            .timeout(const Duration(milliseconds: 250))
+            .catchError((e) => debugPrint("Capture exposure mode skipped: $e"));
       }
 
-      // 2. Enable Light for Capture
       if (state.flashMode == FlashMode.always) {
         if (state.currentLens == CameraLensType.front) {
-          // For front camera, we use the Screen Flash (UI based)
-          // Reduced delay for front flash stabilization
           await Future.delayed(const Duration(milliseconds: 80));
         } else {
-          // For back camera, use the physical LED
           await controller.setFlashMode(FlashMode.torch);
-          // Reduced delay for back flash stabilization (250ms -> 100ms)
           await Future.delayed(const Duration(milliseconds: 100));
         }
       } else {
-        await controller.setFlashMode(FlashMode.off);
+        unawaited(controller
+            .setFlashMode(FlashMode.off)
+            .catchError((e) => debugPrint("Capture flash-off skipped: $e")));
       }
 
-      // 2.5 LOCK Focus and Exposure for full clarity (Parallelized)
-      if (controller.value.isInitialized) {
-        await Future.wait([
-          controller
-              .setFocusMode(FocusMode.locked)
-              .catchError((e) => debugPrint("Locking focus error: $e")),
-          controller
-              .setExposureMode(ExposureMode.locked)
-              .catchError((e) => debugPrint("Locking exposure error: $e")),
-        ]);
-      }
+      final path = await repo.takePicture().timeout(const Duration(seconds: 6));
 
-      // 3. CAPTURE
-      final path = await repo.takePicture();
-
-      // 4. CLEANUP (Non-blocking)
       if (state.flashMode == FlashMode.always) {
         unawaited(_nuclearFlashKill(controller));
       } else {
@@ -614,6 +670,10 @@ class CameraViewModel extends StateNotifier<CameraState>
 
       unawaited(HapticFeedback.lightImpact());
       return path;
+    } on TimeoutException catch (e) {
+      debugPrint('Capture timeout: $e');
+      await refreshCamera();
+      return null;
     } catch (e) {
       debugPrint('Capture error: $e');
       if (e.toString().contains('CameraException')) {
@@ -624,7 +684,8 @@ class CameraViewModel extends StateNotifier<CameraState>
       return null;
     } finally {
       // 🔓 RESTORATION (Non-blocking cleanup)
-      _restoreCameraState(controller);
+      _captureInFlight = false;
+      unawaited(_restoreCameraState(controller));
       state = state.copyWith(isCapturing: false);
     }
   }
@@ -652,8 +713,6 @@ class CameraViewModel extends StateNotifier<CameraState>
     try {
       final originalFile = File(path);
       if (!context.mounted) return;
-
-      final deviceOrientation = ref.read(deviceOrientationProvider);
 
       final result = await Navigator.push(
         context,
@@ -685,13 +744,13 @@ class CameraViewModel extends StateNotifier<CameraState>
     }
   }
 
-  Future<void> startVideoRecording({bool clearSegments = false}) async {
+  Future<bool> startVideoRecording({bool clearSegments = false}) async {
     final controller = state.controller;
     if (controller == null ||
         !controller.value.isInitialized ||
         state.isRecording ||
         (state.processingProgress != null)) {
-      return;
+      return false;
     }
 
     try {
@@ -747,8 +806,10 @@ class CameraViewModel extends StateNotifier<CameraState>
         videoSegments: clearSegments ? <VideoSegment>[] : state.videoSegments,
       );
       unawaited(HapticFeedback.heavyImpact());
+      return true;
     } catch (e) {
       debugPrint("Start recording error: $e");
+      return false;
     }
   }
 
@@ -774,8 +835,11 @@ class CameraViewModel extends StateNotifier<CameraState>
       _videoHistoryTimer = null;
 
       final lastSegmentFile = await repo.stopVideoRecording();
-      final lastSegment =
-          VideoSegment(path: lastSegmentFile.path, lens: state.currentLens);
+      final lastSegment = VideoSegment(
+        path: lastSegmentFile.path,
+        lens: state.currentLens,
+        mirror: _shouldMirrorSegment(state.currentLens),
+      );
       final allSegments = [...state.videoSegments, lastSegment];
       final totalDurationMs = _recordingStartTime == null
           ? 0
@@ -819,6 +883,7 @@ class CameraViewModel extends StateNotifier<CameraState>
             .map((segment) => VideoProcessingSegment(
                   path: segment.path,
                   lens: segment.lens,
+                  mirror: segment.mirror,
                 ))
             .toList(),
         history: history,

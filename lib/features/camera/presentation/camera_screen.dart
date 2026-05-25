@@ -8,7 +8,6 @@ import 'package:surveycam/core/services/location_service.dart';
 import 'package:surveycam/core/services/rate_us_service.dart';
 import 'package:surveycam/core/services/weather_service.dart';
 import 'package:surveycam/core/utils/overlay_utils.dart';
-import 'package:surveycam/features/overlay/domain/overlay_settings.dart';
 import 'package:surveycam/core/utils/developer_info_dialog.dart';
 import 'package:surveycam/core/utils/device_orientation_provider.dart';
 import 'package:surveycam/core/utils/direction_utils.dart';
@@ -50,14 +49,14 @@ class _CameraScreenState extends ConsumerState<CameraScreen>
     super.initState();
     WidgetsBinding.instance.addObserver(this);
 
-    /// INITIALIZE RATE US SERVICE AND CHECK
+    /// INITIALIZE CAMERA FIRST, THEN NON-CRITICAL PROMPTS
     WidgetsBinding.instance.addPostFrameCallback((_) async {
+      unawaited(ref.read(cameraViewModelProvider.notifier).initialize());
+
       await RateUsService.init();
       if (mounted) {
         await RateUsService.showRateDialogIfMeetsCriteria(context);
       }
-      // Ensure camera is initializing
-      ref.read(cameraViewModelProvider.notifier).initialize();
     });
 
     /// DATE TIME UPDATE TIMER
@@ -123,6 +122,7 @@ class _CameraScreenState extends ConsumerState<CameraScreen>
     final privacyAccepted = ref.watch(privacyProvider);
     final cameraState = ref.watch(cameraViewModelProvider);
     final cameraVM = ref.read(cameraViewModelProvider.notifier);
+    final cameraSettings = ref.watch(cameraSettingsProvider);
 
     final lastImage = ref.watch(lastImageProvider);
     final focusPoint = ref.watch(focusPointProvider);
@@ -289,7 +289,9 @@ class _CameraScreenState extends ConsumerState<CameraScreen>
                             },
                             onScaleUpdate: (details) {
                               if (controller == null ||
-                                  !controller.value.isInitialized) return;
+                                  !controller.value.isInitialized) {
+                                return;
+                              }
                               if (details.scale != 1.0) {
                                 cameraVM
                                     .setZoom(cameraState.zoom * details.scale);
@@ -739,6 +741,17 @@ class _CameraScreenState extends ConsumerState<CameraScreen>
                           ],
                         ),
                       ),
+                      if (cameraState.cameraMode == CameraMode.video &&
+                          cameraState.currentLens == CameraLensType.front) ...[
+                        const SizedBox(height: 10),
+                        _buildMirrorToggle(
+                          mirror: cameraSettings.mirrorFrontVideo,
+                          uiColor: uiColor,
+                          onTap: () => cameraVM.setFrontVideoMirroring(
+                            !cameraSettings.mirrorFrontVideo,
+                          ),
+                        ),
+                      ],
                       const SizedBox(height: 12),
                       Container(
                         height: 100,
@@ -790,8 +803,9 @@ class _CameraScreenState extends ConsumerState<CameraScreen>
                                   isRecording: cameraState.isRecording,
                                   mode: cameraState.cameraMode,
                                   onCapture: () async {
-                                    if (!cameraState.isReady || _isCapturing)
+                                    if (!cameraState.isReady || _isCapturing) {
                                       return;
+                                    }
 
                                     if (cameraState.cameraMode ==
                                         CameraMode.video) {
@@ -800,8 +814,11 @@ class _CameraScreenState extends ConsumerState<CameraScreen>
                                         await cameraVM
                                             .stopVideoRecording(context);
                                       } else {
-                                        _startRecordingTimer();
-                                        await cameraVM.startVideoRecording();
+                                        final started = await cameraVM
+                                            .startVideoRecording();
+                                        if (started && mounted) {
+                                          _startRecordingTimer();
+                                        }
                                       }
                                       return;
                                     }
@@ -812,15 +829,16 @@ class _CameraScreenState extends ConsumerState<CameraScreen>
 
                                     try {
                                       final path = await cameraVM.capture();
-                                      
+
                                       // Instant shutter feedback removal
                                       if (mounted) {
                                         setState(() => _isCapturing = false);
                                       }
 
-                                      if (path != null && mounted) {
+                                      if (path != null && context.mounted) {
                                         // Fire-and-forget navigation for zero-lag feeling
-                                        unawaited(cameraVM.handlePostCapture(path, context));
+                                        unawaited(cameraVM.handlePostCapture(
+                                            path, context));
                                       }
                                     } catch (e) {
                                       debugPrint("Capture error: $e");
@@ -891,6 +909,53 @@ class _CameraScreenState extends ConsumerState<CameraScreen>
                   ),
                 ),
               ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildMirrorToggle({
+    required bool mirror,
+    required Color uiColor,
+    required VoidCallback onTap,
+  }) {
+    return GestureDetector(
+      onTap: onTap,
+      behavior: HitTestBehavior.opaque,
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 180),
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
+        decoration: BoxDecoration(
+          color: mirror
+              ? Colors.amberAccent.withValues(alpha: 0.22)
+              : uiColor.withValues(alpha: 0.08),
+          borderRadius: BorderRadius.circular(18),
+          border: Border.all(
+            color: mirror
+                ? Colors.amberAccent.withValues(alpha: 0.55)
+                : uiColor.withValues(alpha: 0.16),
+            width: 0.8,
+          ),
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(
+              mirror ? Icons.flip : Icons.flip_to_front,
+              color: mirror ? Colors.amberAccent : uiColor,
+              size: 16,
+            ),
+            const SizedBox(width: 6),
+            Text(
+              mirror ? "MIRROR VIDEO" : "REAL VIDEO",
+              style: TextStyle(
+                color: mirror ? Colors.amberAccent : uiColor,
+                fontSize: 10,
+                fontWeight: FontWeight.w700,
+                letterSpacing: 0.6,
+              ),
+            ),
           ],
         ),
       ),

@@ -6,7 +6,6 @@ import 'package:flutter_foreground_task/flutter_foreground_task.dart';
 import 'package:surveycam/core/services/video_processing_job.dart';
 import 'package:surveycam/core/utils/gallery_saver.dart';
 import 'package:surveycam/core/utils/thumbnail_utils.dart';
-import 'package:surveycam/features/camera/domain/camera_lens_type.dart';
 import 'package:surveycam/features/overlay/presentation/video_watermark_processor.dart';
 
 @pragma('vm:entry-point')
@@ -72,22 +71,27 @@ class VideoProcessingTaskHandler extends TaskHandler {
         await FlutterForegroundTask.removeData(key: pendingJobKey);
         return;
       }
-      if (_lastFailedJobId == job.id) return;
+      if (_lastFailedJobId == job.id) {
+        await FlutterForegroundTask.removeData(key: pendingJobKey);
+        _send(sendPort, {
+          'type': 'error',
+          'error': 'Previous video processing attempt failed.',
+        });
+        await FlutterForegroundTask.stopService();
+        return;
+      }
 
       _isProcessing = true;
       _send(sendPort, {'type': 'progress', 'value': 0.05});
       await _updateNotification('Preparing video watermark... 5%');
 
       String sourcePath = job.segments.last.path;
-      final hasFrontCamera =
-          job.segments.any((segment) => segment.lens == CameraLensType.front);
-      if (job.segments.length > 1 || hasFrontCamera) {
+      final needsMirror = job.segments.any((segment) => segment.mirror);
+      if (job.segments.length > 1 || needsMirror) {
         await _updateNotification('Merging video segments... 10%');
         final mergedPath = await VideoWatermarkProcessor.mergeVideos(
           job.segments.map((segment) => segment.path).toList(),
-          mirrorMap: job.segments
-              .map((segment) => segment.lens == CameraLensType.front)
-              .toList(),
+          mirrorMap: job.segments.map((segment) => segment.mirror).toList(),
         );
         if (mergedPath != null) {
           sourcePath = mergedPath;
@@ -95,11 +99,14 @@ class VideoProcessingTaskHandler extends TaskHandler {
       }
 
       await _updateNotification('Generating watermark frames... 15%');
+      final videoSize = await VideoWatermarkProcessor.getVideoDimensions(
+        sourcePath,
+      );
       final sequenceDir =
           await VideoWatermarkProcessor.generateVideoOverlaySequence(
         samples: job.history,
-        width: 1080,
-        height: 1920,
+        width: videoSize.width.toDouble(),
+        height: videoSize.height.toDouble(),
         onProgress: (p) {
           final progress = 0.15 + (p * 0.25);
           _send(sendPort, {'type': 'progress', 'value': progress});
@@ -147,6 +154,7 @@ class VideoProcessingTaskHandler extends TaskHandler {
     } catch (e, stackTrace) {
       debugPrint('Background video processing error: $e\n$stackTrace');
       _lastFailedJobId = job?.id;
+      await FlutterForegroundTask.removeData(key: pendingJobKey);
       _send(sendPort, {
         'type': 'error',
         'error': e.toString(),
