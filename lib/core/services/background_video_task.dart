@@ -113,6 +113,7 @@ class VideoProcessingTaskHandler extends TaskHandler {
           samples: job.history,
           width: videoSize.width.toDouble(),
           height: videoSize.height.toDouble(),
+          durationMs: job.durationMs,
           onProgress: (p) {
             final progress = 0.15 + (p * 0.25);
             _send(sendPort, {'type': 'progress', 'value': progress});

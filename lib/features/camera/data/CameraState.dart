@@ -120,6 +120,7 @@ class CameraState {
   CameraState copyWith({
     bool? isReady,
     CameraController? controller,
+    bool clearController = false,
     FlashMode? flashMode,
     CameraLensType? currentLens,
     bool? isCapturing,
@@ -144,7 +145,7 @@ class CameraState {
   }) {
     return CameraState(
       isReady: isReady ?? this.isReady,
-      controller: controller ?? this.controller,
+      controller: clearController ? null : (controller ?? this.controller),
       flashMode: flashMode ?? this.flashMode,
       currentLens: currentLens ?? this.currentLens,
       isCapturing: isCapturing ?? this.isCapturing,

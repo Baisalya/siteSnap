@@ -128,7 +128,6 @@ class _CameraScreenState extends ConsumerState<CameraScreen>
     final focusPoint = ref.watch(focusPointProvider);
 
     final CameraController? controller = cameraState.controller;
-
     final isSelfieFlashActive =
         cameraState.currentLens == CameraLensType.front &&
             cameraState.flashMode == FlashMode.always;
@@ -669,6 +668,7 @@ class _CameraScreenState extends ConsumerState<CameraScreen>
                             right: 16,
                             child: Column(
                               mainAxisSize: MainAxisSize.min,
+                              crossAxisAlignment: CrossAxisAlignment.end,
                               children: [
                                 IconButton(
                                   icon: Icon(
@@ -677,21 +677,23 @@ class _CameraScreenState extends ConsumerState<CameraScreen>
                                   ),
                                   onPressed: cameraVM.switchCamera,
                                 ),
-                                const SizedBox(height: 16),
-                                IconButton(
-                                  icon: Icon(
-                                    Icons.edit,
-                                    color: uiColor,
+                                if (!cameraState.isRecording) ...[
+                                  const SizedBox(height: 16),
+                                  IconButton(
+                                    icon: Icon(
+                                      Icons.edit,
+                                      color: uiColor,
+                                    ),
+                                    onPressed: () {
+                                      showModalBottomSheet(
+                                        context: context,
+                                        isScrollControlled: true,
+                                        backgroundColor: Colors.transparent,
+                                        builder: (_) => const NoteInputSheet(),
+                                      );
+                                    },
                                   ),
-                                  onPressed: () {
-                                    showModalBottomSheet(
-                                      context: context,
-                                      isScrollControlled: true,
-                                      backgroundColor: Colors.transparent,
-                                      builder: (_) => const NoteInputSheet(),
-                                    );
-                                  },
-                                ),
+                                ],
                               ],
                             ),
                           ),
@@ -741,17 +743,6 @@ class _CameraScreenState extends ConsumerState<CameraScreen>
                           ],
                         ),
                       ),
-                      if (cameraState.cameraMode == CameraMode.video &&
-                          cameraState.currentLens == CameraLensType.front) ...[
-                        const SizedBox(height: 10),
-                        _buildMirrorToggle(
-                          mirror: cameraSettings.mirrorFrontVideo,
-                          uiColor: uiColor,
-                          onTap: () => cameraVM.setFrontVideoMirroring(
-                            !cameraSettings.mirrorFrontVideo,
-                          ),
-                        ),
-                      ],
                       const SizedBox(height: 12),
                       Container(
                         height: 100,
@@ -909,53 +900,6 @@ class _CameraScreenState extends ConsumerState<CameraScreen>
                   ),
                 ),
               ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  Widget _buildMirrorToggle({
-    required bool mirror,
-    required Color uiColor,
-    required VoidCallback onTap,
-  }) {
-    return GestureDetector(
-      onTap: onTap,
-      behavior: HitTestBehavior.opaque,
-      child: AnimatedContainer(
-        duration: const Duration(milliseconds: 180),
-        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
-        decoration: BoxDecoration(
-          color: mirror
-              ? Colors.amberAccent.withValues(alpha: 0.22)
-              : uiColor.withValues(alpha: 0.08),
-          borderRadius: BorderRadius.circular(18),
-          border: Border.all(
-            color: mirror
-                ? Colors.amberAccent.withValues(alpha: 0.55)
-                : uiColor.withValues(alpha: 0.16),
-            width: 0.8,
-          ),
-        ),
-        child: Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Icon(
-              mirror ? Icons.flip : Icons.flip_to_front,
-              color: mirror ? Colors.amberAccent : uiColor,
-              size: 16,
-            ),
-            const SizedBox(width: 6),
-            Text(
-              mirror ? "MIRROR VIDEO" : "REAL VIDEO",
-              style: TextStyle(
-                color: mirror ? Colors.amberAccent : uiColor,
-                fontSize: 10,
-                fontWeight: FontWeight.w700,
-                letterSpacing: 0.6,
-              ),
-            ),
           ],
         ),
       ),

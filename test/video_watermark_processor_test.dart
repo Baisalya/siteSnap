@@ -108,6 +108,41 @@ void main() {
     expect(roundTrip.last.timestampMs, 500);
   });
 
+  test('overlay frames are capped to recording duration, not sample count', () {
+    final samples = List.generate(
+      120,
+      (index) => VideoOverlaySample(
+        data: _overlayData.copyWith(
+          position: index < 4
+              ? WatermarkPosition.bottomLeft
+              : WatermarkPosition.bottomRight,
+        ),
+        orientation: DeviceOrientation.portraitUp,
+        settings: const OverlaySettings(),
+        timestampMs: index * 500,
+      ),
+    );
+
+    final frames = VideoWatermarkProcessor.samplesForOverlayFrames(
+      samples: samples,
+      durationMs: 4000,
+      sampleFps: 2,
+    );
+
+    expect(frames.length, 9);
+    expect(frames.last.timestampMs, 4000);
+    expect(frames.last.data.position, WatermarkPosition.bottomRight);
+  });
+
+  test('ffmpeg duration limit uses recording duration to prevent frozen tail',
+      () {
+    expect(
+      VideoWatermarkProcessor.ffmpegDurationLimitArg(4123),
+      '-t 4.123 ',
+    );
+    expect(VideoWatermarkProcessor.ffmpegDurationLimitArg(0), '');
+  });
+
   test('fallback saves a processed merge before original segments', () {
     final paths = VideoProcessingFallback.rawSavePaths(
       mergedPath: 'merged.mp4',

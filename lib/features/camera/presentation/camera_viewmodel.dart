@@ -309,7 +309,7 @@ class CameraViewModel extends StateNotifier<CameraState>
               _isDisposing = true;
               await ref.read(cameraRepositoryProvider).dispose();
               this.state =
-                  this.state.copyWith(controller: null, isReady: false);
+                  this.state.copyWith(clearController: true, isReady: false);
               _isDisposing = false;
             }
           }
@@ -340,7 +340,7 @@ class CameraViewModel extends StateNotifier<CameraState>
   Future<void> refreshCamera() async {
     debugPrint("Refreshing camera manually...");
     await ref.read(cameraRepositoryProvider).dispose();
-    state = state.copyWith(controller: null, isReady: false, error: null);
+    state = state.copyWith(clearController: true, isReady: false, error: null);
     await initialize();
   }
 
@@ -787,7 +787,7 @@ class CameraViewModel extends StateNotifier<CameraState>
     }
   }
 
-  Future<bool> startVideoRecording({bool clearSegments = false}) async {
+  Future<bool> startVideoRecording({bool clearSegments = true}) async {
     final controller = state.controller;
     if (controller == null ||
         !controller.value.isInitialized ||
@@ -808,7 +808,7 @@ class CameraViewModel extends StateNotifier<CameraState>
 
       // Start history tracking
       _videoHistoryTimer?.cancel();
-      if (clearSegments) {
+      if (clearSegments || state.videoSegments.isEmpty) {
         _videoDataHistory.clear();
       }
       _recordingStartTime = DateTime.now();

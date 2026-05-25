@@ -231,6 +231,83 @@ class VideoWatermarkProcessor {
     return fallbackVideoDimensions;
   }
 
+  static double? _parseDurationSeconds(Object? value) {
+    if (value is num) return value.toDouble();
+    if (value is String) return double.tryParse(value);
+    return null;
+  }
+
+  static Future<int?> getVideoDurationMs(String videoPath) async {
+    try {
+      final mediaInfo = await _getNativeMediaInformation(videoPath);
+      final format = mediaInfo?['format'];
+      final duration = _parseDurationSeconds(mediaInfo?['duration']) ??
+          _parseDurationSeconds(format is Map ? format['duration'] : null);
+      if (duration != null && duration > 0) {
+        return (duration * 1000).round();
+      }
+
+      final streams = mediaInfo?['streams'] as List? ?? const [];
+      for (final stream in streams) {
+        final streamMap = Map<dynamic, dynamic>.from(
+          stream as Map? ?? const {},
+        );
+        if (streamMap['codec_type'] != 'video') continue;
+        final streamDuration = _parseDurationSeconds(streamMap['duration']);
+        if (streamDuration != null && streamDuration > 0) {
+          return (streamDuration * 1000).round();
+        }
+      }
+    } catch (e) {
+      debugPrint("Video duration probe failed: $e");
+    }
+
+    return null;
+  }
+
+  static List<VideoOverlaySample> samplesForOverlayFrames({
+    required List<VideoOverlaySample> samples,
+    required int durationMs,
+    double sampleFps = overlaySampleFps,
+  }) {
+    if (samples.isEmpty) return const [];
+    if (durationMs <= 0 || sampleFps <= 0) {
+      return List<VideoOverlaySample>.from(samples);
+    }
+
+    final sorted = List<VideoOverlaySample>.from(samples)
+      ..sort((a, b) => a.timestampMs.compareTo(b.timestampMs));
+    final frameCount = max(1, (durationMs / 1000 * sampleFps).ceil() + 1);
+    final frames = <VideoOverlaySample>[];
+    var sampleIndex = 0;
+
+    for (var frameIndex = 0; frameIndex < frameCount; frameIndex++) {
+      final targetMs = min(
+        durationMs,
+        (frameIndex * 1000 / sampleFps).round(),
+      );
+      while (sampleIndex + 1 < sorted.length &&
+          sorted[sampleIndex + 1].timestampMs <= targetMs) {
+        sampleIndex++;
+      }
+      final sample = sorted[sampleIndex];
+      frames.add(VideoOverlaySample(
+        data: sample.data,
+        orientation: sample.orientation,
+        settings: sample.settings,
+        timestampMs: targetMs,
+      ));
+    }
+
+    return frames;
+  }
+
+  static String ffmpegDurationLimitArg(int durationMs) {
+    if (durationMs <= 0) return '';
+    final seconds = (durationMs / 1000).toStringAsFixed(3);
+    return '-t $seconds ';
+  }
+
   static ({String encoder, String args}) _encoderSettings() {
     if (Platform.isAndroid) {
       return (encoder: 'h264_mediacodec', args: '-b:v 8M -profile:v high');
@@ -282,6 +359,8 @@ class VideoWatermarkProcessor {
     required List<VideoOverlaySample> samples,
     required double width,
     required double height,
+    int durationMs = 0,
+    double sampleFps = overlaySampleFps,
     bool showOverlay = true,
     bool showWatermark = true,
     Function(double)? onProgress,
@@ -311,14 +390,20 @@ class VideoWatermarkProcessor {
       );
 
       // 🔥 OPTIMIZATION: Parallel batch generation to maximize CPU/GPU utilization
+      final frameSamples = samplesForOverlayFrames(
+        samples: samples,
+        durationMs: durationMs,
+        sampleFps: sampleFps,
+      );
+
       const int batchSize = 4;
-      for (int i = 0; i < samples.length; i += batchSize) {
+      for (int i = 0; i < frameSamples.length; i += batchSize) {
         final List<Future<void>> batchTasks = [];
 
-        for (int j = 0; j < batchSize && (i + j) < samples.length; j++) {
+        for (int j = 0; j < batchSize && (i + j) < frameSamples.length; j++) {
           final int index = i + j;
           batchTasks.add(Future(() async {
-            final sample = samples[index];
+            final sample = frameSamples[index];
             final pngBytes = await generateSingleFrameBytes(
               data: sample.data,
               orientation: sample.orientation,
@@ -344,7 +429,8 @@ class VideoWatermarkProcessor {
 
         // Report progress for image generation (0% to 40%)
         if (onProgress != null) {
-          final currentProgress = min(1.0, (i + batchSize) / samples.length);
+          final currentProgress =
+              min(1.0, (i + batchSize) / frameSamples.length);
           onProgress(currentProgress);
         }
 
@@ -473,14 +559,17 @@ class VideoWatermarkProcessor {
       // [1:v]fps=$sampleFps ensures the overlay frames match the expected timing
       final rotationDegrees = await getVideoRotationDegrees(videoPath);
       final normalizeFilter = normalizeVideoForOverlayFilter(rotationDegrees);
+      final probedDurationMs = await getVideoDurationMs(videoPath);
+      final outputDurationMs = probedDurationMs ?? durationMs;
+      final durationLimitArg = ffmpegDurationLimitArg(outputDurationMs);
       final filter = '[0:v]${normalizeFilter}setsar=1[base];'
           '[1:v]setpts=PTS-STARTPTS[ov];'
-          '[base][ov]overlay=0:0:format=auto,format=yuv420p[v]';
+          '[base][ov]overlay=0:0:format=auto:eof_action=pass:repeatlast=0,format=yuv420p[v]';
       final command =
           '-noautorotate -i "$videoPath" -framerate $sampleFps -i "$sequenceDir/frame_%05d.png" '
           '-filter_complex "$filter" -map "[v]" -map 0:a? '
           '-c:v $encoder $extraArgs -pix_fmt yuv420p -c:a copy '
-          '-metadata:s:v:0 rotate=0 -movflags +faststart -y "$outputPath"';
+          '-metadata:s:v:0 rotate=0 -movflags +faststart ${durationLimitArg}-y "$outputPath"';
 
       debugPrint("Executing FFmpeg: $command");
 
@@ -502,7 +591,7 @@ class VideoWatermarkProcessor {
               '-noautorotate -i "$videoPath" -framerate $sampleFps -i "$sequenceDir/frame_%05d.png" '
               '-filter_complex "$filter" -map "[v]" -map 0:a? '
               '-c:v libx264 -preset ultrafast -crf 23 -pix_fmt yuv420p '
-              '-c:a copy -metadata:s:v:0 rotate=0 -movflags +faststart -y "$outputPath"';
+              '-c:a copy -metadata:s:v:0 rotate=0 -movflags +faststart ${durationLimitArg}-y "$outputPath"';
 
           final swReturnCode = await _executeFfmpegCommand(softwareCommand);
 

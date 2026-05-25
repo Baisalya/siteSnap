@@ -399,8 +399,49 @@ class _NoteInputSheetState extends ConsumerState<NoteInputSheet> {
             _buildDataToggles(settings, notifier),
             const SizedBox(height: 16),
             _buildAutoFetchToggle(),
+            const SizedBox(height: 12),
+            _buildMirrorVideoToggle(),
           ],
         ),
+      ),
+    );
+  }
+
+  Widget _buildMirrorVideoToggle() {
+    final settings = ref.watch(cameraSettingsProvider);
+    return Container(
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: Colors.amberAccent.withOpacity(0.04),
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: Colors.amberAccent.withOpacity(0.1)),
+      ),
+      child: Row(
+        children: [
+          const Icon(Icons.flip_to_front, color: Colors.amberAccent, size: 20),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Text("Mirror Front Video",
+                    style: TextStyle(
+                        color: Colors.white,
+                        fontSize: 14,
+                        fontWeight: FontWeight.bold)),
+                Text("Mirror the recording for front camera",
+                    style: TextStyle(
+                        color: Colors.white.withOpacity(0.4), fontSize: 11)),
+              ],
+            ),
+          ),
+          Switch(
+            value: settings.mirrorFrontVideo,
+            activeColor: Colors.amberAccent,
+            onChanged: (v) =>
+                ref.read(cameraSettingsProvider.notifier).setMirrorFrontVideo(v),
+          ),
+        ],
       ),
     );
   }
