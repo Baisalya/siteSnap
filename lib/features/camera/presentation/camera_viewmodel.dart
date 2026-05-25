@@ -42,7 +42,7 @@ class CameraViewModel extends StateNotifier<CameraState>
   bool _isCameraStable = false;
   bool _isInitializing = false;
   bool _isDisposing = false;
-  bool _isRestarting = false;
+  final bool _isRestarting = false;
   bool _captureInFlight = false;
   Timer? _videoHistoryTimer;
   ReceivePort? _receivePort;
@@ -78,15 +78,43 @@ class CameraViewModel extends StateNotifier<CameraState>
   void _onReceiveTaskData(dynamic message) {
     if (message is Map<String, dynamic>) {
       if (message['type'] == 'progress') {
-        state = state.copyWith(processingProgress: message['value']);
+        state = state.copyWith(
+          processingProgress: message['value'],
+          processingMessage:
+              message['message'] as String? ?? 'Processing video...',
+          videoProcessingError: null,
+        );
       } else if (message['type'] == 'complete') {
-        state = state.copyWith(clearProcessingProgress: true);
+        final warning = message['warning'] as String?;
+        state = state.copyWith(
+          clearProcessingProgress: true,
+          processingMessage: warning ?? 'Video saved successfully.',
+          videoProcessingError: null,
+        );
         unawaited(ref.read(galleryFilesProvider.notifier).refresh());
       } else if (message['type'] == 'error') {
         state = state.copyWith(
-            clearProcessingProgress: true, error: message['error']);
+          clearProcessingProgress: true,
+          processingMessage: 'Video processing failed.',
+          videoProcessingError: _friendlyVideoError(message['error']),
+        );
+      } else if (message['type'] == 'cancelled') {
+        state = state.copyWith(
+          clearProcessingProgress: true,
+          processingMessage:
+              message['message'] as String? ?? 'Video processing cancelled.',
+          videoProcessingError: null,
+        );
       }
     }
+  }
+
+  String _friendlyVideoError(Object? error) {
+    final text = error?.toString().trim();
+    if (text == null || text.isEmpty) {
+      return 'Video processing failed. Please try recording again.';
+    }
+    return text.replaceFirst('Exception: ', '');
   }
 
   // ================= INIT =================
@@ -804,6 +832,10 @@ class CameraViewModel extends StateNotifier<CameraState>
     }
 
     try {
+      state = state.copyWith(
+        processingMessage: null,
+        videoProcessingError: null,
+      );
       final repo = ref.read(cameraRepositoryProvider);
 
       if (state.flashMode == FlashMode.always &&
@@ -838,6 +870,8 @@ class CameraViewModel extends StateNotifier<CameraState>
       state = state.copyWith(
         isRecording: true,
         videoSegments: clearSegments ? <VideoSegment>[] : state.videoSegments,
+        processingMessage: null,
+        videoProcessingError: null,
       );
       unawaited(HapticFeedback.heavyImpact());
       return true;
@@ -853,6 +887,25 @@ class CameraViewModel extends StateNotifier<CameraState>
 
   Future<void> stopVideoRecordingInBackground() async {
     await _stopVideoRecording();
+  }
+
+  Future<void> cancelVideoProcessing() async {
+    if (state.processingProgress == null) return;
+
+    state = state.copyWith(
+      clearProcessingProgress: true,
+      processingMessage: 'Video processing cancelled.',
+      videoProcessingError: null,
+    );
+
+    await VideoProcessingTaskHandler.cancelProcessing();
+  }
+
+  void clearVideoProcessingStatus() {
+    state = state.copyWith(
+      processingMessage: null,
+      videoProcessingError: null,
+    );
   }
 
   Future<void> _stopVideoRecording({BuildContext? context}) async {
@@ -895,6 +948,8 @@ class CameraViewModel extends StateNotifier<CameraState>
       state = state.copyWith(
         isRecording: false,
         processingProgress: 0.05,
+        processingMessage: 'Processing video in background...',
+        videoProcessingError: null,
       );
       unawaited(HapticFeedback.mediumImpact());
 
@@ -905,8 +960,9 @@ class CameraViewModel extends StateNotifier<CameraState>
       if (context != null && context.mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
-            content: Text("Processing video..."),
-            duration: Duration(milliseconds: 1500),
+            content:
+                Text("Processing video in background. Recording is paused."),
+            duration: Duration(milliseconds: 2200),
           ),
         );
       }
@@ -937,11 +993,18 @@ class CameraViewModel extends StateNotifier<CameraState>
       _recordingStartTime = null;
     } catch (e) {
       debugPrint("Stop recording error: $e");
-      state = state.copyWith(isRecording: false, clearProcessingProgress: true);
+      state = state.copyWith(
+        isRecording: false,
+        clearProcessingProgress: true,
+        processingMessage: 'Video processing failed.',
+        videoProcessingError: _friendlyVideoError(e),
+      );
       await FlutterForegroundTask.stopService();
       if (context != null && context.mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text("Error saving video: $e")),
+          SnackBar(
+            content: Text("Video processing failed: ${_friendlyVideoError(e)}"),
+          ),
         );
       }
     }
@@ -981,13 +1044,13 @@ class CameraViewModel extends StateNotifier<CameraState>
     final isRunning = await FlutterForegroundTask.isRunningService;
     if (isRunning) {
       await FlutterForegroundTask.updateService(
-        notificationTitle: 'SurveyCam',
+        notificationTitle: 'SurveyCam - Video processing',
         notificationText: 'Preparing video watermark...',
         callback: startCallback,
       );
     } else {
       await FlutterForegroundTask.startService(
-        notificationTitle: 'SurveyCam',
+        notificationTitle: 'SurveyCam - Video processing',
         notificationText: 'Preparing video watermark...',
         callback: startCallback,
       );
@@ -996,8 +1059,22 @@ class CameraViewModel extends StateNotifier<CameraState>
 
   Future<void> _resumePendingVideoProcessing() async {
     try {
+      final previousFailure =
+          await VideoProcessingTaskHandler.takeLastFailure();
+      if (previousFailure != null) {
+        state = state.copyWith(
+          clearProcessingProgress: true,
+          processingMessage: 'Video processing failed.',
+          videoProcessingError: _friendlyVideoError(previousFailure),
+        );
+      }
+
       if (await VideoProcessingTaskHandler.hasPendingJob()) {
-        state = state.copyWith(processingProgress: 0.05);
+        state = state.copyWith(
+          processingProgress: 0.05,
+          processingMessage: 'Resuming video processing...',
+          videoProcessingError: null,
+        );
         await _startForegroundService();
       }
     } catch (e) {

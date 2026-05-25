@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:io';
 import 'dart:math';
 import 'dart:ui' as ui;
@@ -6,6 +7,7 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_svg/flutter_svg.dart' as svg;
+import 'package:ffmpeg_kit_flutter_new_https_gpl/ffmpeg_kit.dart';
 import 'package:vector_graphics/vector_graphics.dart';
 import 'package:ffmpeg_kit_flutter_new_https_gpl/ffmpeg_kit_config.dart';
 import 'package:path_provider/path_provider.dart';
@@ -14,7 +16,6 @@ import 'package:path/path.dart' as p;
 import 'package:surveycam/features/overlay/domain/overlay_model.dart';
 import 'package:surveycam/features/overlay/domain/overlay_settings.dart';
 import 'package:surveycam/features/overlay/domain/video_overlay_sample.dart';
-import 'package:surveycam/features/overlay/presentation/live_overlay_painter.dart';
 
 class VideoDimensions {
   final int width;
@@ -33,6 +34,7 @@ class VideoWatermarkProcessor {
   static const double overlayHeight = 960;
   static const MethodChannel _ffmpegKitChannel =
       MethodChannel('flutter.arthenica.com/ffmpeg_kit');
+  static final Set<int> _activeFfmpegSessionIds = <int>{};
   static const VideoDimensions fallbackVideoDimensions = VideoDimensions(
     width: 1080,
     height: 1920,
@@ -100,15 +102,31 @@ class VideoWatermarkProcessor {
       'ffmpegSession',
       FFmpegKitConfig.parseArguments(command),
     );
+    _activeFfmpegSessionIds.add(sessionId);
 
-    await _ffmpegKitChannel.invokeMethod<void>(
-      'ffmpegSessionExecute',
-      {'sessionId': sessionId},
-    );
+    try {
+      await _ffmpegKitChannel.invokeMethod<void>(
+        'ffmpegSessionExecute',
+        {'sessionId': sessionId},
+      );
 
-    return _ffmpegKitChannel.invokeMethod<int>(
-      'abstractSessionGetReturnCode',
-      {'sessionId': sessionId},
+      return _ffmpegKitChannel.invokeMethod<int>(
+        'abstractSessionGetReturnCode',
+        {'sessionId': sessionId},
+      );
+    } finally {
+      _activeFfmpegSessionIds.remove(sessionId);
+    }
+  }
+
+  static Future<void> cancelActiveProcessing() async {
+    if (_activeFfmpegSessionIds.isEmpty) {
+      await FFmpegKit.cancel();
+      return;
+    }
+
+    await Future.wait(
+      _activeFfmpegSessionIds.map((sessionId) => FFmpegKit.cancel(sessionId)),
     );
   }
 
@@ -347,30 +365,6 @@ class VideoWatermarkProcessor {
         'setsar=1,format=yuv420p';
   }
 
-  static void _undoOrientationForVideoWatermark(
-    Canvas canvas,
-    DeviceOrientation orientation,
-    double w,
-    double h,
-  ) {
-    switch (orientation) {
-      case DeviceOrientation.portraitUp:
-        break;
-      case DeviceOrientation.portraitDown:
-        canvas.translate(w, h);
-        canvas.rotate(pi);
-        break;
-      case DeviceOrientation.landscapeLeft:
-        canvas.translate(0, h);
-        canvas.rotate(-pi / 2);
-        break;
-      case DeviceOrientation.landscapeRight:
-        canvas.translate(w, 0);
-        canvas.rotate(pi / 2);
-        break;
-    }
-  }
-
   static Future<String?> generateVideoOverlaySequence({
     required List<VideoOverlaySample> samples,
     required double width,
@@ -380,6 +374,7 @@ class VideoWatermarkProcessor {
     bool showOverlay = true,
     bool showWatermark = true,
     Function(double)? onProgress,
+    FutureOr<bool> Function()? shouldCancel,
     String? customDir,
   }) async {
     try {
@@ -414,6 +409,10 @@ class VideoWatermarkProcessor {
 
       const int batchSize = 4;
       for (int i = 0; i < frameSamples.length; i += batchSize) {
+        if (await (shouldCancel?.call() ?? Future.value(false))) {
+          return null;
+        }
+
         final List<Future<void>> batchTasks = [];
 
         for (int j = 0; j < batchSize && (i + j) < frameSamples.length; j++) {
@@ -468,16 +467,8 @@ class VideoWatermarkProcessor {
     required DeviceOrientation orientation,
     required PictureInfo pictureInfo,
   }) {
-    canvas.save();
-    _undoOrientationForVideoWatermark(
-      canvas,
-      orientation,
-      size.width,
-      size.height,
-    );
-
     final double baseSize = min(size.width, size.height);
-    const double padding = 0.0;
+    const double margin = 15.0;
 
     final textPainter = TextPainter(
       text: TextSpan(
@@ -500,27 +491,51 @@ class VideoWatermarkProcessor {
 
     final double svgSize = textPainter.height;
     const double spacing = 10;
-    final double totalWidth = svgSize + spacing + textPainter.width;
-
-    double drawWidth = size.width;
-    if (orientation == DeviceOrientation.landscapeLeft ||
-        orientation == DeviceOrientation.landscapeRight) {
-      drawWidth = size.height;
-    }
-
-    double dx, dy;
-    // We always want the watermark at the top-right of the logical view
-    dx = drawWidth - totalWidth - padding;
-    dy = padding;
+    final double boxWidth = svgSize + spacing + textPainter.width;
+    final double boxHeight = svgSize;
 
     canvas.save();
-    canvas.translate(dx, dy);
+
+    // Fixed Bottom-Left placement in physical coordinates
+    const double targetX = margin;
+    final double targetY = size.height - margin;
+
+    canvas.save();
+    // Translate to the target corner
+    canvas.translate(targetX, targetY);
+
+    // Rotate content based on orientation
+    switch (orientation) {
+      case DeviceOrientation.portraitDown:
+        canvas.rotate(pi);
+        // After 180 deg rotation, we need to translate back to keep the box
+        // within the intended area (upright relative to the rotation).
+        canvas.translate(-boxWidth, 0);
+        break;
+      case DeviceOrientation.landscapeLeft:
+        canvas.rotate(-pi / 2);
+        // After -90 deg rotation, (0,0) is at the bottom-left of the original box area
+        break;
+      case DeviceOrientation.landscapeRight:
+        canvas.rotate(pi / 2);
+        canvas.translate(-boxWidth, -boxHeight);
+        break;
+      default:
+        // portraitUp
+        canvas.translate(0, -boxHeight);
+        break;
+    }
+
+    // Draw SVG
+    canvas.save();
     final double scale = svgSize / pictureInfo.size.height;
     canvas.scale(scale, scale);
     canvas.drawPicture(pictureInfo.picture);
     canvas.restore();
 
-    textPainter.paint(canvas, Offset(dx + svgSize + spacing, dy));
+    // Draw Text
+    textPainter.paint(canvas, Offset(svgSize + spacing, 0));
+
     canvas.restore();
   }
 
@@ -535,9 +550,83 @@ class VideoWatermarkProcessor {
     OverlaySettings settings = const OverlaySettings(),
   }) {
     if (showOverlay) {
-      final overlayPainter =
-          LiveOverlayPainter(data, orientation, settings: settings);
-      overlayPainter.paint(canvas, size);
+      canvas.save();
+
+      final double baseSize = min(size.width, size.height);
+      final List<TextSpan> spans = [];
+      final textStyle = TextStyle(
+        color: settings.textColor,
+        fontSize: baseSize * 0.032,
+        fontWeight: FontWeight.w600,
+      );
+
+      if (settings.showDateTime && data.dateTime.isNotEmpty) {
+        spans.add(TextSpan(text: "${data.dateTime}\n", style: textStyle));
+      }
+      if (data.locationWarning != null) {
+        spans.add(TextSpan(
+            text: "${data.locationWarning}\n",
+            style: textStyle.copyWith(color: Colors.redAccent)));
+      } else if (settings.showCoordinates) {
+        spans.add(TextSpan(
+            text:
+                "Lat: ${data.latitude.toStringAsFixed(6)}\nLon: ${data.longitude.toStringAsFixed(6)}\n",
+            style: textStyle));
+      }
+      if (settings.showNote && data.note.isNotEmpty) {
+        spans.add(TextSpan(
+            text: data.note,
+            style: textStyle.copyWith(fontStyle: FontStyle.italic)));
+      }
+
+      final textPainter = TextPainter(
+        text: TextSpan(children: spans),
+        textDirection: TextDirection.ltr,
+      )..layout(maxWidth: baseSize * 0.75);
+
+      final paddingH = baseSize * 0.03;
+      final paddingV = baseSize * 0.02;
+      final boxWidth = textPainter.width + (paddingH * 2);
+      final boxHeight = textPainter.height + (paddingV * 2);
+      const double margin = 15.0;
+
+      // Fixed Top-Right placement in physical coordinates
+      final double targetX = size.width - margin;
+      const double targetY = margin;
+
+      canvas.translate(targetX, targetY);
+
+      switch (orientation) {
+        case DeviceOrientation.portraitDown:
+          canvas.rotate(pi);
+          canvas.translate(0, -boxHeight);
+          break;
+        case DeviceOrientation.landscapeLeft:
+          canvas.rotate(-pi / 2);
+          canvas.translate(-boxWidth, -boxHeight);
+          break;
+        case DeviceOrientation.landscapeRight:
+          canvas.rotate(pi / 2);
+          break;
+        default:
+          // portraitUp
+          canvas.translate(-boxWidth, 0);
+          break;
+      }
+
+      // Draw Background
+      final rect = Rect.fromLTWH(0, 0, boxWidth, boxHeight);
+      canvas.drawRRect(
+        RRect.fromRectAndRadius(rect, const Radius.circular(8)),
+        Paint()
+          ..color = settings.backgroundColor
+              .withValues(alpha: settings.backgroundOpacity),
+      );
+
+      // Draw Text
+      textPainter.paint(canvas, Offset(paddingH, paddingV));
+
+      canvas.restore();
     }
 
     if (showWatermark) {

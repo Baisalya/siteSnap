@@ -15,6 +15,8 @@ void startCallback() {
 
 class VideoProcessingTaskHandler extends TaskHandler {
   static const String pendingJobKey = 'pending_video_processing_job';
+  static const String lastFailureKey = 'last_video_processing_failure';
+  static const String cancelRequestedKey = 'cancel_video_processing_requested';
 
   static bool _isProcessing = false;
   static String? _lastFailedJobId;
@@ -27,11 +29,41 @@ class VideoProcessingTaskHandler extends TaskHandler {
   }
 
   static Future<void> enqueueJob(VideoProcessingJob job) async {
+    await FlutterForegroundTask.removeData(key: lastFailureKey);
+    await FlutterForegroundTask.removeData(key: cancelRequestedKey);
     await FlutterForegroundTask.saveData(
       key: pendingJobKey,
       value: jsonEncode(job.toJson()),
     );
     _lastFailedJobId = null;
+  }
+
+  static Future<void> cancelProcessing() async {
+    await FlutterForegroundTask.saveData(
+      key: cancelRequestedKey,
+      value: 'true',
+    );
+    await FlutterForegroundTask.removeData(key: pendingJobKey);
+    await FlutterForegroundTask.removeData(key: lastFailureKey);
+    await VideoWatermarkProcessor.cancelActiveProcessing();
+    await FlutterForegroundTask.updateService(
+      notificationTitle: 'SurveyCam - Video processing',
+      notificationText: 'Video processing cancelled',
+    );
+    unawaited(Future.delayed(const Duration(seconds: 1), () {
+      FlutterForegroundTask.stopService();
+    }));
+  }
+
+  static Future<String?> takeLastFailure() async {
+    final failure = await FlutterForegroundTask.getData<String>(
+      key: lastFailureKey,
+    );
+    if (failure != null && failure.isNotEmpty) {
+      await FlutterForegroundTask.removeData(key: lastFailureKey);
+      return failure;
+    }
+    return null;
   }
 
   @override
@@ -59,16 +91,21 @@ class VideoProcessingTaskHandler extends TaskHandler {
 
     VideoProcessingJob? job;
     try {
+      await _throwIfCancelRequested(sendPort);
       final jobJson = await FlutterForegroundTask.getData<String>(
         key: pendingJobKey,
       );
-      if (jobJson == null || jobJson.isEmpty) return;
+      if (jobJson == null || jobJson.isEmpty) {
+        await FlutterForegroundTask.stopService();
+        return;
+      }
 
       job = VideoProcessingJob.fromJson(
         Map<String, dynamic>.from(jsonDecode(jobJson) as Map),
       );
       if (job.segments.isEmpty) {
         await FlutterForegroundTask.removeData(key: pendingJobKey);
+        await FlutterForegroundTask.stopService();
         return;
       }
       if (_lastFailedJobId == job.id) {
@@ -81,8 +118,12 @@ class VideoProcessingTaskHandler extends TaskHandler {
       }
 
       _isProcessing = true;
-      _send(sendPort, {'type': 'progress', 'value': 0.05});
-      await _updateNotification('Preparing video watermark... 5%');
+      await _progress(
+        sendPort,
+        0.05,
+        'Preparing video watermark... 5%',
+      );
+      await _throwIfCancelRequested(sendPort);
 
       String? sourcePath =
           job.segments.length == 1 ? job.segments.single.path : null;
@@ -90,11 +131,12 @@ class VideoProcessingTaskHandler extends TaskHandler {
       var canProcessOverlay = job.history.isNotEmpty;
       final needsMirror = job.segments.any((segment) => segment.mirror);
       if (job.segments.length > 1 || needsMirror) {
-        await _updateNotification('Merging video segments... 10%');
+        await _progress(sendPort, 0.10, 'Merging video segments... 10%');
         mergedPath = await VideoWatermarkProcessor.mergeVideos(
           job.segments.map((segment) => segment.path).toList(),
           mirrorMap: job.segments.map((segment) => segment.mirror).toList(),
         );
+        await _throwIfCancelRequested(sendPort);
         if (mergedPath != null) {
           sourcePath = mergedPath;
         } else {
@@ -104,7 +146,7 @@ class VideoProcessingTaskHandler extends TaskHandler {
 
       String? processedPath;
       if (canProcessOverlay && sourcePath != null) {
-        await _updateNotification('Generating watermark frames... 15%');
+        await _progress(sendPort, 0.15, 'Generating watermark frames... 15%');
         final videoSize = await VideoWatermarkProcessor.getVideoDimensions(
           sourcePath,
         );
@@ -114,11 +156,18 @@ class VideoProcessingTaskHandler extends TaskHandler {
           width: videoSize.width.toDouble(),
           height: videoSize.height.toDouble(),
           durationMs: job.durationMs,
+          shouldCancel: _isCancelRequested,
           onProgress: (p) {
             final progress = 0.15 + (p * 0.25);
-            _send(sendPort, {'type': 'progress', 'value': progress});
+            _send(sendPort, {
+              'type': 'progress',
+              'value': progress,
+              'message':
+                  'Generating watermark frames... ${(progress * 100).toInt()}%',
+            });
           },
         );
+        await _throwIfCancelRequested(sendPort);
 
         if (sequenceDir != null) {
           processedPath =
@@ -129,16 +178,22 @@ class VideoProcessingTaskHandler extends TaskHandler {
             durationMs: job.durationMs,
             onProgress: (p) {
               final progress = 0.4 + (p * 0.5);
-              _send(sendPort, {'type': 'progress', 'value': progress});
-              unawaited(_updateNotification(
-                  'Applying watermark... ${(progress * 100).toInt()}%'));
+              final message =
+                  'Applying watermark... ${(progress * 100).toInt()}%';
+              _send(sendPort, {
+                'type': 'progress',
+                'value': progress,
+                'message': message,
+              });
+              unawaited(_updateNotification(message));
             },
           );
+          await _throwIfCancelRequested(sendPort);
         }
       }
 
-      _send(sendPort, {'type': 'progress', 'value': 0.95});
-      await _updateNotification('Saving to gallery... 95%');
+      await _progress(sendPort, 0.95, 'Saving to gallery... 95%');
+      await _throwIfCancelRequested(sendPort);
 
       final List<String> savedPaths = [];
       var savedWithoutOverlay = false;
@@ -157,7 +212,11 @@ class VideoProcessingTaskHandler extends TaskHandler {
           throw Exception('No video file available to save');
         }
 
-        await _updateNotification('Saving original video without overlay...');
+        await _progress(
+          sendPort,
+          0.95,
+          'Saving original video without overlay...',
+        );
         for (final rawPath in rawPaths) {
           final savedPath = await GallerySaver.saveVideo(rawPath);
           await ThumbnailUtils.generateVideoThumbnail(savedPath);
@@ -166,6 +225,7 @@ class VideoProcessingTaskHandler extends TaskHandler {
       }
 
       await FlutterForegroundTask.removeData(key: pendingJobKey);
+      await FlutterForegroundTask.removeData(key: cancelRequestedKey);
       await _updateNotification(savedWithoutOverlay
           ? 'Video saved without overlay'
           : 'Video saved successfully!');
@@ -176,18 +236,34 @@ class VideoProcessingTaskHandler extends TaskHandler {
         'warning': savedWithoutOverlay ? 'Saved without overlay' : null,
       });
 
-      unawaited(Future.delayed(const Duration(seconds: 3), () {
+      unawaited(Future.delayed(const Duration(seconds: 2), () {
+        FlutterForegroundTask.stopService();
+      }));
+    } on _VideoProcessingCancelledException {
+      await FlutterForegroundTask.removeData(key: pendingJobKey);
+      await FlutterForegroundTask.removeData(key: cancelRequestedKey);
+      _send(sendPort, {
+        'type': 'cancelled',
+        'message': 'Video processing cancelled.',
+      });
+      await _updateNotification('Video processing cancelled');
+      unawaited(Future.delayed(const Duration(seconds: 1), () {
         FlutterForegroundTask.stopService();
       }));
     } catch (e, stackTrace) {
       debugPrint('Background video processing error: $e\n$stackTrace');
       _lastFailedJobId = job?.id;
+      await FlutterForegroundTask.removeData(key: pendingJobKey);
+      await FlutterForegroundTask.saveData(
+        key: lastFailureKey,
+        value: e.toString(),
+      );
       _send(sendPort, {
         'type': 'error',
         'error': e.toString(),
       });
-      await _updateNotification('Video processing failed');
-      unawaited(Future.delayed(const Duration(seconds: 3), () {
+      await _updateNotification('Video processing failed. Tap to reopen.');
+      unawaited(Future.delayed(const Duration(seconds: 8), () {
         FlutterForegroundTask.stopService();
       }));
     } finally {
@@ -197,12 +273,42 @@ class VideoProcessingTaskHandler extends TaskHandler {
 
   Future<void> _updateNotification(String text) {
     return FlutterForegroundTask.updateService(
-      notificationTitle: 'SurveyCam - Processing',
+      notificationTitle: 'SurveyCam - Video processing',
       notificationText: text,
     );
+  }
+
+  Future<void> _progress(SendPort? sendPort, double value, String message) {
+    _send(sendPort, {
+      'type': 'progress',
+      'value': value,
+      'message': message,
+    });
+    return _updateNotification(message);
+  }
+
+  Future<bool> _isCancelRequested() async {
+    final requested = await FlutterForegroundTask.getData<String>(
+      key: cancelRequestedKey,
+    );
+    return requested == 'true';
+  }
+
+  Future<void> _throwIfCancelRequested(SendPort? sendPort) async {
+    if (await _isCancelRequested()) {
+      _send(sendPort, {
+        'type': 'cancelled',
+        'message': 'Video processing cancelled.',
+      });
+      throw const _VideoProcessingCancelledException();
+    }
   }
 
   void _send(SendPort? sendPort, Map<String, dynamic> message) {
     sendPort?.send(message);
   }
+}
+
+class _VideoProcessingCancelledException implements Exception {
+  const _VideoProcessingCancelledException();
 }

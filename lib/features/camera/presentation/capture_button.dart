@@ -19,7 +19,6 @@ class CaptureButton extends StatefulWidget {
 
 class _CaptureButtonState extends State<CaptureButton>
     with SingleTickerProviderStateMixin {
-
   AnimationController? _controller;
 
   Animation<double>? _outerScale;
@@ -59,15 +58,16 @@ class _CaptureButtonState extends State<CaptureButton>
     _controller = controller;
   }
 
-  Future<void> _handleTap() async {
+  void _handleTap() {
     if (_controller == null) return;
 
-    if (widget.mode == CameraMode.photo) {
-      await _controller!.forward();
-      await _controller!.reverse();
-    }
-
     widget.onCapture();
+
+    if (widget.mode == CameraMode.photo) {
+      _controller!
+          .forward(from: 0)
+          .then((_) => mounted ? _controller!.reverse() : null);
+    }
   }
 
   @override
@@ -78,7 +78,6 @@ class _CaptureButtonState extends State<CaptureButton>
 
   @override
   Widget build(BuildContext context) {
-
     // safety guard (avoids LateInitializationError)
     if (_controller == null ||
         _outerScale == null ||
@@ -87,7 +86,8 @@ class _CaptureButtonState extends State<CaptureButton>
       return const SizedBox(height: 90, width: 90);
     }
 
-    final Color innerColor = widget.mode == CameraMode.video ? Colors.red : Colors.white;
+    final Color innerColor =
+        widget.mode == CameraMode.video ? Colors.red : Colors.white;
 
     return SizedBox(
       height: 90,
@@ -138,7 +138,8 @@ class _CaptureButtonState extends State<CaptureButton>
                     width: widget.isRecording ? 32 : 56,
                     decoration: BoxDecoration(
                       color: innerColor,
-                      borderRadius: BorderRadius.circular(widget.isRecording ? 8 : 50),
+                      borderRadius:
+                          BorderRadius.circular(widget.isRecording ? 8 : 50),
                       boxShadow: [
                         if (!widget.isRecording)
                           BoxShadow(

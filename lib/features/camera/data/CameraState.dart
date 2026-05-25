@@ -45,6 +45,8 @@ enum CameraMode {
   video,
 }
 
+const Object _unsetCameraStateValue = Object();
+
 class VideoSegment {
   final String path;
   final CameraLensType lens;
@@ -89,6 +91,8 @@ class CameraState {
 
   final List<VideoSegment> videoSegments;
   final double? processingProgress;
+  final String? processingMessage;
+  final String? videoProcessingError;
 
   final String? videoSequenceDir;
 
@@ -105,6 +109,8 @@ class CameraState {
     this.error,
     this.videoSegments = const [],
     this.processingProgress,
+    this.processingMessage,
+    this.videoProcessingError,
     this.exposure = 0.0,
     this.minExposure = -2.0,
     this.maxExposure = 2.0,
@@ -128,7 +134,7 @@ class CameraState {
     CameraMode? cameraMode,
     bool? isManualFocus,
     CameraAspectRatio? aspectRatio,
-    String? error,
+    Object? error = _unsetCameraStateValue,
     double? exposure,
     double? minExposure,
     double? maxExposure,
@@ -141,6 +147,8 @@ class CameraState {
     List<VideoSegment>? videoSegments,
     double? processingProgress,
     bool clearProcessingProgress = false,
+    Object? processingMessage = _unsetCameraStateValue,
+    Object? videoProcessingError = _unsetCameraStateValue,
     String? videoSequenceDir,
   }) {
     return CameraState(
@@ -153,11 +161,20 @@ class CameraState {
       cameraMode: cameraMode ?? this.cameraMode,
       isManualFocus: isManualFocus ?? this.isManualFocus,
       aspectRatio: aspectRatio ?? this.aspectRatio,
-      error: error ?? this.error,
+      error: identical(error, _unsetCameraStateValue)
+          ? this.error
+          : error as String?,
       videoSegments: videoSegments ?? this.videoSegments,
       processingProgress: clearProcessingProgress
           ? null
           : (processingProgress ?? this.processingProgress),
+      processingMessage: identical(processingMessage, _unsetCameraStateValue)
+          ? this.processingMessage
+          : processingMessage as String?,
+      videoProcessingError:
+          identical(videoProcessingError, _unsetCameraStateValue)
+              ? this.videoProcessingError
+              : videoProcessingError as String?,
       exposure: exposure ?? this.exposure,
       minExposure: minExposure ?? this.minExposure,
       maxExposure: maxExposure ?? this.maxExposure,

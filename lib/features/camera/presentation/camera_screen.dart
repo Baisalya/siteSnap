@@ -41,8 +41,12 @@ class _CameraScreenState extends ConsumerState<CameraScreen>
   Timer? _dateTimer;
   Timer? _focusTimer;
   Timer? _recordingTimer;
+  Timer? _shutterFeedbackTimer;
   int _recordingSeconds = 0;
   bool _isCapturing = false;
+  bool _showShutterFeedback = false;
+  int _shutterFeedbackTick = 0;
+  bool _processingBubbleExpanded = false;
 
   @override
   void initState() {
@@ -103,6 +107,33 @@ class _CameraScreenState extends ConsumerState<CameraScreen>
     return '${minutes.toString().padLeft(2, '0')}:${remainingSeconds.toString().padLeft(2, '0')}';
   }
 
+  void _startPhotoCapture() {
+    _shutterFeedbackTimer?.cancel();
+    setState(() {
+      _isCapturing = true;
+      _showShutterFeedback = true;
+      _shutterFeedbackTick++;
+    });
+
+    _shutterFeedbackTimer = Timer(const Duration(milliseconds: 240), () {
+      if (!mounted) return;
+      setState(() => _showShutterFeedback = false);
+    });
+  }
+
+  void _showCameraSnack(String message) {
+    if (!mounted) return;
+    final messenger = ScaffoldMessenger.of(context);
+    messenger.hideCurrentSnackBar();
+    messenger.showSnackBar(
+      SnackBar(
+        content: Text(message),
+        behavior: SnackBarBehavior.floating,
+        duration: const Duration(milliseconds: 2600),
+      ),
+    );
+  }
+
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
     // Redundant refresh removed as ViewModel handles it efficiently
@@ -114,6 +145,7 @@ class _CameraScreenState extends ConsumerState<CameraScreen>
     _dateTimer?.cancel();
     _focusTimer?.cancel();
     _recordingTimer?.cancel();
+    _shutterFeedbackTimer?.cancel();
     super.dispose();
   }
 
@@ -122,7 +154,6 @@ class _CameraScreenState extends ConsumerState<CameraScreen>
     final privacyAccepted = ref.watch(privacyProvider);
     final cameraState = ref.watch(cameraViewModelProvider);
     final cameraVM = ref.read(cameraViewModelProvider.notifier);
-    final cameraSettings = ref.watch(cameraSettingsProvider);
 
     final lastImage = ref.watch(lastImageProvider);
     final focusPoint = ref.watch(focusPointProvider);
@@ -134,6 +165,13 @@ class _CameraScreenState extends ConsumerState<CameraScreen>
     final uiColor = isSelfieFlashActive ? Colors.black87 : Colors.white;
     final backgroundColor =
         isSelfieFlashActive ? const Color(0xFFFEF7FF) : Colors.black;
+    final processingProgress = cameraState.processingProgress;
+    final processingPercent = processingProgress == null
+        ? null
+        : (processingProgress * 100).clamp(0, 100).round();
+    final processingStatusText = processingPercent == null
+        ? null
+        : "Processing video $processingPercent%";
 
     /// ===============================
     /// LISTENERS
@@ -235,6 +273,27 @@ class _CameraScreenState extends ConsumerState<CameraScreen>
         cameraVM.updateOrientation(next);
       },
     );
+
+    ref.listen<CameraState>(cameraViewModelProvider, (previous, next) {
+      final processingError = next.videoProcessingError;
+      if (processingError != null &&
+          processingError != previous?.videoProcessingError) {
+        if (mounted) {
+          setState(() => _processingBubbleExpanded = true);
+        }
+        _showCameraSnack("Video processing failed: $processingError");
+        return;
+      }
+
+      final wasProcessing = previous?.processingProgress != null;
+      final finishedProcessing =
+          wasProcessing && next.processingProgress == null;
+      if (finishedProcessing && next.videoProcessingError == null) {
+        _showCameraSnack(
+          next.processingMessage ?? "Video saved successfully.",
+        );
+      }
+    });
 
     return SafeArea(
       child: Scaffold(
@@ -794,12 +853,34 @@ class _CameraScreenState extends ConsumerState<CameraScreen>
                                   isRecording: cameraState.isRecording,
                                   mode: cameraState.cameraMode,
                                   onCapture: () async {
-                                    if (!cameraState.isReady || _isCapturing) {
+                                    if (!cameraState.isReady) {
+                                      _showCameraSnack(
+                                        "Camera is getting ready. Please wait.",
+                                      );
+                                      return;
+                                    }
+
+                                    if (_isCapturing) {
+                                      _showCameraSnack(
+                                        "Capture is still finishing. Please wait.",
+                                      );
                                       return;
                                     }
 
                                     if (cameraState.cameraMode ==
                                         CameraMode.video) {
+                                      if (cameraState.processingProgress !=
+                                          null) {
+                                        final percent =
+                                            processingPercent == null
+                                                ? ""
+                                                : " ($processingPercent%)";
+                                        _showCameraSnack(
+                                          "Video is still processing$percent. Recording will be available after it finishes.",
+                                        );
+                                        return;
+                                      }
+
                                       if (cameraState.isRecording) {
                                         _stopRecordingTimer();
                                         await cameraVM
@@ -809,19 +890,23 @@ class _CameraScreenState extends ConsumerState<CameraScreen>
                                             .startVideoRecording();
                                         if (started && mounted) {
                                           _startRecordingTimer();
+                                        } else {
+                                          _showCameraSnack(
+                                            "Recording could not start. Please wait a moment and try again.",
+                                          );
                                         }
                                       }
                                       return;
                                     }
 
-                                    setState(() => _isCapturing = true);
-                                    SystemSound.play(SystemSoundType.click);
-                                    HapticFeedback.mediumImpact();
+                                    _startPhotoCapture();
+                                    unawaited(SystemSound.play(
+                                        SystemSoundType.click));
+                                    unawaited(HapticFeedback.mediumImpact());
 
                                     try {
                                       final path = await cameraVM.capture();
 
-                                      // Instant shutter feedback removal
                                       if (mounted) {
                                         setState(() => _isCapturing = false);
                                       }
@@ -889,15 +974,44 @@ class _CameraScreenState extends ConsumerState<CameraScreen>
                 ),
               ],
             ),
-            if (_isCapturing)
+            if (_showShutterFeedback)
               Positioned.fill(
                 child: IgnorePointer(
-                  child: Container(
-                    color: (cameraState.currentLens == CameraLensType.front &&
-                            cameraState.flashMode == FlashMode.always)
-                        ? Colors.white
-                        : Colors.black.withValues(alpha: 0.3),
+                  child: _ShutterFeedbackOverlay(
+                    key: ValueKey(_shutterFeedbackTick),
+                    brightMode:
+                        cameraState.currentLens == CameraLensType.front &&
+                            cameraState.flashMode == FlashMode.always,
                   ),
+                ),
+              ),
+            if (cameraState.processingProgress != null ||
+                cameraState.videoProcessingError != null)
+              Positioned(
+                right: 12,
+                top: MediaQuery.of(context).size.height * 0.38,
+                child: _VideoProcessingBubble(
+                  expanded: _processingBubbleExpanded,
+                  progress: cameraState.processingProgress,
+                  message: cameraState.videoProcessingError ??
+                      cameraState.processingMessage ??
+                      processingStatusText ??
+                      "Processing video",
+                  error: cameraState.videoProcessingError,
+                  onTap: () {
+                    setState(() {
+                      _processingBubbleExpanded = !_processingBubbleExpanded;
+                    });
+                  },
+                  onCancel: () async {
+                    setState(() => _processingBubbleExpanded = false);
+                    await cameraVM.cancelVideoProcessing();
+                    _showCameraSnack("Video processing cancelled.");
+                  },
+                  onDismiss: () {
+                    setState(() => _processingBubbleExpanded = false);
+                    cameraVM.clearVideoProcessingStatus();
+                  },
                 ),
               ),
           ],
@@ -939,6 +1053,279 @@ class _CameraScreenState extends ConsumerState<CameraScreen>
             ),
         ],
       ),
+    );
+  }
+}
+
+class _VideoProcessingBubble extends StatelessWidget {
+  final bool expanded;
+  final double? progress;
+  final String message;
+  final String? error;
+  final VoidCallback onTap;
+  final VoidCallback onCancel;
+  final VoidCallback onDismiss;
+
+  const _VideoProcessingBubble({
+    required this.expanded,
+    required this.progress,
+    required this.message,
+    required this.error,
+    required this.onTap,
+    required this.onCancel,
+    required this.onDismiss,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final hasError = error != null;
+    final percent =
+        progress == null ? null : (progress! * 100).clamp(0, 100).round();
+    final Color accent = hasError ? Colors.redAccent : Colors.amberAccent;
+    final Color foreground = hasError ? Colors.white : Colors.black87;
+
+    return Material(
+      color: Colors.transparent,
+      child: AnimatedSwitcher(
+        duration: const Duration(milliseconds: 220),
+        switchInCurve: Curves.easeOutCubic,
+        switchOutCurve: Curves.easeInCubic,
+        child: expanded
+            ? Container(
+                key: const ValueKey('processing-expanded'),
+                width: 272,
+                padding: const EdgeInsets.all(14),
+                decoration: BoxDecoration(
+                  color: Colors.black.withValues(alpha: 0.88),
+                  borderRadius: BorderRadius.circular(18),
+                  border: Border.all(
+                    color: accent.withValues(alpha: 0.85),
+                    width: 1.2,
+                  ),
+                  boxShadow: [
+                    BoxShadow(
+                      color: Colors.black.withValues(alpha: 0.35),
+                      blurRadius: 18,
+                      offset: const Offset(0, 8),
+                    ),
+                  ],
+                ),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      children: [
+                        Container(
+                          width: 34,
+                          height: 34,
+                          decoration: BoxDecoration(
+                            color: accent,
+                            shape: BoxShape.circle,
+                          ),
+                          child: Icon(
+                            hasError ? Icons.error_outline : Icons.movie,
+                            color: foreground,
+                            size: 20,
+                          ),
+                        ),
+                        const SizedBox(width: 10),
+                        Expanded(
+                          child: Text(
+                            hasError
+                                ? "Video processing failed"
+                                : "Video processing",
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: const TextStyle(
+                              color: Colors.white,
+                              fontWeight: FontWeight.w700,
+                              fontSize: 14,
+                            ),
+                          ),
+                        ),
+                        IconButton(
+                          visualDensity: VisualDensity.compact,
+                          padding: EdgeInsets.zero,
+                          constraints: const BoxConstraints(
+                            minHeight: 32,
+                            minWidth: 32,
+                          ),
+                          onPressed: onTap,
+                          icon: const Icon(
+                            Icons.close,
+                            color: Colors.white70,
+                            size: 18,
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 12),
+                    if (!hasError && progress != null) ...[
+                      ClipRRect(
+                        borderRadius: BorderRadius.circular(999),
+                        child: LinearProgressIndicator(
+                          minHeight: 6,
+                          value: progress!.clamp(0, 1),
+                          backgroundColor: Colors.white.withValues(alpha: 0.16),
+                          valueColor: AlwaysStoppedAnimation<Color>(accent),
+                        ),
+                      ),
+                      const SizedBox(height: 10),
+                    ],
+                    Text(
+                      hasError ? error! : message,
+                      maxLines: 3,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(
+                        color: Colors.white.withValues(alpha: 0.88),
+                        fontSize: 12,
+                        height: 1.25,
+                      ),
+                    ),
+                    const SizedBox(height: 12),
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.end,
+                      children: [
+                        if (!hasError && progress != null)
+                          TextButton.icon(
+                            onPressed: onCancel,
+                            icon: const Icon(Icons.stop_circle_outlined),
+                            label: const Text("Cancel"),
+                            style: TextButton.styleFrom(
+                              foregroundColor: Colors.redAccent,
+                              visualDensity: VisualDensity.compact,
+                            ),
+                          )
+                        else
+                          TextButton(
+                            onPressed: onDismiss,
+                            style: TextButton.styleFrom(
+                              foregroundColor: Colors.white,
+                              visualDensity: VisualDensity.compact,
+                            ),
+                            child: const Text("Dismiss"),
+                          ),
+                      ],
+                    ),
+                  ],
+                ),
+              )
+            : InkWell(
+                key: const ValueKey('processing-collapsed'),
+                onTap: onTap,
+                customBorder: const CircleBorder(),
+                child: Container(
+                  width: 66,
+                  height: 66,
+                  decoration: BoxDecoration(
+                    color: accent,
+                    shape: BoxShape.circle,
+                    boxShadow: [
+                      BoxShadow(
+                        color: accent.withValues(alpha: 0.42),
+                        blurRadius: 18,
+                        spreadRadius: 2,
+                      ),
+                      BoxShadow(
+                        color: Colors.black.withValues(alpha: 0.35),
+                        blurRadius: 12,
+                        offset: const Offset(0, 6),
+                      ),
+                    ],
+                  ),
+                  child: Stack(
+                    alignment: Alignment.center,
+                    children: [
+                      if (!hasError && progress != null)
+                        SizedBox(
+                          width: 56,
+                          height: 56,
+                          child: CircularProgressIndicator(
+                            value: progress!.clamp(0, 1),
+                            strokeWidth: 3,
+                            backgroundColor:
+                                Colors.black.withValues(alpha: 0.14),
+                            valueColor:
+                                AlwaysStoppedAnimation<Color>(foreground),
+                          ),
+                        ),
+                      hasError
+                          ? Icon(
+                              Icons.error_outline,
+                              color: foreground,
+                              size: 30,
+                            )
+                          : Text(
+                              percent == null ? "..." : "$percent%",
+                              style: TextStyle(
+                                color: foreground,
+                                fontWeight: FontWeight.w800,
+                                fontSize:
+                                    percent != null && percent >= 100 ? 13 : 14,
+                              ),
+                            ),
+                    ],
+                  ),
+                ),
+              ),
+      ),
+    );
+  }
+}
+
+class _ShutterFeedbackOverlay extends StatelessWidget {
+  final bool brightMode;
+
+  const _ShutterFeedbackOverlay({
+    super.key,
+    required this.brightMode,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final ringColor = brightMode ? Colors.black87 : Colors.white;
+
+    return TweenAnimationBuilder<double>(
+      tween: Tween(begin: 0, end: 1),
+      duration: const Duration(milliseconds: 220),
+      curve: Curves.easeOutCubic,
+      builder: (context, value, child) {
+        final flashOpacity =
+            (brightMode ? 0.82 : 0.55) * (1 - value).clamp(0.0, 1.0);
+        final ringOpacity = (1 - value).clamp(0.0, 1.0);
+        final ringScale = 0.72 + (value * 1.75);
+
+        return Stack(
+          fit: StackFit.expand,
+          children: [
+            ColoredBox(
+              color: Colors.white.withValues(alpha: flashOpacity),
+            ),
+            Center(
+              child: Transform.scale(
+                scale: ringScale,
+                child: Opacity(
+                  opacity: ringOpacity,
+                  child: Container(
+                    width: 96,
+                    height: 96,
+                    decoration: BoxDecoration(
+                      shape: BoxShape.circle,
+                      border: Border.all(
+                        color: ringColor.withValues(
+                          alpha: brightMode ? 0.7 : 0.9,
+                        ),
+                        width: 2.4,
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+            ),
+          ],
+        );
+      },
     );
   }
 }
