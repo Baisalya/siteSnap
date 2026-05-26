@@ -42,11 +42,14 @@ class _CameraScreenState extends ConsumerState<CameraScreen>
   Timer? _focusTimer;
   Timer? _recordingTimer;
   Timer? _shutterFeedbackTimer;
+  Timer? _processingBubbleIdleTimer;
   int _recordingSeconds = 0;
   bool _isCapturing = false;
   bool _showShutterFeedback = false;
   int _shutterFeedbackTick = 0;
   bool _processingBubbleExpanded = false;
+  bool _processingBubbleDimmed = false;
+  Offset? _processingBubbleOffset;
 
   @override
   void initState() {
@@ -134,6 +137,62 @@ class _CameraScreenState extends ConsumerState<CameraScreen>
     );
   }
 
+  void _scheduleProcessingBubbleDim() {
+    _processingBubbleIdleTimer?.cancel();
+    _processingBubbleIdleTimer = Timer(const Duration(milliseconds: 1400), () {
+      if (!mounted) return;
+      setState(() => _processingBubbleDimmed = true);
+    });
+  }
+
+  void _wakeProcessingBubble() {
+    _processingBubbleIdleTimer?.cancel();
+    if (_processingBubbleDimmed && mounted) {
+      setState(() => _processingBubbleDimmed = false);
+    }
+    _scheduleProcessingBubbleDim();
+  }
+
+  Offset _defaultProcessingBubbleOffset(Size screenSize) {
+    return Offset(
+      screenSize.width - 78,
+      (screenSize.height * 0.42).clamp(96.0, screenSize.height - 170),
+    );
+  }
+
+  Size _processingBubbleSize(bool expanded) {
+    return expanded ? const Size(272, 172) : const Size(66, 66);
+  }
+
+  Offset _clampProcessingBubbleOffset(
+    Offset offset,
+    Size screenSize,
+    bool expanded,
+  ) {
+    final size = _processingBubbleSize(expanded);
+    return Offset(
+      offset.dx.clamp(8.0, screenSize.width - size.width - 8),
+      offset.dy.clamp(76.0, screenSize.height - size.height - 18),
+    );
+  }
+
+  Offset _offsetForBubbleExpansionChange({
+    required Offset currentOffset,
+    required Size screenSize,
+    required bool fromExpanded,
+    required bool toExpanded,
+  }) {
+    final fromSize = _processingBubbleSize(fromExpanded);
+    final toSize = _processingBubbleSize(toExpanded);
+    final center =
+        currentOffset + Offset(fromSize.width / 2, fromSize.height / 2);
+    return _clampProcessingBubbleOffset(
+      center - Offset(toSize.width / 2, toSize.height / 2),
+      screenSize,
+      toExpanded,
+    );
+  }
+
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
     // Redundant refresh removed as ViewModel handles it efficiently
@@ -146,6 +205,7 @@ class _CameraScreenState extends ConsumerState<CameraScreen>
     _focusTimer?.cancel();
     _recordingTimer?.cancel();
     _shutterFeedbackTimer?.cancel();
+    _processingBubbleIdleTimer?.cancel();
     super.dispose();
   }
 
@@ -172,6 +232,32 @@ class _CameraScreenState extends ConsumerState<CameraScreen>
     final processingStatusText = processingPercent == null
         ? null
         : "Processing video $processingPercent%";
+    final hasProcessingBubble = cameraState.processingProgress != null ||
+        cameraState.videoProcessingError != null;
+    final screenSize = MediaQuery.of(context).size;
+    final processingBubbleOffset = _clampProcessingBubbleOffset(
+      _processingBubbleOffset ?? _defaultProcessingBubbleOffset(screenSize),
+      screenSize,
+      _processingBubbleExpanded,
+    );
+
+    if (hasProcessingBubble && _processingBubbleIdleTimer == null) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted && hasProcessingBubble) {
+          _scheduleProcessingBubbleDim();
+        }
+      });
+    } else if (!hasProcessingBubble &&
+        (_processingBubbleIdleTimer != null || _processingBubbleDimmed)) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!mounted) return;
+        _processingBubbleIdleTimer?.cancel();
+        _processingBubbleIdleTimer = null;
+        if (_processingBubbleDimmed) {
+          setState(() => _processingBubbleDimmed = false);
+        }
+      });
+    }
 
     /// ===============================
     /// LISTENERS
@@ -279,7 +365,23 @@ class _CameraScreenState extends ConsumerState<CameraScreen>
       if (processingError != null &&
           processingError != previous?.videoProcessingError) {
         if (mounted) {
-          setState(() => _processingBubbleExpanded = true);
+          setState(() {
+            final currentOffset = _clampProcessingBubbleOffset(
+              _processingBubbleOffset ??
+                  _defaultProcessingBubbleOffset(screenSize),
+              screenSize,
+              _processingBubbleExpanded,
+            );
+            _processingBubbleOffset = _offsetForBubbleExpansionChange(
+              currentOffset: currentOffset,
+              screenSize: screenSize,
+              fromExpanded: _processingBubbleExpanded,
+              toExpanded: true,
+            );
+            _processingBubbleExpanded = true;
+            _processingBubbleDimmed = false;
+          });
+          _scheduleProcessingBubbleDim();
         }
         _showCameraSnack("Video processing failed: $processingError");
         return;
@@ -368,6 +470,7 @@ class _CameraScreenState extends ConsumerState<CameraScreen>
                               children: [
                                 if (controller != null &&
                                     controller.value.isInitialized &&
+                                    !controller.value.isPreviewPaused &&
                                     cameraState.isReady)
                                   SizedBox.expand(
                                       child: Center(
@@ -400,8 +503,7 @@ class _CameraScreenState extends ConsumerState<CameraScreen>
                                                         .previewSize!.width,
                                                     child: CameraPreview(
                                                       controller,
-                                                      key: ValueKey(controller
-                                                          .description.name),
+                                                      key: ObjectKey(controller),
                                                     ),
                                                   ),
                                                 ),
@@ -985,33 +1087,101 @@ class _CameraScreenState extends ConsumerState<CameraScreen>
                   ),
                 ),
               ),
-            if (cameraState.processingProgress != null ||
-                cameraState.videoProcessingError != null)
-              Positioned(
-                right: 12,
-                top: MediaQuery.of(context).size.height * 0.38,
-                child: _VideoProcessingBubble(
-                  expanded: _processingBubbleExpanded,
-                  progress: cameraState.processingProgress,
-                  message: cameraState.videoProcessingError ??
-                      cameraState.processingMessage ??
-                      processingStatusText ??
-                      "Processing video",
-                  error: cameraState.videoProcessingError,
+            if (hasProcessingBubble && _processingBubbleExpanded)
+              Positioned.fill(
+                child: GestureDetector(
+                  behavior: HitTestBehavior.translucent,
                   onTap: () {
                     setState(() {
-                      _processingBubbleExpanded = !_processingBubbleExpanded;
+                      _processingBubbleOffset = _offsetForBubbleExpansionChange(
+                        currentOffset: processingBubbleOffset,
+                        screenSize: screenSize,
+                        fromExpanded: true,
+                        toExpanded: false,
+                      );
+                      _processingBubbleExpanded = false;
                     });
+                    _wakeProcessingBubble();
                   },
-                  onCancel: () async {
-                    setState(() => _processingBubbleExpanded = false);
-                    await cameraVM.cancelVideoProcessing();
-                    _showCameraSnack("Video processing cancelled.");
+                ),
+              ),
+            if (hasProcessingBubble)
+              Positioned(
+                left: processingBubbleOffset.dx,
+                top: processingBubbleOffset.dy,
+                child: GestureDetector(
+                  onPanStart: (_) => _wakeProcessingBubble(),
+                  onPanUpdate: (details) {
+                    setState(() {
+                      _processingBubbleDimmed = false;
+                      _processingBubbleOffset = _clampProcessingBubbleOffset(
+                        (_processingBubbleOffset ?? processingBubbleOffset) +
+                            details.delta,
+                        screenSize,
+                        _processingBubbleExpanded,
+                      );
+                    });
+                    _scheduleProcessingBubbleDim();
                   },
-                  onDismiss: () {
-                    setState(() => _processingBubbleExpanded = false);
-                    cameraVM.clearVideoProcessingStatus();
-                  },
+                  child: _VideoProcessingBubble(
+                    expanded: _processingBubbleExpanded,
+                    dimmed: _processingBubbleDimmed,
+                    progress: cameraState.processingProgress,
+                    message: cameraState.videoProcessingError ??
+                        cameraState.processingMessage ??
+                        processingStatusText ??
+                        "Processing video",
+                    error: cameraState.videoProcessingError,
+                    onTap: () {
+                      _wakeProcessingBubble();
+                      final nextExpanded = !_processingBubbleExpanded;
+                      setState(() {
+                        final currentOffset = _clampProcessingBubbleOffset(
+                          _processingBubbleOffset ??
+                              _defaultProcessingBubbleOffset(screenSize),
+                          screenSize,
+                          _processingBubbleExpanded,
+                        );
+                        _processingBubbleExpanded = nextExpanded;
+                        _processingBubbleOffset =
+                            _offsetForBubbleExpansionChange(
+                          currentOffset: currentOffset,
+                          screenSize: screenSize,
+                          fromExpanded: !nextExpanded,
+                          toExpanded: nextExpanded,
+                        );
+                      });
+                    },
+                    onCancel: () async {
+                      setState(() {
+                        _processingBubbleOffset =
+                            _offsetForBubbleExpansionChange(
+                          currentOffset: processingBubbleOffset,
+                          screenSize: screenSize,
+                          fromExpanded: _processingBubbleExpanded,
+                          toExpanded: false,
+                        );
+                        _processingBubbleExpanded = false;
+                      });
+                      _wakeProcessingBubble();
+                      await cameraVM.cancelVideoProcessing();
+                      _showCameraSnack("Video processing cancelled.");
+                    },
+                    onDismiss: () {
+                      setState(() {
+                        _processingBubbleOffset =
+                            _offsetForBubbleExpansionChange(
+                          currentOffset: processingBubbleOffset,
+                          screenSize: screenSize,
+                          fromExpanded: _processingBubbleExpanded,
+                          toExpanded: false,
+                        );
+                        _processingBubbleExpanded = false;
+                      });
+                      _wakeProcessingBubble();
+                      cameraVM.clearVideoProcessingStatus();
+                    },
+                  ),
                 ),
               ),
           ],
@@ -1059,6 +1229,7 @@ class _CameraScreenState extends ConsumerState<CameraScreen>
 
 class _VideoProcessingBubble extends StatelessWidget {
   final bool expanded;
+  final bool dimmed;
   final double? progress;
   final String message;
   final String? error;
@@ -1068,6 +1239,7 @@ class _VideoProcessingBubble extends StatelessWidget {
 
   const _VideoProcessingBubble({
     required this.expanded,
+    required this.dimmed,
     required this.progress,
     required this.message,
     required this.error,
@@ -1083,192 +1255,200 @@ class _VideoProcessingBubble extends StatelessWidget {
         progress == null ? null : (progress! * 100).clamp(0, 100).round();
     final Color accent = hasError ? Colors.redAccent : Colors.amberAccent;
     final Color foreground = hasError ? Colors.white : Colors.black87;
+    final opacity = dimmed ? (expanded ? 0.86 : 0.54) : 1.0;
 
-    return Material(
-      color: Colors.transparent,
-      child: AnimatedSwitcher(
-        duration: const Duration(milliseconds: 220),
-        switchInCurve: Curves.easeOutCubic,
-        switchOutCurve: Curves.easeInCubic,
-        child: expanded
-            ? Container(
-                key: const ValueKey('processing-expanded'),
-                width: 272,
-                padding: const EdgeInsets.all(14),
-                decoration: BoxDecoration(
-                  color: Colors.black.withValues(alpha: 0.88),
-                  borderRadius: BorderRadius.circular(18),
-                  border: Border.all(
-                    color: accent.withValues(alpha: 0.85),
-                    width: 1.2,
-                  ),
-                  boxShadow: [
-                    BoxShadow(
-                      color: Colors.black.withValues(alpha: 0.35),
-                      blurRadius: 18,
-                      offset: const Offset(0, 8),
-                    ),
-                  ],
-                ),
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Row(
-                      children: [
-                        Container(
-                          width: 34,
-                          height: 34,
-                          decoration: BoxDecoration(
-                            color: accent,
-                            shape: BoxShape.circle,
-                          ),
-                          child: Icon(
-                            hasError ? Icons.error_outline : Icons.movie,
-                            color: foreground,
-                            size: 20,
-                          ),
-                        ),
-                        const SizedBox(width: 10),
-                        Expanded(
-                          child: Text(
-                            hasError
-                                ? "Video processing failed"
-                                : "Video processing",
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                            style: const TextStyle(
-                              color: Colors.white,
-                              fontWeight: FontWeight.w700,
-                              fontSize: 14,
-                            ),
-                          ),
-                        ),
-                        IconButton(
-                          visualDensity: VisualDensity.compact,
-                          padding: EdgeInsets.zero,
-                          constraints: const BoxConstraints(
-                            minHeight: 32,
-                            minWidth: 32,
-                          ),
-                          onPressed: onTap,
-                          icon: const Icon(
-                            Icons.close,
-                            color: Colors.white70,
-                            size: 18,
-                          ),
-                        ),
-                      ],
-                    ),
-                    const SizedBox(height: 12),
-                    if (!hasError && progress != null) ...[
-                      ClipRRect(
-                        borderRadius: BorderRadius.circular(999),
-                        child: LinearProgressIndicator(
-                          minHeight: 6,
-                          value: progress!.clamp(0, 1),
-                          backgroundColor: Colors.white.withValues(alpha: 0.16),
-                          valueColor: AlwaysStoppedAnimation<Color>(accent),
-                        ),
-                      ),
-                      const SizedBox(height: 10),
-                    ],
-                    Text(
-                      hasError ? error! : message,
-                      maxLines: 3,
-                      overflow: TextOverflow.ellipsis,
-                      style: TextStyle(
-                        color: Colors.white.withValues(alpha: 0.88),
-                        fontSize: 12,
-                        height: 1.25,
-                      ),
-                    ),
-                    const SizedBox(height: 12),
-                    Row(
-                      mainAxisAlignment: MainAxisAlignment.end,
-                      children: [
-                        if (!hasError && progress != null)
-                          TextButton.icon(
-                            onPressed: onCancel,
-                            icon: const Icon(Icons.stop_circle_outlined),
-                            label: const Text("Cancel"),
-                            style: TextButton.styleFrom(
-                              foregroundColor: Colors.redAccent,
-                              visualDensity: VisualDensity.compact,
-                            ),
-                          )
-                        else
-                          TextButton(
-                            onPressed: onDismiss,
-                            style: TextButton.styleFrom(
-                              foregroundColor: Colors.white,
-                              visualDensity: VisualDensity.compact,
-                            ),
-                            child: const Text("Dismiss"),
-                          ),
-                      ],
-                    ),
-                  ],
-                ),
-              )
-            : InkWell(
-                key: const ValueKey('processing-collapsed'),
-                onTap: onTap,
-                customBorder: const CircleBorder(),
-                child: Container(
-                  width: 66,
-                  height: 66,
+    return AnimatedOpacity(
+      opacity: opacity,
+      duration: const Duration(milliseconds: 260),
+      curve: Curves.easeOutCubic,
+      child: Material(
+        color: Colors.transparent,
+        child: AnimatedSwitcher(
+          duration: const Duration(milliseconds: 220),
+          switchInCurve: Curves.easeOutCubic,
+          switchOutCurve: Curves.easeInCubic,
+          child: expanded
+              ? Container(
+                  key: const ValueKey('processing-expanded'),
+                  width: 272,
+                  padding: const EdgeInsets.all(14),
                   decoration: BoxDecoration(
-                    color: accent,
-                    shape: BoxShape.circle,
+                    color: Colors.black.withValues(alpha: 0.88),
+                    borderRadius: BorderRadius.circular(18),
+                    border: Border.all(
+                      color: accent.withValues(alpha: 0.85),
+                      width: 1.2,
+                    ),
                     boxShadow: [
                       BoxShadow(
-                        color: accent.withValues(alpha: 0.42),
-                        blurRadius: 18,
-                        spreadRadius: 2,
-                      ),
-                      BoxShadow(
                         color: Colors.black.withValues(alpha: 0.35),
-                        blurRadius: 12,
-                        offset: const Offset(0, 6),
+                        blurRadius: 18,
+                        offset: const Offset(0, 8),
                       ),
                     ],
                   ),
-                  child: Stack(
-                    alignment: Alignment.center,
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      if (!hasError && progress != null)
-                        SizedBox(
-                          width: 56,
-                          height: 56,
-                          child: CircularProgressIndicator(
-                            value: progress!.clamp(0, 1),
-                            strokeWidth: 3,
-                            backgroundColor:
-                                Colors.black.withValues(alpha: 0.14),
-                            valueColor:
-                                AlwaysStoppedAnimation<Color>(foreground),
-                          ),
-                        ),
-                      hasError
-                          ? Icon(
-                              Icons.error_outline,
+                      Row(
+                        children: [
+                          Container(
+                            width: 34,
+                            height: 34,
+                            decoration: BoxDecoration(
+                              color: accent,
+                              shape: BoxShape.circle,
+                            ),
+                            child: Icon(
+                              hasError ? Icons.error_outline : Icons.movie,
                               color: foreground,
-                              size: 30,
-                            )
-                          : Text(
-                              percent == null ? "..." : "$percent%",
-                              style: TextStyle(
-                                color: foreground,
-                                fontWeight: FontWeight.w800,
-                                fontSize:
-                                    percent != null && percent >= 100 ? 13 : 14,
+                              size: 20,
+                            ),
+                          ),
+                          const SizedBox(width: 10),
+                          Expanded(
+                            child: Text(
+                              hasError
+                                  ? "Video processing failed"
+                                  : "Video processing",
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: const TextStyle(
+                                color: Colors.white,
+                                fontWeight: FontWeight.w700,
+                                fontSize: 14,
                               ),
                             ),
+                          ),
+                          IconButton(
+                            visualDensity: VisualDensity.compact,
+                            padding: EdgeInsets.zero,
+                            constraints: const BoxConstraints(
+                              minHeight: 32,
+                              minWidth: 32,
+                            ),
+                            onPressed: onTap,
+                            icon: const Icon(
+                              Icons.close,
+                              color: Colors.white70,
+                              size: 18,
+                            ),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 12),
+                      if (!hasError && progress != null) ...[
+                        ClipRRect(
+                          borderRadius: BorderRadius.circular(999),
+                          child: LinearProgressIndicator(
+                            minHeight: 6,
+                            value: progress!.clamp(0, 1),
+                            backgroundColor:
+                                Colors.white.withValues(alpha: 0.16),
+                            valueColor: AlwaysStoppedAnimation<Color>(accent),
+                          ),
+                        ),
+                        const SizedBox(height: 10),
+                      ],
+                      Text(
+                        hasError ? error! : message,
+                        maxLines: 3,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(
+                          color: Colors.white.withValues(alpha: 0.88),
+                          fontSize: 12,
+                          height: 1.25,
+                        ),
+                      ),
+                      const SizedBox(height: 12),
+                      Row(
+                        mainAxisAlignment: MainAxisAlignment.end,
+                        children: [
+                          if (!hasError && progress != null)
+                            TextButton.icon(
+                              onPressed: onCancel,
+                              icon: const Icon(Icons.stop_circle_outlined),
+                              label: const Text("Cancel"),
+                              style: TextButton.styleFrom(
+                                foregroundColor: Colors.redAccent,
+                                visualDensity: VisualDensity.compact,
+                              ),
+                            )
+                          else
+                            TextButton(
+                              onPressed: onDismiss,
+                              style: TextButton.styleFrom(
+                                foregroundColor: Colors.white,
+                                visualDensity: VisualDensity.compact,
+                              ),
+                              child: const Text("Dismiss"),
+                            ),
+                        ],
+                      ),
                     ],
                   ),
+                )
+              : InkWell(
+                  key: const ValueKey('processing-collapsed'),
+                  onTap: onTap,
+                  customBorder: const CircleBorder(),
+                  child: Container(
+                    width: 66,
+                    height: 66,
+                    decoration: BoxDecoration(
+                      color: accent,
+                      shape: BoxShape.circle,
+                      boxShadow: [
+                        BoxShadow(
+                          color: accent.withValues(alpha: 0.42),
+                          blurRadius: 18,
+                          spreadRadius: 2,
+                        ),
+                        BoxShadow(
+                          color: Colors.black.withValues(alpha: 0.35),
+                          blurRadius: 12,
+                          offset: const Offset(0, 6),
+                        ),
+                      ],
+                    ),
+                    child: Stack(
+                      alignment: Alignment.center,
+                      children: [
+                        if (!hasError && progress != null)
+                          SizedBox(
+                            width: 56,
+                            height: 56,
+                            child: CircularProgressIndicator(
+                              value: progress!.clamp(0, 1),
+                              strokeWidth: 3,
+                              backgroundColor:
+                                  Colors.black.withValues(alpha: 0.14),
+                              valueColor:
+                                  AlwaysStoppedAnimation<Color>(foreground),
+                            ),
+                          ),
+                        hasError
+                            ? Icon(
+                                Icons.error_outline,
+                                color: foreground,
+                                size: 30,
+                              )
+                            : Text(
+                                percent == null ? "..." : "$percent%",
+                                style: TextStyle(
+                                  color: foreground,
+                                  fontWeight: FontWeight.w800,
+                                  fontSize: percent != null && percent >= 100
+                                      ? 13
+                                      : 14,
+                                ),
+                              ),
+                      ],
+                    ),
+                  ),
                 ),
-              ),
+        ),
       ),
     );
   }

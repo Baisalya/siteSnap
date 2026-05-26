@@ -524,9 +524,19 @@ class VideoWatermarkProcessor {
 
     canvas.save();
 
-    // Fixed Bottom-Left placement in physical coordinates
-    const double targetX = margin;
-    final double targetY = size.height - margin;
+    final bool isLandscape = orientation == DeviceOrientation.landscapeLeft ||
+        orientation == DeviceOrientation.landscapeRight;
+
+    // Swap positions in landscape: Watermark moves to Bottom-Left
+    final double targetX;
+    final double targetY;
+    if (isLandscape) {
+      targetX = margin;
+      targetY = size.height - margin;
+    } else {
+      targetX = size.width - margin;
+      targetY = margin;
+    }
 
     canvas.save();
     // Translate to the target corner
@@ -538,19 +548,19 @@ class VideoWatermarkProcessor {
         canvas.rotate(pi);
         // After 180 deg rotation, we need to translate back to keep the box
         // within the intended area (upright relative to the rotation).
-        canvas.translate(-boxWidth, 0);
+        canvas.translate(0, -boxHeight);
         break;
       case DeviceOrientation.landscapeLeft:
         canvas.rotate(-pi / 2);
-        // After -90 deg rotation, (0,0) is at the bottom-left of the original box area
         break;
       case DeviceOrientation.landscapeRight:
         canvas.rotate(pi / 2);
+        // After 90 deg rotation, we need to translate to keep the box visible
         canvas.translate(-boxWidth, -boxHeight);
         break;
       default:
         // portraitUp
-        canvas.translate(0, -boxHeight);
+        canvas.translate(-boxWidth, 0);
         break;
     }
 
@@ -618,16 +628,26 @@ class VideoWatermarkProcessor {
       final boxHeight = textPainter.height + (paddingV * 2);
       const double margin = 15.0;
 
-      // Fixed Top-Right placement in physical coordinates
-      final double targetX = size.width - margin;
-      const double targetY = margin;
+      final bool isLandscape = orientation == DeviceOrientation.landscapeLeft ||
+          orientation == DeviceOrientation.landscapeRight;
+
+      // Swap positions in landscape: Overlay moves to Top-Right
+      final double targetX;
+      final double targetY;
+      if (isLandscape) {
+        targetX = size.width - margin;
+        targetY = margin;
+      } else {
+        targetX = margin;
+        targetY = size.height - margin;
+      }
 
       canvas.translate(targetX, targetY);
 
       switch (orientation) {
         case DeviceOrientation.portraitDown:
           canvas.rotate(pi);
-          canvas.translate(0, -boxHeight);
+          canvas.translate(-boxWidth, 0);
           break;
         case DeviceOrientation.landscapeLeft:
           canvas.rotate(-pi / 2);
@@ -638,7 +658,7 @@ class VideoWatermarkProcessor {
           break;
         default:
           // portraitUp
-          canvas.translate(-boxWidth, 0);
+          canvas.translate(0, -boxHeight);
           break;
       }
 

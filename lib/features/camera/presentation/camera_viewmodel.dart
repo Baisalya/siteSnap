@@ -44,6 +44,8 @@ class CameraViewModel extends StateNotifier<CameraState>
   bool _isDisposing = false;
   final bool _isRestarting = false;
   bool _captureInFlight = false;
+  bool _startRecordingInFlight = false;
+  bool _stopRecordingInFlight = false;
   Timer? _videoHistoryTimer;
   ReceivePort? _receivePort;
 
@@ -115,6 +117,19 @@ class CameraViewModel extends StateNotifier<CameraState>
       return 'Video processing failed. Please try recording again.';
     }
     return text.replaceFirst('Exception: ', '');
+  }
+
+  bool _isNativeCameraNullPointer(Object error) {
+    final text = error.toString();
+    return text.contains('CameraException') &&
+        text.contains('NullPointerException');
+  }
+
+  String _friendlyStopRecordingError(Object error) {
+    if (_isNativeCameraNullPointer(error)) {
+      return 'Camera lost the active recording session before it could finalize the video. Please try recording again.';
+    }
+    return _friendlyVideoError(error);
   }
 
   // ================= INIT =================
@@ -560,7 +575,7 @@ class CameraViewModel extends StateNotifier<CameraState>
         ? CameraLensType.normal
         : CameraLensType.front;
 
-    state = state.copyWith(currentLens: nextLens, isReady: false);
+    state = state.copyWith(currentLens: nextLens, isReady: false, clearController: true);
 
     try {
       final repo = ref.read(cameraRepositoryProvider);
@@ -827,10 +842,13 @@ class CameraViewModel extends StateNotifier<CameraState>
     if (controller == null ||
         !controller.value.isInitialized ||
         state.isRecording ||
+        _startRecordingInFlight ||
+        _stopRecordingInFlight ||
         (state.processingProgress != null)) {
       return false;
     }
 
+    _startRecordingInFlight = true;
     try {
       state = state.copyWith(
         processingMessage: null,
@@ -878,6 +896,8 @@ class CameraViewModel extends StateNotifier<CameraState>
     } catch (e) {
       debugPrint("Start recording error: $e");
       return false;
+    } finally {
+      _startRecordingInFlight = false;
     }
   }
 
@@ -912,10 +932,12 @@ class CameraViewModel extends StateNotifier<CameraState>
     final controller = state.controller;
     if (controller == null ||
         !controller.value.isInitialized ||
-        !state.isRecording) {
+        !state.isRecording ||
+        _stopRecordingInFlight) {
       return;
     }
 
+    _stopRecordingInFlight = true;
     try {
       final repo = ref.read(cameraRepositoryProvider);
       _videoHistoryTimer?.cancel();
@@ -993,20 +1015,32 @@ class CameraViewModel extends StateNotifier<CameraState>
       _recordingStartTime = null;
     } catch (e) {
       debugPrint("Stop recording error: $e");
+      final friendlyError = _friendlyStopRecordingError(e);
       state = state.copyWith(
         isRecording: false,
         clearProcessingProgress: true,
-        processingMessage: 'Video processing failed.',
-        videoProcessingError: _friendlyVideoError(e),
+        videoSegments: [],
+        videoSequenceDir: null,
+        processingMessage: 'Video recording failed.',
+        videoProcessingError: friendlyError,
       );
+      _videoHistoryTimer?.cancel();
+      _videoHistoryTimer = null;
+      _videoDataHistory.clear();
+      _recordingStartTime = null;
       await FlutterForegroundTask.stopService();
+      if (_isNativeCameraNullPointer(e)) {
+        unawaited(refreshCamera());
+      }
       if (context != null && context.mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text("Video processing failed: ${_friendlyVideoError(e)}"),
+            content: Text("Video recording failed: $friendlyError"),
           ),
         );
       }
+    } finally {
+      _stopRecordingInFlight = false;
     }
   }
 
