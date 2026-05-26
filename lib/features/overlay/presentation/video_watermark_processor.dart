@@ -632,7 +632,17 @@ class VideoWatermarkProcessor {
         fontSize: baseSize * 0.032,
         fontWeight: FontWeight.w600,
       );
+      final noteStyle = textStyle.copyWith(fontStyle: FontStyle.italic);
+      final noteLines = settings.showNote && data.note.trim().isNotEmpty
+          ? data.note.trim().split(RegExp(r'\r?\n'))
+          : const <String>[];
+      final placeLine = noteLines.isEmpty ? '' : noteLines.first.trim();
+      final extraNote =
+          noteLines.length <= 1 ? '' : noteLines.skip(1).join('\n').trim();
 
+      if (placeLine.isNotEmpty) {
+        spans.add(TextSpan(text: "$placeLine\n", style: noteStyle));
+      }
       if (settings.showDateTime && data.dateTime.isNotEmpty) {
         spans.add(TextSpan(text: "${data.dateTime}\n", style: textStyle));
       }
@@ -646,12 +656,9 @@ class VideoWatermarkProcessor {
                 "Lat: ${data.latitude.toStringAsFixed(6)}\nLon: ${data.longitude.toStringAsFixed(6)}\n",
             style: textStyle));
       }
-      if (settings.showNote && data.note.isNotEmpty) {
-        spans.add(TextSpan(
-            text: data.note,
-            style: textStyle.copyWith(fontStyle: FontStyle.italic)));
+      if (extraNote.isNotEmpty) {
+        spans.add(TextSpan(text: extraNote, style: noteStyle));
       }
-
       final textPainter = TextPainter(
         text: TextSpan(children: spans),
         textDirection: TextDirection.ltr,

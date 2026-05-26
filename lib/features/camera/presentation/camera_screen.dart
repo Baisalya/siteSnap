@@ -110,6 +110,16 @@ class _CameraScreenState extends ConsumerState<CameraScreen>
     return '${minutes.toString().padLeft(2, '0')}:${remainingSeconds.toString().padLeft(2, '0')}';
   }
 
+  String _mergeLocationWithExistingExtraNote({
+    required String location,
+    required String currentNote,
+  }) {
+    final lines = currentNote.trim().split(RegExp(r'\r?\n'));
+    final extraNote = lines.length > 1 ? lines.skip(1).join('\n').trim() : '';
+    if (extraNote.isEmpty) return location;
+    return "$location\n$extraNote";
+  }
+
   void _startPhotoCapture() {
     _shutterFeedbackTimer?.cancel();
     setState(() {
@@ -334,9 +344,13 @@ class _CameraScreenState extends ConsumerState<CameraScreen>
               language: overlaySettings.language,
             );
             if (name != null && mounted) {
+              final currentNote = ref.read(overlayPreviewProvider).note;
               ref.read(overlayPreviewProvider.notifier).state =
                   ref.read(overlayPreviewProvider.notifier).state.copyWith(
-                        note: name,
+                        note: _mergeLocationWithExistingExtraNote(
+                          location: name,
+                          currentNote: currentNote,
+                        ),
                       );
             }
           }
@@ -503,7 +517,8 @@ class _CameraScreenState extends ConsumerState<CameraScreen>
                                                         .previewSize!.width,
                                                     child: CameraPreview(
                                                       controller,
-                                                      key: ObjectKey(controller),
+                                                      key:
+                                                          ObjectKey(controller),
                                                     ),
                                                   ),
                                                 ),

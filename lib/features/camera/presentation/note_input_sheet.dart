@@ -16,20 +16,48 @@ class NoteInputSheet extends ConsumerStatefulWidget {
 }
 
 class _NoteInputSheetState extends ConsumerState<NoteInputSheet> {
-  late TextEditingController controller;
+  late TextEditingController locationController;
+  late TextEditingController extraNoteController;
 
   @override
   void initState() {
     super.initState();
     // Initialize with current note if exists
     final currentNote = ref.read(overlayPreviewProvider).note;
-    controller = TextEditingController(text: currentNote);
+    locationController = TextEditingController(
+      text: _locationLineFromWatermark(currentNote),
+    );
+    extraNoteController = TextEditingController(
+      text: _extraNoteFromWatermark(currentNote),
+    );
   }
 
   @override
   void dispose() {
-    controller.dispose();
+    locationController.dispose();
+    extraNoteController.dispose();
     super.dispose();
+  }
+
+  String _locationLineFromWatermark(String value) {
+    final normalized = value.trim();
+    if (normalized.isEmpty) return '';
+    return normalized.split(RegExp(r'\r?\n')).first.trim();
+  }
+
+  String _extraNoteFromWatermark(String value) {
+    final lines = value.trim().split(RegExp(r'\r?\n'));
+    if (lines.length <= 1) return '';
+    return lines.skip(1).join('\n').trim();
+  }
+
+  String _composeWatermarkText() {
+    final location = locationController.text.trim();
+    final extraNote = extraNoteController.text.trim();
+
+    if (location.isEmpty) return extraNote;
+    if (extraNote.isEmpty) return location;
+    return "$location\n$extraNote";
   }
 
   @override
@@ -255,46 +283,112 @@ class _NoteInputSheetState extends ConsumerState<NoteInputSheet> {
 
   Widget _buildSearchInput(BuildContext context) {
     return Container(
+      padding: const EdgeInsets.all(14),
       decoration: BoxDecoration(
         color: Colors.white.withOpacity(0.03),
         borderRadius: BorderRadius.circular(18),
         border: Border.all(color: Colors.white.withOpacity(0.08)),
       ),
-      child: TextField(
-        controller: controller,
-        style: const TextStyle(color: Colors.white, fontSize: 16),
-        decoration: InputDecoration(
-          hintText: 'Enter project name or location...',
-          hintStyle: const TextStyle(color: Colors.white24),
-          prefixIcon: const Icon(Icons.edit_note_rounded,
-              color: Colors.blueAccent, size: 24),
-          contentPadding: const EdgeInsets.symmetric(vertical: 18),
-          border: InputBorder.none,
-          suffixIcon: Row(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              if (controller.text.isNotEmpty)
-                IconButton(
-                  icon:
-                      const Icon(Icons.clear, color: Colors.white24, size: 20),
-                  onPressed: () => setState(() => controller.clear()),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          _buildInputCaption("LINE 1 - AUTOMATIC LOCATION"),
+          const SizedBox(height: 8),
+          TextField(
+            controller: locationController,
+            style: const TextStyle(color: Colors.white, fontSize: 15),
+            decoration: InputDecoration(
+              hintText: 'Edit location text or tap button to auto-fill',
+              hintStyle: const TextStyle(color: Colors.white24),
+              prefixIcon: const Icon(
+                Icons.place_outlined,
+                color: Colors.blueAccent,
+                size: 22,
+              ),
+              suffixIcon: IconButton(
+                icon: const Icon(
+                  Icons.my_location_rounded,
+                  color: Colors.blueAccent,
                 ),
-              Padding(
-                padding: const EdgeInsets.only(right: 8),
-                child: IconButton(
-                  icon: const Icon(Icons.my_location_rounded,
-                      color: Colors.blueAccent),
-                  style: IconButton.styleFrom(
-                    backgroundColor: Colors.blueAccent.withOpacity(0.1),
-                  ),
-                  onPressed: () => _fetchLocation(context),
+                style: IconButton.styleFrom(
+                  backgroundColor: Colors.blueAccent.withOpacity(0.1),
+                ),
+                onPressed: () => _fetchLocation(context),
+              ),
+              filled: true,
+              fillColor: Colors.black.withOpacity(0.18),
+              border: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(14),
+                borderSide: BorderSide.none,
+              ),
+              contentPadding:
+                  const EdgeInsets.symmetric(horizontal: 12, vertical: 14),
+            ),
+            onChanged: (_) => setState(() {}),
+          ),
+          const SizedBox(height: 14),
+          _buildInputCaption("LINE 2 - EXTRA NOTE"),
+          const SizedBox(height: 8),
+          TextField(
+            controller: extraNoteController,
+            minLines: 2,
+            maxLines: 4,
+            style: const TextStyle(color: Colors.white, fontSize: 15),
+            decoration: InputDecoration(
+              hintText: 'Write additional note here...',
+              hintStyle: const TextStyle(color: Colors.white24),
+              prefixIcon: const Padding(
+                padding: EdgeInsets.only(bottom: 42),
+                child: Icon(
+                  Icons.edit_note_rounded,
+                  color: Colors.blueAccent,
+                  size: 24,
                 ),
               ),
-            ],
+              suffixIcon: extraNoteController.text.isEmpty
+                  ? null
+                  : IconButton(
+                      icon: const Icon(
+                        Icons.clear,
+                        color: Colors.white24,
+                        size: 20,
+                      ),
+                      onPressed: () =>
+                          setState(() => extraNoteController.clear()),
+                    ),
+              filled: true,
+              fillColor: Colors.black.withOpacity(0.18),
+              border: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(14),
+                borderSide: BorderSide.none,
+              ),
+              contentPadding:
+                  const EdgeInsets.symmetric(horizontal: 12, vertical: 14),
+            ),
+            onChanged: (_) => setState(() {}),
           ),
-        ),
-        onChanged: (val) => setState(() {}),
-        onSubmitted: (text) => _submitNote(text),
+          const SizedBox(height: 10),
+          Text(
+            "Overlay preview: automatic location first, extra note starts on the next line.",
+            style: TextStyle(
+              color: Colors.white.withOpacity(0.38),
+              fontSize: 11,
+              height: 1.25,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildInputCaption(String text) {
+    return Text(
+      text,
+      style: TextStyle(
+        color: Colors.blueAccent.withOpacity(0.9),
+        fontSize: 10,
+        fontWeight: FontWeight.w900,
+        letterSpacing: 1.2,
       ),
     );
   }
@@ -366,7 +460,11 @@ class _NoteInputSheetState extends ConsumerState<NoteInputSheet> {
         separatorBuilder: (_, __) => const SizedBox(width: 10),
         itemBuilder: (context, i) {
           return ActionChip(
-            label: Text(recent[i].text),
+            label: Text(
+              recent[i].text.replaceAll(RegExp(r'\s*\r?\n\s*'), '  |  '),
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+            ),
             onPressed: () => _useNote(recent[i]),
             backgroundColor: Colors.white,
             labelStyle: const TextStyle(
@@ -401,8 +499,12 @@ class _NoteInputSheetState extends ConsumerState<NoteInputSheet> {
           child: ListTile(
             contentPadding:
                 const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
-            title: Text(note.text,
-                style: const TextStyle(color: Colors.white, fontSize: 14)),
+            title: Text(
+              note.text,
+              maxLines: 2,
+              overflow: TextOverflow.ellipsis,
+              style: const TextStyle(color: Colors.white, fontSize: 14),
+            ),
             trailing: IconButton(
               icon: const Icon(Icons.delete_outline_rounded,
                   color: Colors.redAccent, size: 20),
@@ -427,7 +529,7 @@ class _NoteInputSheetState extends ConsumerState<NoteInputSheet> {
         width: double.infinity,
         height: 56,
         child: ElevatedButton(
-          onPressed: () => _submitNote(controller.text),
+          onPressed: _submitNote,
           style: ElevatedButton.styleFrom(
             backgroundColor: Colors.blueAccent,
             foregroundColor: Colors.white,
@@ -481,13 +583,13 @@ class _NoteInputSheetState extends ConsumerState<NoteInputSheet> {
     if (context.mounted) {
       Navigator.pop(context);
       if (name != null) {
-        setState(() => controller.text = name);
+        setState(() => locationController.text = name);
       }
     }
   }
 
-  Future<void> _submitNote(String text) async {
-    final value = text.trim();
+  Future<void> _submitNote() async {
+    final value = _composeWatermarkText();
     if (value.isNotEmpty) {
       await ref.read(savedNotesProvider.notifier).addNote(value);
       final overlay = ref.read(overlayPreviewProvider);
@@ -499,6 +601,10 @@ class _NoteInputSheetState extends ConsumerState<NoteInputSheet> {
 
   void _useNote(dynamic note) {
     ref.read(savedNotesProvider.notifier).markAsUsed(note);
+    setState(() {
+      locationController.text = _locationLineFromWatermark(note.text);
+      extraNoteController.text = _extraNoteFromWatermark(note.text);
+    });
     final overlay = ref.read(overlayPreviewProvider);
     ref.read(overlayPreviewProvider.notifier).state =
         overlay.copyWith(note: note.text);

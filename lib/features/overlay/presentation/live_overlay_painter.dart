@@ -12,7 +12,8 @@ class LiveOverlayPainter extends CustomPainter {
   final DeviceOrientation orientation;
   final OverlaySettings settings;
 
-  LiveOverlayPainter(this.data, this.orientation, {this.settings = const OverlaySettings()});
+  LiveOverlayPainter(this.data, this.orientation,
+      {this.settings = const OverlaySettings()});
 
   @override
   void paint(Canvas canvas, Size size) {
@@ -70,7 +71,7 @@ class LiveOverlayPainter extends CustomPainter {
 
     final warningStyle = textStyle.copyWith(color: Colors.redAccent);
     final noteStyle = textStyle.copyWith(
-      fontSize: baseSize * 0.035, 
+      fontSize: baseSize * 0.035,
       color: settings.textColor,
       fontStyle: FontStyle.italic,
     );
@@ -79,19 +80,32 @@ class LiveOverlayPainter extends CustomPainter {
     // BUILD TEXT SPANS
     // ===============================
     final List<TextSpan> spans = [];
+    final noteLines = settings.showNote && data.note.trim().isNotEmpty
+        ? data.note.trim().split(RegExp(r'\r?\n'))
+        : const <String>[];
+    final placeLine = noteLines.isEmpty ? '' : noteLines.first.trim();
+    final extraNote =
+        noteLines.length <= 1 ? '' : noteLines.skip(1).join('\n').trim();
+
+    if (placeLine.isNotEmpty) {
+      spans.add(TextSpan(text: "$placeLine\n", style: noteStyle));
+    }
 
     if (settings.showDateTime && data.dateTime.isNotEmpty) {
       spans.add(TextSpan(text: "${data.dateTime}\n", style: textStyle));
     }
 
     if (data.locationWarning != null) {
-      spans.add(TextSpan(text: "${data.locationWarning}\n", style: warningStyle));
+      spans.add(
+          TextSpan(text: "${data.locationWarning}\n", style: warningStyle));
     } else if (settings.showCoordinates) {
       final latLabel = OverlayUtils.getLabel('latitude', settings.language);
       final lonLabel = OverlayUtils.getLabel('longitude', settings.language);
-      final latVal = OverlayUtils.formatCoordinate(data.latitude, true, settings.coordinateFormat);
-      final lonVal = OverlayUtils.formatCoordinate(data.longitude, false, settings.coordinateFormat);
-      
+      final latVal = OverlayUtils.formatCoordinate(
+          data.latitude, true, settings.coordinateFormat);
+      final lonVal = OverlayUtils.formatCoordinate(
+          data.longitude, false, settings.coordinateFormat);
+
       spans.add(TextSpan(
         text: "$latLabel: $latVal\n$lonLabel: $lonVal\n",
         style: textStyle,
@@ -105,7 +119,8 @@ class LiveOverlayPainter extends CustomPainter {
     }
     if (settings.showDirection) {
       final dirLabel = OverlayUtils.getLabel('direction', settings.language);
-      altDirText += "$dirLabel: ${data.direction} ${data.heading.toStringAsFixed(0)}°";
+      altDirText +=
+          "$dirLabel: ${data.direction} ${data.heading.toStringAsFixed(0)}°";
     }
     if (altDirText.isNotEmpty) {
       spans.add(TextSpan(text: "$altDirText\n", style: textStyle));
@@ -131,8 +146,8 @@ class LiveOverlayPainter extends CustomPainter {
       spans.add(TextSpan(text: "$label: ${data.air}\n", style: textStyle));
     }
 
-    if (settings.showNote && data.note.isNotEmpty) {
-      spans.add(TextSpan(text: data.note, style: noteStyle));
+    if (extraNote.isNotEmpty) {
+      spans.add(TextSpan(text: extraNote, style: noteStyle));
     }
 
     final textPainter = TextPainter(
@@ -167,7 +182,8 @@ class LiveOverlayPainter extends CustomPainter {
     // BACKGROUND CARD
     // ===============================
     final bgPaint = Paint()
-      ..color = settings.backgroundColor.withOpacity(settings.backgroundOpacity);
+      ..color =
+          settings.backgroundColor.withOpacity(settings.backgroundOpacity);
 
     final borderPaint = Paint()
       ..color = Colors.black.withOpacity(0.1)
