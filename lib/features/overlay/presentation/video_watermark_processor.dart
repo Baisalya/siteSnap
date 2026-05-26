@@ -13,6 +13,7 @@ import 'package:ffmpeg_kit_flutter_new_https_gpl/ffmpeg_kit_config.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:path/path.dart' as p;
 
+import 'package:surveycam/features/camera/domain/camera_lens_type.dart';
 import 'package:surveycam/features/overlay/domain/overlay_model.dart';
 import 'package:surveycam/features/overlay/domain/overlay_settings.dart';
 import 'package:surveycam/features/overlay/domain/video_overlay_sample.dart';
@@ -214,17 +215,36 @@ class VideoWatermarkProcessor {
     return normalized < 0 ? normalized + 360 : normalized;
   }
 
-  static String normalizeVideoForOverlayFilter(double rotationDegrees) {
+  static bool shouldApplyFrontCameraPortraitCorrection({
+    required CameraLensType lens,
+    required DeviceOrientation? recordingOrientation,
+  }) {
+    return lens == CameraLensType.front &&
+        recordingOrientation == DeviceOrientation.portraitUp;
+  }
+
+  static String normalizeVideoForOverlayFilter(
+    double rotationDegrees, {
+    bool extraHalfTurn = false,
+  }) {
+    final String normalizeFilter;
     switch (_normalizedRotationDegrees(rotationDegrees).round()) {
       case 90:
-        return 'transpose=clock,';
+        normalizeFilter = 'transpose=clock,';
+        break;
       case 180:
-        return 'transpose=clock,transpose=clock,';
+        normalizeFilter = 'transpose=clock,transpose=clock,';
+        break;
       case 270:
-        return 'transpose=cclock,';
+        normalizeFilter = 'transpose=cclock,';
+        break;
       default:
-        return '';
+        normalizeFilter = '';
     }
+
+    final halfTurnFilter =
+        extraHalfTurn ? 'transpose=clock,transpose=clock,' : '';
+    return '$normalizeFilter$halfTurnFilter';
   }
 
   static Future<double> getVideoRotationDegrees(String videoPath) async {
@@ -385,8 +405,12 @@ class VideoWatermarkProcessor {
     required int height,
     bool mirror = false,
     double rotationDegrees = 0,
+    bool extraHalfTurn = false,
   }) {
-    final normalizeFilter = normalizeVideoForOverlayFilter(rotationDegrees);
+    final normalizeFilter = normalizeVideoForOverlayFilter(
+      rotationDegrees,
+      extraHalfTurn: extraHalfTurn,
+    );
     final hflip = mirror ? 'hflip,' : '';
     return '$normalizeFilter${hflip}scale=$width:$height:force_original_aspect_ratio=decrease,'
         'pad=$width:$height:(ow-iw)/2:(oh-ih)/2,'
@@ -732,6 +756,7 @@ class VideoWatermarkProcessor {
     required int frameCount,
     required int durationMs,
     double sampleFps = overlaySampleFps,
+    bool correctFrontCameraPortrait = false,
     Function(double)? onProgress,
   }) async {
     try {
@@ -747,7 +772,10 @@ class VideoWatermarkProcessor {
       // FFmpeg command optimized for speed
       // [1:v]fps=$sampleFps ensures the overlay frames match the expected timing
       final rotationDegrees = await getVideoRotationDegrees(videoPath);
-      final normalizeFilter = normalizeVideoForOverlayFilter(rotationDegrees);
+      final normalizeFilter = normalizeVideoForOverlayFilter(
+        rotationDegrees,
+        extraHalfTurn: correctFrontCameraPortrait,
+      );
       final probedDurationMs = await getVideoDurationMs(videoPath);
       final outputDurationMs = probedDurationMs ?? durationMs;
       final durationLimitArg = ffmpegDurationLimitArg(outputDurationMs);
@@ -876,6 +904,7 @@ class VideoWatermarkProcessor {
   static Future<String?> mergeVideos(
     List<String> paths, {
     List<bool>? mirrorMap,
+    List<bool>? frontCameraPortraitCorrectionMap,
   }) async {
     if (paths.isEmpty) return null;
 
@@ -893,7 +922,13 @@ class VideoWatermarkProcessor {
       if (paths.length == 1) {
         final encoderSettings = _encoderSettings();
         final rotationDegrees = await getVideoRotationDegrees(paths.first);
-        final normalizeFilter = normalizeVideoForOverlayFilter(rotationDegrees);
+        final extraHalfTurn = frontCameraPortraitCorrectionMap != null &&
+            frontCameraPortraitCorrectionMap.isNotEmpty &&
+            frontCameraPortraitCorrectionMap.first;
+        final normalizeFilter = normalizeVideoForOverlayFilter(
+          rotationDegrees,
+          extraHalfTurn: extraHalfTurn,
+        );
         final command =
             '-noautorotate -i "${paths.first}" -vf "${normalizeFilter}hflip,format=yuv420p" -map 0:a? '
             '-c:v ${encoderSettings.encoder} ${encoderSettings.args} '
@@ -922,6 +957,9 @@ class VideoWatermarkProcessor {
           height: targetSize.height,
           mirror: isMirrored,
           rotationDegrees: rotationMap[i],
+          extraHalfTurn: frontCameraPortraitCorrectionMap != null &&
+              i < frontCameraPortraitCorrectionMap.length &&
+              frontCameraPortraitCorrectionMap[i],
         );
 
         filterComplex += '[$i:v]$fitFilter[v$i];';

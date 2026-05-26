@@ -239,6 +239,42 @@ void main() {
     );
   });
 
+  test('front camera portrait correction is limited to portrait-up front lens',
+      () {
+    expect(
+      VideoWatermarkProcessor.shouldApplyFrontCameraPortraitCorrection(
+        lens: CameraLensType.front,
+        recordingOrientation: DeviceOrientation.portraitUp,
+      ),
+      isTrue,
+    );
+    expect(
+      VideoWatermarkProcessor.shouldApplyFrontCameraPortraitCorrection(
+        lens: CameraLensType.normal,
+        recordingOrientation: DeviceOrientation.portraitUp,
+      ),
+      isFalse,
+    );
+    expect(
+      VideoWatermarkProcessor.shouldApplyFrontCameraPortraitCorrection(
+        lens: CameraLensType.front,
+        recordingOrientation: DeviceOrientation.landscapeLeft,
+      ),
+      isFalse,
+    );
+  });
+
+  test('front camera portrait correction adds a half turn after normalization',
+      () {
+    expect(
+      VideoWatermarkProcessor.normalizeVideoForOverlayFilter(
+        90,
+        extraHalfTurn: true,
+      ),
+      'transpose=clock,transpose=clock,transpose=clock,',
+    );
+  });
+
   test('merge fit filter normalizes rotation before mirror and padding', () {
     final filter = VideoWatermarkProcessor.fitVideoInsideCanvasFilter(
       width: 1080,

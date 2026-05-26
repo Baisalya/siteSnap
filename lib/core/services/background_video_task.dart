@@ -6,6 +6,7 @@ import 'package:flutter_foreground_task/flutter_foreground_task.dart';
 import 'package:surveycam/core/services/video_processing_job.dart';
 import 'package:surveycam/core/utils/gallery_saver.dart';
 import 'package:surveycam/core/utils/thumbnail_utils.dart';
+import 'package:surveycam/features/camera/domain/camera_lens_type.dart';
 import 'package:surveycam/features/overlay/presentation/video_watermark_processor.dart';
 
 @pragma('vm:entry-point')
@@ -130,11 +131,23 @@ class VideoProcessingTaskHandler extends TaskHandler {
       String? mergedPath;
       var canProcessOverlay = job.history.isNotEmpty;
       final needsMirror = job.segments.any((segment) => segment.mirror);
+      final recordingOrientation =
+          VideoWatermarkProcessor.preferredOrientationForSamples(job.history);
+      final frontCameraPortraitCorrectionMap = job.segments
+          .map(
+            (segment) => VideoWatermarkProcessor
+                .shouldApplyFrontCameraPortraitCorrection(
+              lens: segment.lens,
+              recordingOrientation: recordingOrientation,
+            ),
+          )
+          .toList(growable: false);
       if (job.segments.length > 1 || needsMirror) {
         await _progress(sendPort, 0.10, 'Merging video segments... 10%');
         mergedPath = await VideoWatermarkProcessor.mergeVideos(
           job.segments.map((segment) => segment.path).toList(),
           mirrorMap: job.segments.map((segment) => segment.mirror).toList(),
+          frontCameraPortraitCorrectionMap: frontCameraPortraitCorrectionMap,
         );
         await _throwIfCancelRequested(sendPort);
         if (mergedPath != null) {
@@ -170,12 +183,17 @@ class VideoProcessingTaskHandler extends TaskHandler {
         await _throwIfCancelRequested(sendPort);
 
         if (sequenceDir != null) {
+          final correctRawFrontPortrait = mergedPath == null &&
+              job.segments.length == 1 &&
+              job.segments.single.lens == CameraLensType.front &&
+              frontCameraPortraitCorrectionMap.single;
           processedPath =
               await VideoWatermarkProcessor.applyOverlaySequenceToVideo(
             videoPath: sourcePath,
             sequenceDir: sequenceDir,
             frameCount: job.history.length,
             durationMs: job.durationMs,
+            correctFrontCameraPortrait: correctRawFrontPortrait,
             onProgress: (p) {
               final progress = 0.4 + (p * 0.5);
               final message =
