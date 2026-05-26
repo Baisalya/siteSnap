@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:surveycam/core/services/location_service.dart';
 import 'package:surveycam/features/overlay/domain/WatermarkPosition.dart';
+import 'package:surveycam/features/overlay/domain/overlay_settings.dart';
 import 'package:surveycam/features/overlay/presentation/overlay_preview_state.dart';
 import 'package:surveycam/features/overlay/presentation/overlay_settings_provider.dart';
 import 'package:surveycam/features/overlay/presentation/saved_notes_provider.dart';
@@ -18,6 +19,7 @@ class NoteInputSheet extends ConsumerStatefulWidget {
 class _NoteInputSheetState extends ConsumerState<NoteInputSheet> {
   late TextEditingController locationController;
   late TextEditingController extraNoteController;
+  bool _extraNoteHasText = false;
 
   @override
   void initState() {
@@ -30,13 +32,22 @@ class _NoteInputSheetState extends ConsumerState<NoteInputSheet> {
     extraNoteController = TextEditingController(
       text: _extraNoteFromWatermark(currentNote),
     );
+    _extraNoteHasText = extraNoteController.text.isNotEmpty;
+    extraNoteController.addListener(_handleExtraNoteChanged);
   }
 
   @override
   void dispose() {
+    extraNoteController.removeListener(_handleExtraNoteChanged);
     locationController.dispose();
     extraNoteController.dispose();
     super.dispose();
+  }
+
+  void _handleExtraNoteChanged() {
+    final hasText = extraNoteController.text.isNotEmpty;
+    if (hasText == _extraNoteHasText) return;
+    setState(() => _extraNoteHasText = hasText);
   }
 
   String _locationLineFromWatermark(String value) {
@@ -63,7 +74,10 @@ class _NoteInputSheetState extends ConsumerState<NoteInputSheet> {
   @override
   Widget build(BuildContext context) {
     final notes = ref.watch(savedNotesProvider);
-    final overlayPreview = ref.watch(overlayPreviewProvider);
+    final position = ref.watch(
+      overlayPreviewProvider.select((value) => value.position),
+    );
+    final overlaySettings = ref.watch(overlaySettingsProvider);
 
     final recent = notes.take(3).toList();
     final allNotes = notes;
@@ -106,7 +120,13 @@ class _NoteInputSheetState extends ConsumerState<NoteInputSheet> {
                   // ───── POSITION SELECTOR ─────
                   _buildSectionLabel("POSITION ON IMAGE"),
                   const SizedBox(height: 12),
-                  _buildPositionSelector(overlayPreview.position),
+                  _buildPositionSelector(position),
+
+                  const SizedBox(height: 24),
+
+                  _buildSectionLabel("BRAND WATERMARK"),
+                  const SizedBox(height: 12),
+                  _buildBrandSelector(overlaySettings),
 
                   const SizedBox(height: 24),
 
@@ -227,6 +247,21 @@ class _NoteInputSheetState extends ConsumerState<NoteInputSheet> {
     );
   }
 
+  Future<void> _openBrandSettings(
+    BuildContext context, {
+    int? initialSlot,
+  }) async {
+    await Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) => OverlayConfigurationScreen(
+          focusBrandWatermark: true,
+          initialWatermarkSlot: initialSlot,
+        ),
+      ),
+    );
+  }
+
   Widget _buildSettingsShortcut(BuildContext context) {
     return InkWell(
       onTap: () => _openOverlaySettings(context),
@@ -324,7 +359,6 @@ class _NoteInputSheetState extends ConsumerState<NoteInputSheet> {
               contentPadding:
                   const EdgeInsets.symmetric(horizontal: 12, vertical: 14),
             ),
-            onChanged: (_) => setState(() {}),
           ),
           const SizedBox(height: 14),
           _buildInputCaption("LINE 2 - EXTRA NOTE"),
@@ -345,7 +379,7 @@ class _NoteInputSheetState extends ConsumerState<NoteInputSheet> {
                   size: 24,
                 ),
               ),
-              suffixIcon: extraNoteController.text.isEmpty
+              suffixIcon: !_extraNoteHasText
                   ? null
                   : IconButton(
                       icon: const Icon(
@@ -353,8 +387,7 @@ class _NoteInputSheetState extends ConsumerState<NoteInputSheet> {
                         color: Colors.white24,
                         size: 20,
                       ),
-                      onPressed: () =>
-                          setState(() => extraNoteController.clear()),
+                      onPressed: extraNoteController.clear,
                     ),
               filled: true,
               fillColor: Colors.black.withOpacity(0.18),
@@ -365,7 +398,6 @@ class _NoteInputSheetState extends ConsumerState<NoteInputSheet> {
               contentPadding:
                   const EdgeInsets.symmetric(horizontal: 12, vertical: 14),
             ),
-            onChanged: (_) => setState(() {}),
           ),
           const SizedBox(height: 10),
           Text(
@@ -410,6 +442,153 @@ class _NoteInputSheetState extends ConsumerState<NoteInputSheet> {
         ],
       ),
     );
+  }
+
+  Widget _buildBrandSelector(OverlaySettings settings) {
+    final custom1Configured = _isCustomBrandConfigured(settings, 1);
+    final custom2Configured = _isCustomBrandConfigured(settings, 2);
+
+    return Container(
+      padding: const EdgeInsets.all(6),
+      decoration: BoxDecoration(
+        color: Colors.black54,
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: Colors.white.withOpacity(0.05)),
+      ),
+      child: Column(
+        children: [
+          Row(
+            children: [
+              _brandOption(
+                slot: 0,
+                label: "Default",
+                icon: Icons.camera_alt_rounded,
+                configured: true,
+                selected: settings.watermarkPresetIndex == 0,
+              ),
+              const SizedBox(width: 8),
+              _brandOption(
+                slot: 1,
+                label: custom1Configured ? "Custom 1" : "Add 1",
+                icon: custom1Configured
+                    ? Icons.workspace_premium_rounded
+                    : Icons.add_rounded,
+                configured: custom1Configured,
+                selected: settings.watermarkPresetIndex == 1,
+              ),
+              const SizedBox(width: 8),
+              _brandOption(
+                slot: 2,
+                label: custom2Configured ? "Custom 2" : "Add 2",
+                icon: custom2Configured
+                    ? Icons.workspace_premium_rounded
+                    : Icons.add_rounded,
+                configured: custom2Configured,
+                selected: settings.watermarkPresetIndex == 2,
+              ),
+            ],
+          ),
+          if (!custom1Configured && !custom2Configured) ...[
+            const SizedBox(height: 10),
+            InkWell(
+              onTap: () => _openBrandSettings(context, initialSlot: 1),
+              borderRadius: BorderRadius.circular(10),
+              child: Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 7),
+                child: Row(
+                  children: [
+                    const Icon(
+                      Icons.add_photo_alternate_outlined,
+                      color: Colors.blueAccent,
+                      size: 18,
+                    ),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: Text(
+                        "Add your logo or brand text in Overlay Settings",
+                        style: TextStyle(
+                          color: Colors.white.withOpacity(0.52),
+                          fontSize: 12,
+                        ),
+                      ),
+                    ),
+                    const Icon(
+                      Icons.chevron_right_rounded,
+                      color: Colors.white38,
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+
+  Widget _brandOption({
+    required int slot,
+    required String label,
+    required IconData icon,
+    required bool configured,
+    required bool selected,
+  }) {
+    final enabled = slot == 0 || configured;
+    final foreground = selected
+        ? Colors.white
+        : enabled
+            ? Colors.white70
+            : Colors.white54;
+
+    return Expanded(
+      child: InkWell(
+        onTap: enabled
+            ? () => ref
+                .read(overlaySettingsProvider.notifier)
+                .setWatermarkPresetIndex(slot)
+            : () => _openBrandSettings(context, initialSlot: slot),
+        borderRadius: BorderRadius.circular(10),
+        child: AnimatedContainer(
+          duration: const Duration(milliseconds: 180),
+          padding: const EdgeInsets.symmetric(vertical: 11, horizontal: 6),
+          decoration: BoxDecoration(
+            color: selected ? Colors.blueAccent : Colors.transparent,
+            borderRadius: BorderRadius.circular(10),
+            border: Border.all(
+              color: enabled
+                  ? Colors.transparent
+                  : Colors.blueAccent.withOpacity(0.28),
+            ),
+          ),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(icon, color: foreground, size: 18),
+              const SizedBox(height: 5),
+              Text(
+                label,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(
+                  color: foreground,
+                  fontSize: 11,
+                  fontWeight: selected ? FontWeight.bold : FontWeight.w600,
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  bool _isCustomBrandConfigured(OverlaySettings settings, int slot) {
+    if (slot == 2) {
+      return settings.watermarkText2.trim().isNotEmpty ||
+          (settings.watermarkLogoPath2?.isNotEmpty ?? false);
+    }
+    return settings.watermarkText.trim().isNotEmpty ||
+        (settings.watermarkLogoPath?.isNotEmpty ?? false);
   }
 
   Widget _positionOption(
@@ -484,37 +663,39 @@ class _NoteInputSheetState extends ConsumerState<NoteInputSheet> {
   }
 
   Widget _buildSavedNotesList(List<dynamic> allNotes) {
-    return ListView.builder(
-      shrinkWrap: true,
-      physics: const NeverScrollableScrollPhysics(),
-      itemCount: allNotes.length,
-      itemBuilder: (context, i) {
-        final note = allNotes[i];
-        return Container(
-          margin: const EdgeInsets.only(bottom: 8),
-          decoration: BoxDecoration(
-            color: Colors.white.withOpacity(0.03),
-            borderRadius: BorderRadius.circular(14),
-          ),
-          child: ListTile(
-            contentPadding:
-                const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
-            title: Text(
-              note.text,
-              maxLines: 2,
-              overflow: TextOverflow.ellipsis,
-              style: const TextStyle(color: Colors.white, fontSize: 14),
+    return SizedBox(
+      height: allNotes.length > 3 ? 260.0 : allNotes.length * 72.0,
+      child: ListView.builder(
+        physics: const BouncingScrollPhysics(),
+        itemCount: allNotes.length,
+        itemBuilder: (context, i) {
+          final note = allNotes[i];
+          return Container(
+            margin: const EdgeInsets.only(bottom: 8),
+            decoration: BoxDecoration(
+              color: Colors.white.withOpacity(0.03),
+              borderRadius: BorderRadius.circular(14),
             ),
-            trailing: IconButton(
-              icon: const Icon(Icons.delete_outline_rounded,
-                  color: Colors.redAccent, size: 20),
-              onPressed: () =>
-                  ref.read(savedNotesProvider.notifier).deleteNote(note.id),
+            child: ListTile(
+              contentPadding:
+                  const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+              title: Text(
+                note.text,
+                maxLines: 2,
+                overflow: TextOverflow.ellipsis,
+                style: const TextStyle(color: Colors.white, fontSize: 14),
+              ),
+              trailing: IconButton(
+                icon: const Icon(Icons.delete_outline_rounded,
+                    color: Colors.redAccent, size: 20),
+                onPressed: () =>
+                    ref.read(savedNotesProvider.notifier).deleteNote(note.id),
+              ),
+              onTap: () => _useNote(note),
             ),
-            onTap: () => _useNote(note),
-          ),
-        );
-      },
+          );
+        },
+      ),
     );
   }
 
@@ -583,7 +764,7 @@ class _NoteInputSheetState extends ConsumerState<NoteInputSheet> {
     if (context.mounted) {
       Navigator.pop(context);
       if (name != null) {
-        setState(() => locationController.text = name);
+        locationController.text = name;
       }
     }
   }
@@ -601,10 +782,8 @@ class _NoteInputSheetState extends ConsumerState<NoteInputSheet> {
 
   void _useNote(dynamic note) {
     ref.read(savedNotesProvider.notifier).markAsUsed(note);
-    setState(() {
-      locationController.text = _locationLineFromWatermark(note.text);
-      extraNoteController.text = _extraNoteFromWatermark(note.text);
-    });
+    locationController.text = _locationLineFromWatermark(note.text);
+    extraNoteController.text = _extraNoteFromWatermark(note.text);
     final overlay = ref.read(overlayPreviewProvider);
     ref.read(overlayPreviewProvider.notifier).state =
         overlay.copyWith(note: note.text);

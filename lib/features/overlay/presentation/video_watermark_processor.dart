@@ -473,6 +473,8 @@ class VideoWatermarkProcessor {
           final int index = i + j;
           batchTasks.add(Future(() async {
             final sample = frameSamples[index];
+            final customLogo =
+                await _loadCustomLogo(sample.settings.activeWatermarkLogoPath);
             final pngBytes = await generateSingleFrameBytes(
               data: sample.data,
               orientation: sample.orientation,
@@ -482,7 +484,9 @@ class VideoWatermarkProcessor {
               showWatermark: showWatermark,
               settings: sample.settings,
               pictureInfo: pictureInfo,
+              customLogo: customLogo,
             );
+            customLogo?.dispose();
 
             if (pngBytes != null) {
               final file = File(p.join(
@@ -520,14 +524,19 @@ class VideoWatermarkProcessor {
     required Size size,
     required DeviceOrientation orientation,
     required PictureInfo pictureInfo,
+    required OverlaySettings settings,
+    ui.Image? customLogo,
     bool useLandscapeLeftMarkedArea = false,
   }) {
     final double baseSize = min(size.width, size.height);
     const double margin = 15.0;
+    final brandText = settings.activeWatermarkText.trim();
+    final hasText = brandText.isNotEmpty;
+    final hasLogo = settings.activeWatermarkShowLogo;
 
     final textPainter = TextPainter(
       text: TextSpan(
-        text: "SurveyCam",
+        text: brandText,
         style: TextStyle(
           color: Colors.white,
           fontSize: baseSize * 0.045,
@@ -544,10 +553,14 @@ class VideoWatermarkProcessor {
       textDirection: TextDirection.ltr,
     )..layout();
 
-    final double svgSize = textPainter.height;
-    const double spacing = 10;
-    final double boxWidth = svgSize + spacing + textPainter.width;
-    final double boxHeight = svgSize;
+    final double logoSize =
+        hasLogo ? (hasText ? textPainter.height : baseSize * 0.06) : 0;
+    final double spacing = hasLogo && hasText ? 10 : 0;
+    final double boxWidth =
+        logoSize + spacing + (hasText ? textPainter.width : 0);
+    final double boxHeight = max(logoSize, hasText ? textPainter.height : 0);
+
+    if (boxWidth <= 0 || boxHeight <= 0) return;
 
     canvas.save();
 
@@ -598,15 +611,64 @@ class VideoWatermarkProcessor {
         break;
     }
 
-    // Draw SVG
-    canvas.save();
-    final double scale = svgSize / pictureInfo.size.height;
-    canvas.scale(scale, scale);
-    canvas.drawPicture(pictureInfo.picture);
-    canvas.restore();
+    if (hasLogo) {
+      _paintBrandLogo(
+        canvas: canvas,
+        offset: Offset.zero,
+        size: logoSize,
+        defaultLogo: pictureInfo,
+        customLogo: customLogo,
+      );
+    }
 
-    // Draw Text
-    textPainter.paint(canvas, Offset(svgSize + spacing, 0));
+    if (hasText) {
+      textPainter.paint(canvas, Offset(logoSize + spacing, 0));
+    }
+
+    canvas.restore();
+  }
+
+  static Future<ui.Image?> _loadCustomLogo(String? path) async {
+    if (path == null || path.isEmpty) return null;
+    try {
+      final file = File(path);
+      if (!await file.exists()) return null;
+      final bytes = await file.readAsBytes();
+      final codec = await ui.instantiateImageCodec(bytes);
+      final frame = await codec.getNextFrame();
+      return frame.image;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  static void _paintBrandLogo({
+    required Canvas canvas,
+    required Offset offset,
+    required double size,
+    required PictureInfo defaultLogo,
+    ui.Image? customLogo,
+  }) {
+    canvas.save();
+    canvas.translate(offset.dx, offset.dy);
+
+    if (customLogo != null) {
+      canvas.drawImageRect(
+        customLogo,
+        Rect.fromLTWH(
+          0,
+          0,
+          customLogo.width.toDouble(),
+          customLogo.height.toDouble(),
+        ),
+        Rect.fromLTWH(0, 0, size, size),
+        Paint()..filterQuality = ui.FilterQuality.high,
+      );
+    } else {
+      final double scale = size / defaultLogo.size.height;
+      canvas.scale(scale, scale);
+      canvas.drawPicture(defaultLogo.picture);
+    }
 
     canvas.restore();
   }
@@ -617,6 +679,7 @@ class VideoWatermarkProcessor {
     required OverlayData data,
     required DeviceOrientation orientation,
     required PictureInfo pictureInfo,
+    ui.Image? customLogo,
     bool showOverlay = true,
     bool showWatermark = true,
     OverlaySettings settings = const OverlaySettings(),
@@ -732,6 +795,8 @@ class VideoWatermarkProcessor {
         size: size,
         orientation: orientation,
         pictureInfo: pictureInfo,
+        settings: settings,
+        customLogo: customLogo,
         useLandscapeLeftMarkedArea: useLandscapeLeftMarkedArea,
       );
     }
@@ -743,6 +808,7 @@ class VideoWatermarkProcessor {
     required double width,
     required double height,
     required PictureInfo pictureInfo,
+    ui.Image? customLogo,
     bool showOverlay = true,
     bool showWatermark = true,
     OverlaySettings settings = const OverlaySettings(),
@@ -763,6 +829,7 @@ class VideoWatermarkProcessor {
       data: data,
       orientation: paintOrientation,
       pictureInfo: pictureInfo,
+      customLogo: customLogo,
       showOverlay: showOverlay,
       showWatermark: showWatermark,
       settings: settings,

@@ -49,6 +49,8 @@ class _ImagePreviewScreenState extends ConsumerState<ImagePreviewScreen> {
   bool _showOverlay = true;
   bool _showTextWatermark = true;
   ui.Image? _previewImage;
+  ui.Image? _customLogoImage;
+  String? _loadedCustomLogoPath;
   PictureInfo? _svgPicture;
   DeviceOrientation? _captureOrientation;
   CameraAspectRatio? _captureAspectRatio;
@@ -94,6 +96,37 @@ class _ImagePreviewScreenState extends ConsumerState<ImagePreviewScreen> {
     });
   }
 
+  void _loadCustomLogo(String? path) async {
+    _loadedCustomLogoPath = path;
+    if (path == null || path.isEmpty) {
+      setState(() {
+        _customLogoImage?.dispose();
+        _customLogoImage = null;
+      });
+      return;
+    }
+
+    try {
+      final file = File(path);
+      if (!await file.exists()) return;
+      final bytes = await file.readAsBytes();
+      final codec = await ui.instantiateImageCodec(bytes);
+      final frame = await codec.getNextFrame();
+
+      if (!mounted || _loadedCustomLogoPath != path) {
+        frame.image.dispose();
+        return;
+      }
+
+      setState(() {
+        _customLogoImage?.dispose();
+        _customLogoImage = frame.image;
+      });
+    } catch (e) {
+      debugPrint("Error loading custom watermark logo: $e");
+    }
+  }
+
   void _capturePreviewState() {
     final cameraState = ref.read(cameraViewModelProvider);
     _captureOrientation =
@@ -119,6 +152,7 @@ class _ImagePreviewScreenState extends ConsumerState<ImagePreviewScreen> {
   void dispose() {
     _transformationController.dispose();
     _previewImage?.dispose();
+    _customLogoImage?.dispose();
     super.dispose();
   }
 
@@ -250,6 +284,11 @@ class _ImagePreviewScreenState extends ConsumerState<ImagePreviewScreen> {
     final live = ref.watch(overlayPreviewProvider);
     final cameraState = ref.watch(cameraViewModelProvider);
     final settings = ref.watch(overlaySettingsProvider);
+    if (_loadedCustomLogoPath != settings.activeWatermarkLogoPath) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) _loadCustomLogo(settings.activeWatermarkLogoPath);
+      });
+    }
 
     final overlayData = (captured ?? live).copyWith(
       note: live.note,
@@ -295,6 +334,7 @@ class _ImagePreviewScreenState extends ConsumerState<ImagePreviewScreen> {
                                     (_captureLens ?? cameraState.captureLens) ==
                                         CameraLensType.front,
                                 svgPicture: _svgPicture,
+                                customLogo: _customLogoImage,
                                 settings: settings,
                               ),
                               child: const SizedBox.expand(),
@@ -546,6 +586,7 @@ class _CapturedPhotoPreviewPainter extends CustomPainter {
   final CameraAspectRatio aspectRatio;
   final bool mirror;
   final PictureInfo? svgPicture;
+  final ui.Image? customLogo;
   final OverlaySettings settings;
 
   _CapturedPhotoPreviewPainter({
@@ -557,6 +598,7 @@ class _CapturedPhotoPreviewPainter extends CustomPainter {
     required this.aspectRatio,
     required this.mirror,
     required this.svgPicture,
+    required this.customLogo,
     required this.settings,
   });
 
@@ -590,7 +632,7 @@ class _CapturedPhotoPreviewPainter extends CustomPainter {
       overlayPainter.paint(canvas, Size(srcRect.width, srcRect.height));
     }
 
-    if (showWatermark && svgPicture != null) {
+    if (showWatermark && (svgPicture != null || customLogo != null)) {
       _drawWatermark(canvas, srcRect);
     }
 
@@ -683,9 +725,12 @@ class _CapturedPhotoPreviewPainter extends CustomPainter {
     final baseSize = min(srcRect.width, srcRect.height);
     final padding = contentW * 0.04;
 
+    final brandText = settings.activeWatermarkText.trim();
+    final hasText = brandText.isNotEmpty;
+    final hasLogo = settings.activeWatermarkShowLogo;
     final textPainter = TextPainter(
       text: TextSpan(
-        text: "SurveyCam",
+        text: brandText,
         style: TextStyle(
           color: Colors.white,
           fontSize: baseSize * 0.045,
@@ -702,23 +747,47 @@ class _CapturedPhotoPreviewPainter extends CustomPainter {
       textDirection: TextDirection.ltr,
     )..layout();
 
-    final svgSize = textPainter.height;
-    const spacing = 10.0;
-    final totalWidth = svgSize + spacing + textPainter.width;
+    final double logoSize =
+        hasLogo ? (hasText ? textPainter.height : baseSize * 0.06) : 0;
+    final double spacing = hasLogo && hasText ? 10.0 : 0.0;
+    final double totalWidth =
+        logoSize + spacing + (hasText ? textPainter.width : 0);
+    if (totalWidth <= 0) {
+      canvas.restore();
+      return;
+    }
     final isLandscape = orientation == DeviceOrientation.landscapeLeft ||
         orientation == DeviceOrientation.landscapeRight;
 
     final dx = isLandscape ? padding : contentW - totalWidth - padding;
     final dy = padding;
 
-    canvas.save();
-    canvas.translate(dx, dy);
-    final scale = svgSize / svgPicture!.size.height;
-    canvas.scale(scale, scale);
-    canvas.drawPicture(svgPicture!.picture);
-    canvas.restore();
+    if (hasLogo) {
+      canvas.save();
+      canvas.translate(dx, dy);
+      if (customLogo != null) {
+        canvas.drawImageRect(
+          customLogo!,
+          Rect.fromLTWH(
+            0,
+            0,
+            customLogo!.width.toDouble(),
+            customLogo!.height.toDouble(),
+          ),
+          Rect.fromLTWH(0, 0, logoSize, logoSize),
+          Paint()..filterQuality = ui.FilterQuality.high,
+        );
+      } else if (svgPicture != null) {
+        final scale = logoSize / svgPicture!.size.height;
+        canvas.scale(scale, scale);
+        canvas.drawPicture(svgPicture!.picture);
+      }
+      canvas.restore();
+    }
 
-    textPainter.paint(canvas, Offset(dx + svgSize + spacing, dy));
+    if (hasText) {
+      textPainter.paint(canvas, Offset(dx + logoSize + spacing, dy));
+    }
     canvas.restore();
   }
 
@@ -732,6 +801,7 @@ class _CapturedPhotoPreviewPainter extends CustomPainter {
         oldDelegate.aspectRatio != aspectRatio ||
         oldDelegate.mirror != mirror ||
         oldDelegate.svgPicture != svgPicture ||
+        oldDelegate.customLogo != customLogo ||
         oldDelegate.settings != settings;
   }
 }

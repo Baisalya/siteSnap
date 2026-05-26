@@ -5,62 +5,204 @@
     android:viewportWidth="288"
     android:viewportHeight="288">
 
+    <!-- Soft background shadow -->
+    <path
+        android:fillColor="#22000000"
+        android:pathData="M83,230C105,241 183,241 205,230C218,223 211,213 144,213C77,213 70,223 83,230Z" />
+
     <group
         android:scaleX="0.85"
         android:scaleY="0.85"
         android:translateX="59"
-        android:translateY="59">
+        android:translateY="45">
 
+        <!-- Back depth shadow of pin -->
         <path
-            android:fillColor="#1E3A8A"
-            android:pathData="M100,10C60,10 30,40 30,80C30,130 100,190 100,190C100,190 170,130 170,80C170,40 140,10 100,10Z" />
+            android:fillColor="#162C6F"
+            android:pathData="M103,15C63,15 33,45 33,85C33,135 103,195 103,195C103,195 173,135 173,85C173,45 143,15 103,15Z" />
 
+        <!-- Main premium blue pin -->
         <path
-            android:fillColor="#FFFFFF"
-            android:pathData="M100,35A45,45 0,1 0,100,125A45,45 0,1 0,100,35Z" />
+            android:pathData="M100,10C60,10 30,40 30,80C30,130 100,190 100,190C100,190 170,130 170,80C170,40 140,10 100,10Z">
+            <aapt:attr name="android:fillColor"
+                xmlns:aapt="http://schemas.android.com/aapt">
+                <gradient
+                    android:type="linear"
+                    android:startX="60"
+                    android:startY="20"
+                    android:endX="150"
+                    android:endY="180"
+                    android:startColor="#3B64D8"
+                    android:centerColor="#1E3A8A"
+                    android:endColor="#081B55" />
+            </aapt:attr>
+        </path>
 
+        <!-- Top glossy highlight on pin -->
         <path
-            android:fillColor="#374151"
-            android:pathData="M100,42A38,38 0,1 0,100,118A38,38 0,1 0,100,42Z" />
+            android:fillColor="#33FFFFFF"
+            android:pathData="M55,48C70,23 115,16 145,34C123,27 82,29 58,62C53,69 48,59 55,48Z" />
 
+        <!-- Inner edge depth -->
         <path
-            android:fillColor="#111827"
-            android:pathData="M100,58A22,22 0,1 0,100,102A22,22 0,1 0,100,58Z" />
+            android:fillColor="#22000000"
+            android:pathData="M43,91C48,125 86,164 100,178C113,165 151,125 157,91C145,137 100,177 100,177C100,177 55,137 43,91Z" />
 
+        <!-- White outer lens ring shadow -->
         <path
-            android:fillColor="#CCFFFFFF"
-            android:pathData="M92,66A6,6 0,1 0,92,78A6,6 0,1 0,92,66Z" />
+            android:fillColor="#33000000"
+            android:pathData="M103,38A45,45 0,1 0,103,128A45,45 0,1 0,103,38Z" />
 
+        <!-- White outer lens ring -->
         <path
-            android:fillColor="#FFFFFF"
-            android:pathData="M123,50L147,50Q155,50 155,58L155,82Q155,90 147,90L123,90Q115,90 115,82L115,58Q115,50 123,50Z"
+            android:pathData="M100,35A45,45 0,1 0,100,125A45,45 0,1 0,100,35Z">
+            <aapt:attr name="android:fillColor"
+                xmlns:aapt="http://schemas.android.com/aapt">
+                <gradient
+                    android:type="linear"
+                    android:startX="75"
+                    android:startY="38"
+                    android:endX="126"
+                    android:endY="125"
+                    android:startColor="#FFFFFF"
+                    android:centerColor="#F3F4F6"
+                    android:endColor="#D1D5DB" />
+            </aapt:attr>
+        </path>
+
+        <!-- Dark lens outer -->
+        <path
+            android:pathData="M100,42A38,38 0,1 0,100,118A38,38 0,1 0,100,42Z">
+            <aapt:attr name="android:fillColor"
+                xmlns:aapt="http://schemas.android.com/aapt">
+                <gradient
+                    android:type="linear"
+                    android:startX="78"
+                    android:startY="45"
+                    android:endX="124"
+                    android:endY="118"
+                    android:startColor="#4B5563"
+                    android:centerColor="#374151"
+                    android:endColor="#111827" />
+            </aapt:attr>
+        </path>
+
+        <!-- Lens shine ring -->
+        <path
+            android:fillColor="#22FFFFFF"
+            android:pathData="M76,58C87,47 110,45 124,58C110,51 90,51 78,64C75,67 73,62 76,58Z" />
+
+        <!-- Black lens center -->
+        <path
+            android:pathData="M100,58A22,22 0,1 0,100,102A22,22 0,1 0,100,58Z">
+            <aapt:attr name="android:fillColor"
+                xmlns:aapt="http://schemas.android.com/aapt">
+                <gradient
+                    android:type="radial"
+                    android:centerX="92"
+                    android:centerY="66"
+                    android:gradientRadius="35"
+                    android:startColor="#1F2937"
+                    android:centerColor="#111827"
+                    android:endColor="#020617" />
+            </aapt:attr>
+        </path>
+
+        <!-- Lens small highlight -->
+        <path
+            android:pathData="M92,66A6,6 0,1 0,92,78A6,6 0,1 0,92,66Z">
+            <aapt:attr name="android:fillColor"
+                xmlns:aapt="http://schemas.android.com/aapt">
+                <gradient
+                    android:type="radial"
+                    android:centerX="90"
+                    android:centerY="68"
+                    android:gradientRadius="10"
+                    android:startColor="#FFFFFF"
+                    android:endColor="#A5F3FC" />
+            </aapt:attr>
+        </path>
+
+        <!-- Plus card shadow -->
+        <path
+            android:fillColor="#33000000"
+            android:pathData="M126,54L150,54Q158,54 158,62L158,86Q158,94 150,94L126,94Q118,94 118,86L118,62Q118,54 126,54Z" />
+
+        <!-- White premium card -->
+        <path
             android:strokeColor="#1E3A8A"
-            android:strokeWidth="3" />
+            android:strokeWidth="2.5"
+            android:pathData="M123,50L147,50Q155,50 155,58L155,82Q155,90 147,90L123,90Q115,90 115,82L115,58Q115,50 123,50Z">
+            <aapt:attr name="android:fillColor"
+                xmlns:aapt="http://schemas.android.com/aapt">
+                <gradient
+                    android:type="linear"
+                    android:startX="120"
+                    android:startY="50"
+                    android:endX="155"
+                    android:endY="90"
+                    android:startColor="#FFFFFF"
+                    android:centerColor="#F9FAFB"
+                    android:endColor="#E5E7EB" />
+            </aapt:attr>
+        </path>
 
+        <!-- Card shine -->
+        <path
+            android:fillColor="#66FFFFFF"
+            android:pathData="M122,56Q122,53 126,53L146,53Q151,53 152,57C142,54 130,54 122,60Z" />
+
+        <!-- Plus vertical -->
         <path
             android:fillColor="@android:color/transparent"
             android:pathData="M135,70L135,58"
             android:strokeColor="#1E3A8A"
             android:strokeLineCap="round"
-            android:strokeWidth="3" />
+            android:strokeWidth="4" />
 
+        <!-- Plus horizontal -->
         <path
             android:fillColor="@android:color/transparent"
             android:pathData="M135,70L145,70"
             android:strokeColor="#1E3A8A"
             android:strokeLineCap="round"
-            android:strokeWidth="3" />
+            android:strokeWidth="4" />
 
+        <!-- Green badge shadow -->
         <path
-            android:fillColor="#22C55E"
-            android:pathData="M155,71A14,14 0,1 0,155,99A14,14 0,1 0,155,71Z" />
+            android:fillColor="#33000000"
+            android:pathData="M158,75A14,14 0,1 0,158,103A14,14 0,1 0,158,75Z" />
 
+        <!-- Green badge -->
+        <path
+            android:pathData="M155,71A14,14 0,1 0,155,99A14,14 0,1 0,155,71Z">
+            <aapt:attr name="android:fillColor"
+                xmlns:aapt="http://schemas.android.com/aapt">
+                <gradient
+                    android:type="linear"
+                    android:startX="148"
+                    android:startY="72"
+                    android:endX="164"
+                    android:endY="99"
+                    android:startColor="#4ADE80"
+                    android:centerColor="#22C55E"
+                    android:endColor="#15803D" />
+            </aapt:attr>
+        </path>
+
+        <!-- Green badge highlight -->
+        <path
+            android:fillColor="#44FFFFFF"
+            android:pathData="M146,79C150,72 160,72 165,78C158,75 151,76 147,83C145,85 144,82 146,79Z" />
+
+        <!-- Check mark -->
         <path
             android:fillColor="@android:color/transparent"
             android:pathData="M148,85L153,90L162,78"
             android:strokeColor="#FFFFFF"
             android:strokeLineCap="round"
             android:strokeLineJoin="round"
-            android:strokeWidth="3" />
+            android:strokeWidth="3.5" />
+
     </group>
 </vector>

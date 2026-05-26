@@ -26,11 +26,20 @@ class _AppLauncherState extends ConsumerState<AppLauncher> {
   String _unauthorizedMessage = "";
   String _unauthorizedSolution = "";
   bool _cameraInitRequested = false;
+  bool _updateCheckRequested = false;
 
   @override
   void initState() {
     super.initState();
-   // _performSecurityCheck();
+    // _performSecurityCheck();
+    _scheduleUpdateCheck();
+  }
+
+  void _scheduleUpdateCheck() {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      _checkForUpdate();
+    });
   }
 
   Future<void> _performSecurityCheck() async {
@@ -109,7 +118,6 @@ class _AppLauncherState extends ConsumerState<AppLauncher> {
 
       /// 🔥 Safe update check
       _checkForUpdate();
-
     } catch (e) {
       debugPrint('Security check error: $e');
     }
@@ -130,6 +138,14 @@ class _AppLauncherState extends ConsumerState<AppLauncher> {
 
   /// 🔥 FULLY SAFE UPDATE CHECK
   Future<void> _checkForUpdate() async {
+    if (_updateCheckRequested) return;
+    _updateCheckRequested = true;
+
+    if (!Platform.isAndroid) {
+      debugPrint("In-app update is only available on Android");
+      return;
+    }
+
     /// ❌ Skip in debug/dev
     if (!kReleaseMode) {
       debugPrint("⛔ Debug mode → skipping in-app update");
@@ -148,8 +164,7 @@ class _AppLauncherState extends ConsumerState<AppLauncher> {
 
       final updateInfo = await InAppUpdate.checkForUpdate();
 
-      if (updateInfo.updateAvailability ==
-          UpdateAvailability.updateAvailable) {
+      if (updateInfo.updateAvailability == UpdateAvailability.updateAvailable) {
         await InAppUpdate.performImmediateUpdate();
       }
     } catch (e) {
@@ -184,17 +199,16 @@ class _AppLauncherState extends ConsumerState<AppLauncher> {
                 Text(
                   _unauthorizedMessage,
                   textAlign: TextAlign.center,
-                  style:
-                  TextStyle(color: Colors.grey[300], fontSize: 16),
+                  style: TextStyle(color: Colors.grey[300], fontSize: 16),
                 ),
                 const SizedBox(height: 32),
                 Container(
                   padding: const EdgeInsets.all(16),
                   decoration: BoxDecoration(
-                    color: Colors.red.withOpacity(0.1),
+                    color: Colors.red.withValues(alpha: 0.1),
                     borderRadius: BorderRadius.circular(12),
-                    border: Border.all(
-                        color: Colors.red.withOpacity(0.3)),
+                    border:
+                        Border.all(color: Colors.red.withValues(alpha: 0.3)),
                   ),
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,

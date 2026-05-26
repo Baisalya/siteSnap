@@ -1,9 +1,18 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- Modify this file to customize your launch splash screen -->
 <layer-list xmlns:android="http://schemas.android.com/apk/res/android">
+
     <item android:drawable="@android:color/white" />
 
     <item
-        android:drawable="@drawable/splash_logo_wordmark"
+        android:bottom="65dp"
+        android:drawable="@drawable/splash_logo"
         android:gravity="center" />
+
+    <item
+        android:width="240dp"
+        android:height="55dp"
+        android:top="170dp"
+        android:drawable="@drawable/surveycam_wordmark"
+        android:gravity="center" />
+
 </layer-list>

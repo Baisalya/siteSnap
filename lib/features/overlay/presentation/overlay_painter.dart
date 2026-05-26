@@ -88,6 +88,7 @@ class WatermarkProcessor {
       svg.SvgStringLoader(_cachedSvgString!),
       null,
     );
+    final customLogo = await _loadCustomLogo(settings.activeWatermarkLogoPath);
 
     final double srcW = uiImage.width.toDouble();
     final double srcH = uiImage.height.toDouble();
@@ -176,28 +177,15 @@ class WatermarkProcessor {
       final double baseSize = min(srcRect.width, srcRect.height);
       final double padding = contentW * 0.04;
 
-      final textPainter = TextPainter(
-        text: TextSpan(
-          text: "SurveyCam",
-          style: TextStyle(
-            color: Colors.white,
-            fontSize: baseSize * 0.045,
-            fontWeight: FontWeight.bold,
-            shadows: [
-              Shadow(
-                blurRadius: 6,
-                color: Colors.black.withValues(alpha: 0.5),
-                offset: const Offset(1, 1),
-              ),
-            ],
-          ),
-        ),
-        textDirection: TextDirection.ltr,
-      )..layout();
-
-      final double svgSize = textPainter.height;
-      const double spacing = 10;
-      final double totalWidth = svgSize + spacing + textPainter.width;
+      final brandText = settings.activeWatermarkText.trim();
+      final hasText = brandText.isNotEmpty;
+      final hasLogo = settings.activeWatermarkShowLogo;
+      final textPainter = _brandTextPainter(brandText, baseSize);
+      final double logoSize =
+          hasLogo ? (hasText ? textPainter.height : baseSize * 0.06) : 0;
+      final double spacing = hasLogo && hasText ? 10 : 0;
+      final double totalWidth =
+          logoSize + spacing + (hasText ? textPainter.width : 0);
 
       /// ✅ RESTORED OLD POSITION LOGIC FOR PHOTOS
       final bool isLandscape = orientation == DeviceOrientation.landscapeLeft ||
@@ -209,21 +197,20 @@ class WatermarkProcessor {
 
       final double dy = padding;
 
-      // Draw SVG
-      canvas.save();
-      canvas.translate(dx, dy);
-
-      final double scale = svgSize / pictureInfo.size.height;
-      canvas.scale(scale, scale);
-      canvas.drawPicture(pictureInfo.picture);
-
-      canvas.restore();
-
-      // Draw Text
-      textPainter.paint(
-        canvas,
-        Offset(dx + svgSize + spacing, dy),
-      );
+      if (totalWidth > 0) {
+        if (hasLogo) {
+          _paintBrandLogo(
+            canvas: canvas,
+            offset: Offset(dx, dy),
+            size: logoSize,
+            defaultLogo: pictureInfo,
+            customLogo: customLogo,
+          );
+        }
+        if (hasText) {
+          textPainter.paint(canvas, Offset(dx + logoSize + spacing, dy));
+        }
+      }
 
       canvas.restore();
     }
@@ -241,6 +228,7 @@ class WatermarkProcessor {
     // Dispose UI images as early as possible
     uiImage.dispose();
     finalImage.dispose();
+    customLogo?.dispose();
 
     if (byteData == null) return Uint8List(0);
 
@@ -251,6 +239,72 @@ class WatermarkProcessor {
       'height': finalHeight,
       'buffer': byteData.buffer,
     });
+  }
+
+  static Future<ui.Image?> _loadCustomLogo(String? path) async {
+    if (path == null || path.isEmpty) return null;
+    try {
+      final file = File(path);
+      if (!await file.exists()) return null;
+      final bytes = await file.readAsBytes();
+      final codec = await ui.instantiateImageCodec(bytes);
+      final frame = await codec.getNextFrame();
+      return frame.image;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  static TextPainter _brandTextPainter(String text, double baseSize) {
+    return TextPainter(
+      text: TextSpan(
+        text: text,
+        style: TextStyle(
+          color: Colors.white,
+          fontSize: baseSize * 0.045,
+          fontWeight: FontWeight.bold,
+          shadows: [
+            Shadow(
+              blurRadius: 6,
+              color: Colors.black.withValues(alpha: 0.5),
+              offset: const Offset(1, 1),
+            ),
+          ],
+        ),
+      ),
+      textDirection: TextDirection.ltr,
+    )..layout();
+  }
+
+  static void _paintBrandLogo({
+    required Canvas canvas,
+    required Offset offset,
+    required double size,
+    required PictureInfo defaultLogo,
+    ui.Image? customLogo,
+  }) {
+    canvas.save();
+    canvas.translate(offset.dx, offset.dy);
+
+    if (customLogo != null) {
+      canvas.drawImageRect(
+        customLogo,
+        Rect.fromLTWH(
+          0,
+          0,
+          customLogo.width.toDouble(),
+          customLogo.height.toDouble(),
+        ),
+        Rect.fromLTWH(0, 0, size, size),
+        Paint()..filterQuality = ui.FilterQuality.high,
+      );
+    } else {
+      final double scale = size / defaultLogo.size.height;
+      canvas.scale(scale, scale);
+      canvas.drawPicture(defaultLogo.picture);
+    }
+
+    canvas.restore();
   }
 
   static Uint8List _encodeJpgTask(Map<String, dynamic> params) {
