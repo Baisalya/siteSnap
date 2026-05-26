@@ -70,7 +70,7 @@ class VideoWatermarkProcessor {
       // orientation relative to that landscape canvas.
       switch (orientation) {
         case DeviceOrientation.landscapeLeft:
-          return DeviceOrientation.portraitDown;
+          return DeviceOrientation.portraitUp;
         case DeviceOrientation.landscapeRight:
           return DeviceOrientation.portraitUp;
         case DeviceOrientation.portraitUp:
@@ -518,6 +518,7 @@ class VideoWatermarkProcessor {
     required Size size,
     required DeviceOrientation orientation,
     required PictureInfo pictureInfo,
+    bool useLandscapeLeftMarkedArea = false,
   }) {
     final double baseSize = min(size.width, size.height);
     const double margin = 15.0;
@@ -554,7 +555,10 @@ class VideoWatermarkProcessor {
     // Swap positions in landscape: Watermark moves to Bottom-Left
     final double targetX;
     final double targetY;
-    if (isLandscape) {
+    if (useLandscapeLeftMarkedArea) {
+      targetX = margin + boxWidth;
+      targetY = margin + boxHeight;
+    } else if (isLandscape) {
       targetX = margin;
       targetY = size.height - margin;
     } else {
@@ -583,6 +587,10 @@ class VideoWatermarkProcessor {
         canvas.translate(-boxWidth, -boxHeight);
         break;
       default:
+        if (useLandscapeLeftMarkedArea) {
+          canvas.rotate(pi);
+          break;
+        }
         // portraitUp
         canvas.translate(-boxWidth, 0);
         break;
@@ -610,6 +618,7 @@ class VideoWatermarkProcessor {
     bool showOverlay = true,
     bool showWatermark = true,
     OverlaySettings settings = const OverlaySettings(),
+    bool useLandscapeLeftMarkedArea = false,
   }) {
     if (showOverlay) {
       canvas.save();
@@ -658,7 +667,10 @@ class VideoWatermarkProcessor {
       // Swap positions in landscape: Overlay moves to Top-Right
       final double targetX;
       final double targetY;
-      if (isLandscape) {
+      if (useLandscapeLeftMarkedArea) {
+        targetX = size.width - margin;
+        targetY = margin + boxHeight;
+      } else if (isLandscape) {
         targetX = size.width - margin;
         targetY = margin;
       } else {
@@ -681,6 +693,10 @@ class VideoWatermarkProcessor {
           canvas.rotate(pi / 2);
           break;
         default:
+          if (useLandscapeLeftMarkedArea) {
+            canvas.rotate(pi);
+            break;
+          }
           // portraitUp
           canvas.translate(0, -boxHeight);
           break;
@@ -707,6 +723,7 @@ class VideoWatermarkProcessor {
         size: size,
         orientation: orientation,
         pictureInfo: pictureInfo,
+        useLandscapeLeftMarkedArea: useLandscapeLeftMarkedArea,
       );
     }
   }
@@ -728,6 +745,8 @@ class VideoWatermarkProcessor {
       frameSize: frameSize,
       orientation: orientation,
     );
+    final useLandscapeLeftMarkedArea = frameSize.width > frameSize.height &&
+        orientation == DeviceOrientation.landscapeLeft;
 
     _paintFrameContent(
       canvas: canvas,
@@ -738,6 +757,7 @@ class VideoWatermarkProcessor {
       showOverlay: showOverlay,
       showWatermark: showWatermark,
       settings: settings,
+      useLandscapeLeftMarkedArea: useLandscapeLeftMarkedArea,
     );
 
     final picture = recorder.endRecording();
