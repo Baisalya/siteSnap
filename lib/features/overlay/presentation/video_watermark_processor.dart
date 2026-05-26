@@ -218,8 +218,10 @@ class VideoWatermarkProcessor {
   static bool shouldApplyFrontCameraPortraitCorrection({
     required CameraLensType lens,
     required DeviceOrientation? recordingOrientation,
+    bool mirrored = false,
   }) {
-    return lens == CameraLensType.front &&
+    return !mirrored &&
+        lens == CameraLensType.front &&
         recordingOrientation == DeviceOrientation.portraitUp;
   }
 
@@ -950,7 +952,8 @@ class VideoWatermarkProcessor {
           extraHalfTurn: extraHalfTurn,
         );
         final command =
-            '-noautorotate -i "${paths.first}" -vf "${normalizeFilter}hflip,format=yuv420p" -map 0:a? '
+            '-noautorotate -i "${paths.first}" -vf "${normalizeFilter}hflip,format=yuv420p" '
+            '-map 0:v:0 -map 0:a? '
             '-c:v ${encoderSettings.encoder} ${encoderSettings.args} '
             '-pix_fmt yuv420p -c:a copy -metadata:s:v:0 rotate=0 '
             '-movflags +faststart -y "$outputPath"';

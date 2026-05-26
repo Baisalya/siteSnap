@@ -262,6 +262,14 @@ void main() {
       ),
       isFalse,
     );
+    expect(
+      VideoWatermarkProcessor.shouldApplyFrontCameraPortraitCorrection(
+        lens: CameraLensType.front,
+        recordingOrientation: DeviceOrientation.portraitUp,
+        mirrored: true,
+      ),
+      isFalse,
+    );
   });
 
   test('front camera portrait correction adds a half turn after normalization',

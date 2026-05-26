@@ -139,6 +139,7 @@ class VideoProcessingTaskHandler extends TaskHandler {
                 .shouldApplyFrontCameraPortraitCorrection(
               lens: segment.lens,
               recordingOrientation: recordingOrientation,
+              mirrored: segment.mirror,
             ),
           )
           .toList(growable: false);
