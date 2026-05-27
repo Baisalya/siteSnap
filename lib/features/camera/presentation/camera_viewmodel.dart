@@ -1,10 +1,11 @@
 import 'dart:async';
 import 'dart:io';
 import 'dart:isolate';
-import 'package:camera/camera.dart';
+import 'package:camera/camera.dart' hide CameraLensType;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:flutter_riverpod/legacy.dart';
 import 'package:surveycam/core/di/providers.dart';
 import 'package:surveycam/core/permissions/permission_service.dart';
 import 'package:surveycam/core/utils/device_orientation_provider.dart';
@@ -50,7 +51,6 @@ class CameraViewModel extends StateNotifier<CameraState>
   bool _startRecordingInFlight = false;
   bool _stopRecordingInFlight = false;
   Timer? _videoHistoryTimer;
-  ReceivePort? _receivePort;
 
   // Optimized overlay history storage
   final List<VideoOverlaySample> _videoDataHistory = [];
@@ -75,9 +75,8 @@ class CameraViewModel extends StateNotifier<CameraState>
   }
 
   void _initBackgroundService() {
-    _receivePort?.close();
-    _receivePort = FlutterForegroundTask.receivePort;
-    _receivePort?.listen(_onReceiveTaskData);
+    FlutterForegroundTask.initCommunicationPort();
+    FlutterForegroundTask.addTaskDataCallback(_onReceiveTaskData);
   }
 
   void _onReceiveTaskData(dynamic message) {
@@ -343,8 +342,8 @@ class CameraViewModel extends StateNotifier<CameraState>
   // ================= LIFECYCLE =================
 
   @override
-  void didChangeAppLifecycleState(AppLifecycleState lifecycleState) async {
-    final appState = lifecycleState;
+  void didChangeAppLifecycleState(AppLifecycleState state) async {
+    final appState = state;
     debugPrint("AppLifecycleState: $appState");
 
     if (appState == AppLifecycleState.inactive ||
@@ -376,7 +375,7 @@ class CameraViewModel extends StateNotifier<CameraState>
               debugPrint("Error pausing preview: $e. Falling back to dispose.");
               _isDisposing = true;
               await ref.read(cameraRepositoryProvider).dispose();
-              state = state.copyWith(clearController: true, isReady: false);
+              this.state = this.state.copyWith(clearController: true, isReady: false);
               _isDisposing = false;
             }
           }
@@ -387,7 +386,7 @@ class CameraViewModel extends StateNotifier<CameraState>
     }
 
     if (appState == AppLifecycleState.resumed) {
-      final controller = state.controller;
+      final controller = this.state.controller;
       if (controller != null && controller.value.isInitialized) {
         try {
           await controller.resumePreview();
@@ -395,7 +394,7 @@ class CameraViewModel extends StateNotifier<CameraState>
           await controller.getMinZoomLevel();
           debugPrint("Camera preview resumed and verified.");
           // 🔥 Nudge the UI to rebuild the texture surface
-          state = state.copyWith();
+          this.state = this.state.copyWith();
         } catch (e) {
           debugPrint("Instant resume or health check failed: $e. Re-initializing...");
           await initialize();
@@ -809,16 +808,16 @@ class CameraViewModel extends StateNotifier<CameraState>
 
       // Only re-apply auto mode if we are doing a manual reset
       if (!state.isManualFocus) {
-        tasks.add(controller.setExposureMode(ExposureMode.auto).catchError((_) => null));
-        tasks.add(controller.setFocusMode(FocusMode.auto).catchError((_) => null));
-        tasks.add(controller.setExposurePoint(const Offset(0.5, 0.5)).catchError((_) => null));
-        tasks.add(controller.setFocusPoint(const Offset(0.5, 0.5)).catchError((_) => null));
+        tasks.add(controller.setExposureMode(ExposureMode.auto).catchError((_) {}));
+        tasks.add(controller.setFocusMode(FocusMode.auto).catchError((_) {}));
+        tasks.add(controller.setExposurePoint(const Offset(0.5, 0.5)).catchError((_) {}));
+        tasks.add(controller.setFocusPoint(const Offset(0.5, 0.5)).catchError((_) {}));
       }
 
       // Re-apply current exposure offset if it's set
       if (_currentExposure != 0.0) {
         tasks.add(controller.setExposureOffset(
-            _currentExposure.clamp(_minExposure, _maxExposure)).catchError((_) => null));
+            _currentExposure.clamp(_minExposure, _maxExposure)).catchError((_) => 0.0));
       }
 
       if (tasks.isNotEmpty) {
@@ -1123,19 +1122,13 @@ class CameraViewModel extends StateNotifier<CameraState>
         channelDescription: 'Shows progress of media processing',
         channelImportance: NotificationChannelImportance.LOW,
         priority: NotificationPriority.LOW,
-        iconData: const NotificationIconData(
-          resType: ResourceType.mipmap,
-          resPrefix: ResourcePrefix.ic,
-          name: 'launcher',
-        ),
       ),
       iosNotificationOptions: const IOSNotificationOptions(
         showNotification: true,
         playSound: false,
       ),
-      foregroundTaskOptions: const ForegroundTaskOptions(
-        interval: 5000,
-        isOnceEvent: false,
+      foregroundTaskOptions: ForegroundTaskOptions(
+        eventAction: ForegroundTaskEventAction.repeat(5000),
         autoRunOnBoot: false,
         allowWakeLock: true,
         allowWifiLock: true,
@@ -1197,7 +1190,7 @@ class CameraViewModel extends StateNotifier<CameraState>
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
     _videoHistoryTimer?.cancel();
-    _receivePort?.close();
+    FlutterForegroundTask.removeTaskDataCallback(_onReceiveTaskData);
     ref.read(cameraRepositoryProvider).dispose();
     super.dispose();
   }

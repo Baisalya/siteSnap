@@ -1,4 +1,4 @@
-import 'package:camera/camera.dart';
+import 'package:camera/camera.dart' hide CameraLensType;
 import 'package:flutter/services.dart';
 
 import '../domain/camera_lens_type.dart';

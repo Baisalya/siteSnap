@@ -1,6 +1,7 @@
 import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:flutter_riverpod/legacy.dart';
 import 'package:share_plus/share_plus.dart';
 import 'package:surveycam/features/gallery/data/sitesnap_gallery_repository.dart';
 import 'package:surveycam/features/gallery/presentation/gallery_image_viewer.dart';
@@ -46,9 +47,11 @@ class _GalleryFolderScreenState extends ConsumerState<GalleryFolderScreen>
     final selectedImages = ref.read(gallerySelectionProvider);
     if (selectedImages.isEmpty) return;
 
-    Share.shareXFiles(
-      selectedImages.map((f) => XFile(f.path)).toList(),
-      text: "Shared from SurveyCam 📷",
+    SharePlus.instance.share(
+      ShareParams(
+        files: selectedImages.map((f) => XFile(f.path)).toList(),
+        text: "Shared from SurveyCam 📷",
+      ),
     );
   }
 
@@ -228,7 +231,7 @@ class GalleryItem extends ConsumerWidget {
           onLongPress: () {
             ref
                 .read(gallerySelectionProvider.notifier)
-                .update((state) => {...state, file});
+                .update((state) => <File>{...state, file});
           },
           onTap: () {
             if (selectionMode) {

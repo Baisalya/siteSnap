@@ -1,4 +1,4 @@
-import 'package:camera/camera.dart';
+import 'package:camera/camera.dart' hide CameraLensType;
 import 'camera_lens_type.dart';
 
 abstract class CameraRepository {

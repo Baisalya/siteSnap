@@ -125,17 +125,17 @@ class VideoProcessingTaskHandler extends TaskHandler {
   }
 
   @override
-  void onStart(DateTime timestamp, SendPort? sendPort) {
-    unawaited(_processPendingJob(sendPort));
+  Future<void> onStart(DateTime timestamp, TaskStarter starter) async {
+    unawaited(_processPendingJob());
   }
 
   @override
-  void onRepeatEvent(DateTime timestamp, SendPort? sendPort) {
-    unawaited(_processPendingJob(sendPort));
+  void onRepeatEvent(DateTime timestamp) {
+    unawaited(_processPendingJob());
   }
 
   @override
-  void onDestroy(DateTime timestamp, SendPort? sendPort) {
+  Future<void> onDestroy(DateTime timestamp, bool isTimeout) async {
     // Service destroyed
   }
 
@@ -144,12 +144,12 @@ class VideoProcessingTaskHandler extends TaskHandler {
     FlutterForegroundTask.launchApp();
   }
 
-  Future<void> _processPendingJob(SendPort? sendPort) async {
+  Future<void> _processPendingJob() async {
     if (_isProcessing) return;
 
     VideoProcessingJob? job;
     try {
-      await _throwIfCancelRequested(sendPort);
+      await _throwIfCancelRequested();
       final jobJson = await FlutterForegroundTask.getData<String>(
         key: pendingJobKey,
       );
@@ -159,7 +159,7 @@ class VideoProcessingTaskHandler extends TaskHandler {
       if (jobJson == null || jobJson.isEmpty) {
         if (_decodeImageJobQueue(imageJobJson).isNotEmpty) {
           _isProcessing = true;
-          await _processPendingImageJob(sendPort, imageJobJson!);
+          await _processPendingImageJob(imageJobJson!);
           return;
         }
         await FlutterForegroundTask.stopService();
@@ -175,7 +175,7 @@ class VideoProcessingTaskHandler extends TaskHandler {
         return;
       }
       if (_lastFailedJobId == job.id) {
-        _send(sendPort, {
+        _send({
           'type': 'error',
           'error': 'Previous video processing attempt failed.',
         });
@@ -185,11 +185,10 @@ class VideoProcessingTaskHandler extends TaskHandler {
 
       _isProcessing = true;
       await _progress(
-        sendPort,
         0.05,
         'Preparing video watermark... 5%',
       );
-      await _throwIfCancelRequested(sendPort);
+      await _throwIfCancelRequested();
 
       String? sourcePath =
           job.segments.length == 1 ? job.segments.single.path : null;
@@ -209,13 +208,13 @@ class VideoProcessingTaskHandler extends TaskHandler {
           )
           .toList(growable: false);
       if (job.segments.length > 1 || needsMirror) {
-        await _progress(sendPort, 0.10, 'Merging video segments... 10%');
+        await _progress(0.10, 'Merging video segments... 10%');
         mergedPath = await VideoWatermarkProcessor.mergeVideos(
           job.segments.map((segment) => segment.path).toList(),
           mirrorMap: job.segments.map((segment) => segment.mirror).toList(),
           frontCameraPortraitCorrectionMap: frontCameraPortraitCorrectionMap,
         );
-        await _throwIfCancelRequested(sendPort);
+        await _throwIfCancelRequested();
         if (mergedPath != null) {
           sourcePath = mergedPath;
         } else {
@@ -225,7 +224,7 @@ class VideoProcessingTaskHandler extends TaskHandler {
 
       String? processedPath;
       if (canProcessOverlay && sourcePath != null) {
-        await _progress(sendPort, 0.15, 'Generating watermark frames... 15%');
+        await _progress(0.15, 'Generating watermark frames... 15%');
         final videoSize = await VideoWatermarkProcessor.getVideoDimensions(
           sourcePath,
         );
@@ -238,7 +237,7 @@ class VideoProcessingTaskHandler extends TaskHandler {
           shouldCancel: _isCancelRequested,
           onProgress: (p) {
             final progress = 0.15 + (p * 0.25);
-            _send(sendPort, {
+            _send({
               'type': 'progress',
               'value': progress,
               'message':
@@ -246,7 +245,7 @@ class VideoProcessingTaskHandler extends TaskHandler {
             });
           },
         );
-        await _throwIfCancelRequested(sendPort);
+        await _throwIfCancelRequested();
 
         if (sequenceDir != null) {
           final correctRawFrontPortrait = mergedPath == null &&
@@ -264,7 +263,7 @@ class VideoProcessingTaskHandler extends TaskHandler {
               final progress = 0.4 + (p * 0.5);
               final message =
                   'Applying watermark... ${(progress * 100).toInt()}%';
-              _send(sendPort, {
+              _send({
                 'type': 'progress',
                 'value': progress,
                 'message': message,
@@ -272,12 +271,12 @@ class VideoProcessingTaskHandler extends TaskHandler {
               unawaited(_updateNotification(message));
             },
           );
-          await _throwIfCancelRequested(sendPort);
+          await _throwIfCancelRequested();
         }
       }
 
-      await _progress(sendPort, 0.95, 'Saving to gallery... 95%');
-      await _throwIfCancelRequested(sendPort);
+      await _progress(0.95, 'Saving to gallery... 95%');
+      await _throwIfCancelRequested();
 
       final List<String> savedPaths = [];
       var savedWithoutOverlay = false;
@@ -297,7 +296,6 @@ class VideoProcessingTaskHandler extends TaskHandler {
         }
 
         await _progress(
-          sendPort,
           0.95,
           'Saving original video without overlay...',
         );
@@ -313,7 +311,7 @@ class VideoProcessingTaskHandler extends TaskHandler {
       await _updateNotification(savedWithoutOverlay
           ? 'Video saved without overlay'
           : 'Video saved successfully!');
-      _send(sendPort, {
+      _send({
         'type': 'complete',
         'path': savedPaths.isEmpty ? null : savedPaths.first,
         'paths': savedPaths,
@@ -326,7 +324,7 @@ class VideoProcessingTaskHandler extends TaskHandler {
     } on _VideoProcessingCancelledException {
       await FlutterForegroundTask.removeData(key: pendingJobKey);
       await FlutterForegroundTask.removeData(key: cancelRequestedKey);
-      _send(sendPort, {
+      _send({
         'type': 'cancelled',
         'message': 'Video processing cancelled.',
       });
@@ -342,7 +340,7 @@ class VideoProcessingTaskHandler extends TaskHandler {
         key: lastFailureKey,
         value: e.toString(),
       );
-      _send(sendPort, {
+      _send({
         'type': 'error',
         'error': e.toString(),
       });
@@ -353,7 +351,7 @@ class VideoProcessingTaskHandler extends TaskHandler {
     } finally {
       _isProcessing = false;
       if (await _hasAnyPendingJob()) {
-        unawaited(Future.microtask(() => _processPendingJob(sendPort)));
+        unawaited(Future.microtask(() => _processPendingJob()));
       }
     }
   }
@@ -377,7 +375,6 @@ class VideoProcessingTaskHandler extends TaskHandler {
   }
 
   Future<void> _processPendingImageJob(
-    SendPort? sendPort,
     String jobJson,
   ) async {
     ImageProcessingJob? imageJob;
@@ -416,7 +413,7 @@ class VideoProcessingTaskHandler extends TaskHandler {
       await _removeImageJobFromQueue(imageJob.id);
       await FlutterForegroundTask.removeData(key: lastImageFailureKey);
       await _updateNotification('Photo saved successfully!');
-      _send(sendPort, {
+      _send({
         'type': 'image_complete',
         'originalPath': imageJob.originalPath,
         'path': savedFile.path,
@@ -437,7 +434,7 @@ class VideoProcessingTaskHandler extends TaskHandler {
         value: e.toString(),
       );
       await _updateNotification('Photo save failed. Tap to reopen.');
-      _send(sendPort, {
+      _send({
         'type': 'image_error',
         'originalPath': imageJob?.originalPath,
         'error': e.toString(),
@@ -476,8 +473,8 @@ class VideoProcessingTaskHandler extends TaskHandler {
     return _updateNotification(message);
   }
 
-  Future<void> _progress(SendPort? sendPort, double value, String message) {
-    _send(sendPort, {
+  Future<void> _progress(double value, String message) {
+    _send({
       'type': 'progress',
       'value': value,
       'message': message,
@@ -492,9 +489,9 @@ class VideoProcessingTaskHandler extends TaskHandler {
     return requested == 'true';
   }
 
-  Future<void> _throwIfCancelRequested(SendPort? sendPort) async {
+  Future<void> _throwIfCancelRequested() async {
     if (await _isCancelRequested()) {
-      _send(sendPort, {
+      _send({
         'type': 'cancelled',
         'message': 'Video processing cancelled.',
       });
@@ -502,8 +499,8 @@ class VideoProcessingTaskHandler extends TaskHandler {
     }
   }
 
-  void _send(SendPort? sendPort, Map<String, dynamic> message) {
-    sendPort?.send(message);
+  void _send(Map<String, dynamic> message) {
+    FlutterForegroundTask.sendDataToMain(message);
   }
 }
 

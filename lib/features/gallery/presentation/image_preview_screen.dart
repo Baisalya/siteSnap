@@ -377,9 +377,11 @@ class _ImagePreviewScreenState extends ConsumerState<ImagePreviewScreen> {
       if (!mounted) return;
 
       // Share
-      await Share.shareXFiles(
-        [XFile(tempPath)],
-        text: "Shared from SurveyCam 📷",
+      await SharePlus.instance.share(
+        ShareParams(
+          files: [XFile(tempPath)],
+          text: "Shared from SurveyCam 📷",
+        ),
       );
     } catch (e) {
       debugPrint("Share error: $e");

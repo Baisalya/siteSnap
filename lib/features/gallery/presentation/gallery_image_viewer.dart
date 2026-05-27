@@ -44,9 +44,11 @@ class _GalleryImageViewerState extends ConsumerState<GalleryImageViewer> {
 
     if (!file.existsSync()) return;
 
-    await Share.shareXFiles(
-      [XFile(file.path)],
-      text: "Shared from SurveyCam 📷",
+    await SharePlus.instance.share(
+      ShareParams(
+        files: [XFile(file.path)],
+        text: "Shared from SurveyCam 📷",
+      ),
     );
   }
 
