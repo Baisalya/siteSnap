@@ -42,7 +42,9 @@ class ImagePreviewScreen extends ConsumerStatefulWidget {
 enum _PreviewBusyAction { save, share }
 
 class _ImagePreviewScreenState extends ConsumerState<ImagePreviewScreen> {
-  static const int _previewDecodeWidth = 1600;
+  // 🔥 Increased decode width to 3200 to significantly reduce "softness" in preview.
+  // This provides much more "structure" and detail when viewing the captured photo.
+  static const int _previewDecodeWidth = 3200;
 
   final TransformationController _transformationController =
       TransformationController();
@@ -63,6 +65,7 @@ class _ImagePreviewScreenState extends ConsumerState<ImagePreviewScreen> {
   CameraLensType? _captureLens;
   Timer? _prepareSaveTimer;
   String? _preparedSaveKey;
+  String? _scheduledSignature; // 🔥 Track the signature currently being prepared
   Future<Uint8List>? _preparedSaveFuture;
 
   bool get _saving => _busyAction != null;
@@ -78,6 +81,22 @@ class _ImagePreviewScreenState extends ConsumerState<ImagePreviewScreen> {
   void _loadPreviewImage() async {
     try {
       final bytes = await widget.originalFile.readAsBytes();
+
+      // Phase 1: Super fast decode (low-res) for instant visual feedback
+      // 800px is enough for a sharp-looking thumbnail while the high-res loads.
+      final fastCodec = await ui.instantiateImageCodec(bytes, targetWidth: 800);
+      final fastFrame = await fastCodec.getNextFrame();
+
+      if (!mounted) {
+        fastFrame.image.dispose();
+        return;
+      }
+
+      setState(() {
+        _previewImage = fastFrame.image;
+      });
+
+      // Phase 2: High resolution decode for maximum "structure" and detail
       final codec = await ui.instantiateImageCodec(
         bytes,
         targetWidth: _previewDecodeWidth,
@@ -91,8 +110,10 @@ class _ImagePreviewScreenState extends ConsumerState<ImagePreviewScreen> {
       }
 
       setState(() {
-        _previewImage?.dispose();
+        final old = _previewImage;
         _previewImage = frame.image;
+        // Dispose the low-res version once high-res is ready
+        if (old != _previewImage) old?.dispose();
       });
     } catch (e) {
       debugPrint("Error loading preview image: $e");
@@ -191,10 +212,18 @@ class _ImagePreviewScreenState extends ConsumerState<ImagePreviewScreen> {
     required OverlayData overlayData,
     required OverlaySettings settings,
   }) {
-    if (_saving || _preparedSaveKey == signature) return;
+    // 🔥 OPTIMIZATION: If we are already saving, or have finished this signature,
+    // or a timer is already counting down for this EXACT signature, don't restart it.
+    // This prevents the "softness" of the UI (renders) from delaying the background processing.
+    if (_saving ||
+        _preparedSaveKey == signature ||
+        _scheduledSignature == signature) return;
 
     _prepareSaveTimer?.cancel();
-    _prepareSaveTimer = Timer(const Duration(milliseconds: 220), () {
+    _scheduledSignature = signature;
+
+    // Reduced delay from 220ms to 80ms for much more aggressive "instant" feel.
+    _prepareSaveTimer = Timer(const Duration(milliseconds: 80), () {
       if (!mounted || _saving) return;
 
       final orientation = _captureOrientation ??
@@ -237,6 +266,13 @@ class _ImagePreviewScreenState extends ConsumerState<ImagePreviewScreen> {
   Future<void> _saveImage() async {
     if (_saving) return;
 
+    // 🔥 Trigger UI feedback immediately
+    HapticFeedback.mediumImpact();
+    setState(() {
+      _busyAction = _PreviewBusyAction.save;
+      _showUI = true;
+    });
+
     final cameraState = ref.read(cameraViewModelProvider);
     final captured = ref.read(capturedOverlayProvider);
     final live = ref.read(overlayPreviewProvider);
@@ -258,11 +294,11 @@ class _ImagePreviewScreenState extends ConsumerState<ImagePreviewScreen> {
       overlayData: overlayData,
       settings: settings,
     );
+    
+    // Check if we have a background-prepared future for this specific image state
     final preparedSaveFuture =
         _preparedSaveKey == saveSignature ? _preparedSaveFuture : null;
 
-    // Return the save future so the camera screen can keep the gallery current
-    // while the final watermarked file is produced.
     final saveFuture = preparedSaveFuture == null
         ? ref.read(overlayViewModelProvider.notifier).saveCapturedImage(
               original: widget.originalFile,
@@ -278,14 +314,12 @@ class _ImagePreviewScreenState extends ConsumerState<ImagePreviewScreen> {
               preparedBytes: preparedSaveFuture,
             );
 
+    // Give enough time for the "Checkmark" animation to be visible.
+    // Increased to 1100ms to give background processing more time to finish 
+    // before the screen pops, ensuring the gallery gets the overlay version instantly.
+    await Future<void>.delayed(const Duration(milliseconds: 1100));
+    
     if (mounted) {
-      HapticFeedback.mediumImpact();
-      setState(() {
-        _busyAction = _PreviewBusyAction.save;
-        _showUI = true;
-      });
-      await Future<void>.delayed(const Duration(seconds: 1));
-      if (!mounted) return;
       Navigator.of(context).pop(saveFuture);
     }
   }
@@ -427,13 +461,14 @@ class _ImagePreviewScreenState extends ConsumerState<ImagePreviewScreen> {
                   minScale: 1.0,
                   maxScale: 5.0,
                   child: Center(
-                    child: _aspectRatio == null || _previewImage == null
-                        ? const CircularProgressIndicator(
-                            color: Colors.white24, strokeWidth: 2)
+                    child: _aspectRatio == null
+                        ? const SizedBox.shrink()
                         : AspectRatio(
                             aspectRatio: _aspectRatio!,
-                            child: CustomPaint(
-                              painter: _CapturedPhotoPreviewPainter(
+                            child: _previewImage == null
+                                ? const SizedBox.shrink()
+                                : CustomPaint(
+                                    painter: _CapturedPhotoPreviewPainter(
                                 image: _previewImage!,
                                 data: overlayData,
                                 showOverlay: _showOverlay,

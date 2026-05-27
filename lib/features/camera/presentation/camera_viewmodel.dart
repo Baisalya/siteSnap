@@ -32,8 +32,7 @@ final cameraViewModelProvider =
 });
 
 const Duration _photoCaptureTimeout = Duration(seconds: 12);
-const Duration _autoExposureSettleDelay = Duration(milliseconds: 220);
-const Duration _flashExposureSettleDelay = Duration(milliseconds: 140);
+const Duration _flashExposureSettleDelay = Duration(milliseconds: 60);
 
 class CameraViewModel extends StateNotifier<CameraState>
     with WidgetsBindingObserver {
@@ -235,21 +234,17 @@ class CameraViewModel extends StateNotifier<CameraState>
     try {
       if (!mounted || !controller.value.isInitialized) return;
 
-      await controller
-          .setFlashMode(FlashMode.off)
-          .catchError((e) => debugPrint("Initial flash mode error: $e"));
-      await controller
-          .setFocusMode(FocusMode.auto)
-          .catchError((e) => debugPrint("Initial focus mode error: $e"));
-      await controller
-          .setExposureMode(ExposureMode.auto)
-          .catchError((e) => debugPrint("Initial exposure mode error: $e"));
-      await controller
-          .setFocusPoint(const Offset(0.5, 0.5))
-          .catchError((e) => debugPrint("Initial focus point error: $e"));
-      await controller
-          .setExposurePoint(const Offset(0.5, 0.5))
-          .catchError((e) => debugPrint("Initial exposure point error: $e"));
+      // 🔥 Optimization: Parallelize initial camera configuration to reduce startup delay
+      await Future.wait([
+        controller.setFlashMode(FlashMode.off),
+        controller.setFocusMode(FocusMode.auto),
+        controller.setExposureMode(ExposureMode.auto),
+        controller.setFocusPoint(const Offset(0.5, 0.5)),
+        controller.setExposurePoint(const Offset(0.5, 0.5)),
+      ]).catchError((e) {
+        debugPrint("Deferred camera configuration partial failure: $e");
+        return [];
+      });
 
       final caps = await Future.wait([
         controller.getMinExposureOffset(),
@@ -348,8 +343,8 @@ class CameraViewModel extends StateNotifier<CameraState>
   // ================= LIFECYCLE =================
 
   @override
-  void didChangeAppLifecycleState(AppLifecycleState state) async {
-    final appState = state;
+  void didChangeAppLifecycleState(AppLifecycleState lifecycleState) async {
+    final appState = lifecycleState;
     debugPrint("AppLifecycleState: $appState");
 
     if (appState == AppLifecycleState.inactive ||
@@ -381,8 +376,7 @@ class CameraViewModel extends StateNotifier<CameraState>
               debugPrint("Error pausing preview: $e. Falling back to dispose.");
               _isDisposing = true;
               await ref.read(cameraRepositoryProvider).dispose();
-              this.state =
-                  this.state.copyWith(clearController: true, isReady: false);
+              state = state.copyWith(clearController: true, isReady: false);
               _isDisposing = false;
             }
           }
@@ -393,13 +387,17 @@ class CameraViewModel extends StateNotifier<CameraState>
     }
 
     if (appState == AppLifecycleState.resumed) {
-      final controller = this.state.controller;
+      final controller = state.controller;
       if (controller != null && controller.value.isInitialized) {
         try {
           await controller.resumePreview();
-          debugPrint("Camera preview resumed instantly.");
+          // Health check: verify hardware session is still valid after resume
+          await controller.getMinZoomLevel();
+          debugPrint("Camera preview resumed and verified.");
+          // 🔥 Nudge the UI to rebuild the texture surface
+          state = state.copyWith();
         } catch (e) {
-          debugPrint("Instant resume failed: $e. Re-initializing...");
+          debugPrint("Instant resume or health check failed: $e. Re-initializing...");
           await initialize();
         }
       } else {
@@ -757,26 +755,27 @@ class CameraViewModel extends StateNotifier<CameraState>
     try {
       final repo = ref.read(cameraRepositoryProvider);
 
-      await _prepareSmartPhotoExposure(controller);
+      // 🔥 SPEED OPTIMIZATION: Skip redundant exposure preparation if we are already in 
+      // a standard auto state with Flash OFF. This avoids re-triggering AE/AF scans.
+      if (state.isManualFocus || state.flashMode != FlashMode.off || _currentExposure != 0.0) {
+        await _prepareSmartPhotoExposure(controller);
+      }
 
       if (state.flashMode == FlashMode.always) {
         if (state.currentLens == CameraLensType.front) {
-          await Future.delayed(const Duration(milliseconds: 30));
+          await Future.delayed(const Duration(milliseconds: 20));
         } else {
           await controller.setFlashMode(FlashMode.torch);
           await Future.delayed(_flashExposureSettleDelay);
         }
-      } else {
-        unawaited(controller
-            .setFlashMode(FlashMode.off)
-            .catchError((e) => debugPrint("Capture flash-off skipped: $e")));
       }
 
+      // Actual capture - native speed is controlled by the camera plugin/driver
       final path = await repo.takePicture().timeout(_photoCaptureTimeout);
 
       if (state.flashMode == FlashMode.always) {
         unawaited(_nuclearFlashKill(controller));
-      } else {
+      } else if (state.flashMode != FlashMode.off) {
         unawaited(_softFlashQuench(controller));
       }
 
@@ -806,27 +805,25 @@ class CameraViewModel extends StateNotifier<CameraState>
     try {
       if (!controller.value.isInitialized) return;
 
-      await controller
-          .setExposureMode(ExposureMode.auto)
-          .catchError((e) => debugPrint("Smart exposure mode skipped: $e"));
+      final List<Future> tasks = [];
 
+      // Only re-apply auto mode if we are doing a manual reset
       if (!state.isManualFocus) {
-        await controller
-            .setExposurePoint(const Offset(0.5, 0.5))
-            .catchError((e) => debugPrint("Smart exposure point skipped: $e"));
+        tasks.add(controller.setExposureMode(ExposureMode.auto).catchError((_) => null));
+        tasks.add(controller.setFocusMode(FocusMode.auto).catchError((_) => null));
+        tasks.add(controller.setExposurePoint(const Offset(0.5, 0.5)).catchError((_) => null));
+        tasks.add(controller.setFocusPoint(const Offset(0.5, 0.5)).catchError((_) => null));
       }
 
-      try {
-        await controller.setExposureOffset(
-            _currentExposure.clamp(_minExposure, _maxExposure));
-      } catch (e) {
-        debugPrint("Smart exposure offset skipped: $e");
+      // Re-apply current exposure offset if it's set
+      if (_currentExposure != 0.0) {
+        tasks.add(controller.setExposureOffset(
+            _currentExposure.clamp(_minExposure, _maxExposure)).catchError((_) => null));
       }
 
-      // The camera plugin does not expose direct ISO control. A short settle
-      // window lets the native auto-exposure/ISO pipeline react to bright or
-      // dark areas before the still image is taken.
-      await Future.delayed(_autoExposureSettleDelay);
+      if (tasks.isNotEmpty) {
+        await Future.wait(tasks);
+      }
     } catch (e) {
       debugPrint("Smart exposure preparation skipped: $e");
     }
@@ -834,15 +831,29 @@ class CameraViewModel extends StateNotifier<CameraState>
 
   Future<void> _restoreCameraState(CameraController? controller) async {
     try {
-      if (controller != null && controller.value.isInitialized) {
-        await controller.setFlashMode(FlashMode.off);
-        await Future.wait([
-          controller.setFocusMode(FocusMode.auto),
-          controller.setExposureMode(ExposureMode.auto),
-          controller.setExposureOffset(_currentExposure),
-        ]);
-        await controller.resumePreview();
+      if (controller == null || !controller.value.isInitialized) return;
+
+      final List<Future> cleanupTasks = [
+        controller.setFlashMode(FlashMode.off),
+      ];
+
+      // Only reset focus/exposure if they were altered by manual interaction
+      if (state.isManualFocus) {
+        cleanupTasks.add(controller.setFocusMode(FocusMode.auto));
+        cleanupTasks.add(controller.setExposureMode(ExposureMode.auto));
+        cleanupTasks.add(controller.setFocusPoint(null));
+        cleanupTasks.add(controller.setExposurePoint(null));
       }
+
+      // Also ensure exposure offset is restored if it was non-zero
+      if (_currentExposure != 0.0) {
+        cleanupTasks.add(controller.setExposureOffset(_currentExposure));
+      }
+
+      await Future.wait(cleanupTasks.map((t) => t.catchError((e) => null)));
+
+      // Resume preview if needed by the specific device/plugin state
+      await controller.resumePreview().catchError((e) => null);
     } catch (e) {
       debugPrint("Restoration error: $e");
     }

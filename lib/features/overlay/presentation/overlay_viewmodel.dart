@@ -141,16 +141,37 @@ class OverlayViewModel extends StateNotifier<void> {
     required Future<Uint8List> preparedBytes,
   }) async {
     try {
+      // 🔥 OPTIMIZATION: Try to wait for the prepared bytes for a very short window (150ms).
+      // If they are ready, we skip showing the "original" (no-overlay) image in the gallery 
+      // entirely, avoiding the "flash" of a raw photo before the watermarked one appears.
+      Uint8List? bytes;
+      try {
+        bytes = await preparedBytes.timeout(const Duration(milliseconds: 150));
+      } catch (_) {
+        // Not ready yet, proceed with showing the original as a placeholder
+      }
+
+      if (bytes != null) {
+        if (bytes.isEmpty) throw Exception('Prepared image was empty');
+        final savedFile = await GallerySaver.saveImageBytes(bytes);
+        ref.read(lastImageProvider.notifier).state = savedFile;
+        ref
+            .read(galleryFilesProvider.notifier)
+            .showFileImmediately(savedFile);
+        return savedFile;
+      }
+
+      // If we are here, processing is taking longer. Show original with a processing indicator.
       ref.read(lastImageProvider.notifier).state = original;
       ref.read(galleryFilesProvider.notifier).showFileImmediately(original);
       ref.read(galleryProcessingProvider.notifier).start(original);
 
-      final bytes = await preparedBytes;
-      if (bytes.isEmpty) {
+      final finalBytes = await preparedBytes;
+      if (finalBytes.isEmpty) {
         throw Exception('Prepared image was empty');
       }
 
-      final savedFile = await GallerySaver.saveImageBytes(bytes);
+      final savedFile = await GallerySaver.saveImageBytes(finalBytes);
       ref.read(lastImageProvider.notifier).state = savedFile;
       ref
           .read(galleryProcessingProvider.notifier)
@@ -158,7 +179,7 @@ class OverlayViewModel extends StateNotifier<void> {
       ref
           .read(galleryFilesProvider.notifier)
           .showFileImmediately(savedFile, replace: original);
-      debugPrint("Prepared Save Complete");
+
       return savedFile;
     } catch (e) {
       debugPrint("Prepared Save Failed: $e");

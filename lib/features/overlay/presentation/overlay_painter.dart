@@ -125,11 +125,26 @@ class WatermarkProcessor {
       dstH = srcRect.width;
     }
 
+    // 🔥 SPEED OPTIMIZATION FOR RELEASE MODE:
+    // Processing massive photos (e.g. 50MP-108MP) in pure Dart is too slow.
+    // Capping at ~4000px ensures consistent, near-instant watermarking across all devices
+    // while maintaining extreme detail (4000px is still ~12 megapixels).
+    const double maxProcDimension = 4032.0;
+    double scale = 1.0;
+    if (dstW > maxProcDimension || dstH > maxProcDimension) {
+      scale = maxProcDimension / max(dstW, dstH);
+      dstW *= scale;
+      dstH *= scale;
+    }
+
     final recorder = ui.PictureRecorder();
     final canvas = Canvas(recorder);
 
     canvas.save();
-    _applyOrientation(canvas, orientation, dstW, dstH);
+    if (scale != 1.0) {
+      canvas.scale(scale, scale);
+    }
+    _applyOrientation(canvas, orientation, dstW / scale, dstH / scale);
 
     // Draw image
     if (mirror) {
@@ -323,9 +338,8 @@ class WatermarkProcessor {
     return Uint8List.fromList(
       img.encodeJpg(
         processedImage,
-        quality: 100,
-        chroma: img
-            .JpegChroma.yuv444, // 🔥 No chroma subsampling for maximum clarity
+        quality: 95, // 🔥 95 is standard high quality and much faster than 100
+        chroma: img.JpegChroma.yuv420, // 🔥 yuv420 is significantly faster than yuv444
       ),
     );
   }

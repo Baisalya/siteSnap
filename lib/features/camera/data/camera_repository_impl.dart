@@ -116,7 +116,7 @@ class CameraRepositoryImpl implements CameraRepository {
   Future<void> _initController(CameraDescription camera) async {
     final controller = CameraController(
       camera,
-      ResolutionPreset.max,
+      ResolutionPreset.ultraHigh, // 🔥 Standardize on 4K (UltraHigh) instead of sensor Max
       enableAudio: true,
       imageFormatGroup: ImageFormatGroup.jpeg,
     );

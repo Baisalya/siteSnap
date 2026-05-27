@@ -50,6 +50,7 @@ class _CameraScreenState extends ConsumerState<CameraScreen>
   bool _processingBubbleExpanded = false;
   bool _processingBubbleDimmed = false;
   Offset? _processingBubbleOffset;
+  int _resumeCounter = 0;
 
   @override
   void initState() {
@@ -124,10 +125,18 @@ class _CameraScreenState extends ConsumerState<CameraScreen>
     _shutterFeedbackTimer?.cancel();
     setState(() {
       _isCapturing = true;
+      _showShutterFeedback = false;
+    });
+  }
+
+  void _showPhotoCapturedFeedback() {
+    _shutterFeedbackTimer?.cancel();
+    if (!mounted) return;
+    setState(() {
+      _isCapturing = false;
       _showShutterFeedback = true;
       _shutterFeedbackTick++;
     });
-
     _shutterFeedbackTimer = Timer(const Duration(milliseconds: 240), () {
       if (!mounted) return;
       setState(() => _showShutterFeedback = false);
@@ -214,7 +223,14 @@ class _CameraScreenState extends ConsumerState<CameraScreen>
 
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
-    // Redundant refresh removed as ViewModel handles it efficiently
+    if (state == AppLifecycleState.resumed) {
+      // Force a rebuild and increment counter to reset the CameraPreview texture
+      if (mounted) {
+        setState(() {
+          _resumeCounter++;
+        });
+      }
+    }
   }
 
   @override
@@ -526,8 +542,8 @@ class _CameraScreenState extends ConsumerState<CameraScreen>
                                                         .previewSize!.width,
                                                     child: CameraPreview(
                                                       controller,
-                                                      key:
-                                                          ObjectKey(controller),
+                                                      key: ValueKey(
+                                                          "${controller.hashCode}_${cameraState.cameraMode}_$_resumeCounter"),
                                                     ),
                                                   ),
                                                 ),
@@ -575,29 +591,27 @@ class _CameraScreenState extends ConsumerState<CameraScreen>
                                   child: Container(
                                     color: Colors.black,
                                     child: Center(
-                                      child: Column(
-                                        mainAxisSize: MainAxisSize.min,
-                                        children: [
-                                          const Icon(Icons.camera_alt,
-                                              color: Colors.white24, size: 50),
-                                          if (cameraState.error != null) ...[
-                                            const SizedBox(height: 16),
-                                            Text(
-                                              "Camera Error: ${cameraState.error}",
-                                              style: const TextStyle(
-                                                  color: Colors.white70),
-                                              textAlign: TextAlign.center,
+                                      child: cameraState.error == null
+                                          ? const _CameraPreparingOverlay()
+                                          : Column(
+                                              mainAxisSize: MainAxisSize.min,
+                                              children: [
+                                                Text(
+                                                  "Camera Error: ${cameraState.error}",
+                                                  style: const TextStyle(
+                                                      color: Colors.white70),
+                                                  textAlign: TextAlign.center,
+                                                ),
+                                                TextButton(
+                                                  onPressed: () => ref
+                                                      .read(
+                                                          cameraViewModelProvider
+                                                              .notifier)
+                                                      .initialize(),
+                                                  child: const Text("Retry"),
+                                                ),
+                                              ],
                                             ),
-                                            TextButton(
-                                              onPressed: () => ref
-                                                  .read(cameraViewModelProvider
-                                                      .notifier)
-                                                  .initialize(),
-                                              child: const Text("Retry"),
-                                            ),
-                                          ],
-                                        ],
-                                      ),
                                     ),
                                   ),
                                 ),
@@ -1033,12 +1047,19 @@ class _CameraScreenState extends ConsumerState<CameraScreen>
                                     try {
                                       final path = await cameraVM.capture();
 
-                                      _finishPhotoCapture();
+                                      _showPhotoCapturedFeedback();
 
                                       if (path != null && context.mounted) {
-                                        // Fire-and-forget navigation for zero-lag feeling
-                                        unawaited(cameraVM.handlePostCapture(
-                                            path, context));
+                                        unawaited(
+                                          Future<void>(() async {
+                                            await Future.delayed(
+                                              const Duration(milliseconds: 180),
+                                            );
+                                            if (!context.mounted) return;
+                                            await cameraVM.handlePostCapture(
+                                                path, context);
+                                          }),
+                                        );
                                       }
                                     } catch (e) {
                                       debugPrint("Capture error: $e");
@@ -1536,6 +1557,100 @@ class _ShutterFeedbackOverlay extends StatelessWidget {
   }
 }
 
+class _CameraPreparingOverlay extends StatefulWidget {
+  const _CameraPreparingOverlay();
+
+  @override
+  State<_CameraPreparingOverlay> createState() =>
+      _CameraPreparingOverlayState();
+}
+
+class _CameraPreparingOverlayState extends State<_CameraPreparingOverlay>
+    with SingleTickerProviderStateMixin {
+  late final AnimationController _controller;
+
+  @override
+  void initState() {
+    super.initState();
+    _controller = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 1200),
+    )..repeat();
+  }
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return TweenAnimationBuilder<double>(
+      tween: Tween(begin: 0, end: 1),
+      duration: const Duration(milliseconds: 220),
+      curve: Curves.easeOutCubic,
+      builder: (context, opacity, child) {
+        return Opacity(opacity: opacity, child: child);
+      },
+      child: Container(
+        width: 184,
+        padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 16),
+        decoration: BoxDecoration(
+          color: Colors.white.withValues(alpha: 0.08),
+          borderRadius: BorderRadius.circular(14),
+          border: Border.all(
+            color: Colors.white.withValues(alpha: 0.12),
+          ),
+        ),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            AnimatedBuilder(
+              animation: _controller,
+              builder: (context, child) {
+                return ClipRRect(
+                  borderRadius: BorderRadius.circular(999),
+                  child: LinearProgressIndicator(
+                    minHeight: 3,
+                    value: 0.22 + (_controller.value * 0.58),
+                    backgroundColor: Colors.white.withValues(alpha: 0.12),
+                    valueColor: AlwaysStoppedAnimation<Color>(
+                      Colors.white.withValues(alpha: 0.82),
+                    ),
+                  ),
+                );
+              },
+            ),
+            const SizedBox(height: 14),
+            Text(
+              "Preparing camera",
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(
+                color: Colors.white.withValues(alpha: 0.9),
+                fontSize: 13,
+                fontWeight: FontWeight.w700,
+              ),
+            ),
+            const SizedBox(height: 4),
+            Text(
+              "Getting preview ready",
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(
+                color: Colors.white.withValues(alpha: 0.55),
+                fontSize: 11,
+                fontWeight: FontWeight.w500,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
 class _CaptureProgressOverlay extends StatefulWidget {
   const _CaptureProgressOverlay();
 
@@ -1553,7 +1668,7 @@ class _CaptureProgressOverlayState extends State<_CaptureProgressOverlay>
     super.initState();
     _controller = AnimationController(
       vsync: this,
-      duration: const Duration(milliseconds: 900),
+      duration: const Duration(milliseconds: 1100),
     )..repeat();
   }
 
@@ -1565,77 +1680,77 @@ class _CaptureProgressOverlayState extends State<_CaptureProgressOverlay>
 
   @override
   Widget build(BuildContext context) {
-    return Center(
-      child: TweenAnimationBuilder<double>(
-        tween: Tween(begin: 0, end: 1),
-        duration: const Duration(milliseconds: 160),
-        curve: Curves.easeOut,
-        builder: (context, opacity, child) {
-          return Opacity(
-            opacity: opacity,
-            child: child,
-          );
-        },
-        child: Container(
-          width: 84,
-          height: 84,
-          decoration: BoxDecoration(
-            color: Colors.black.withValues(alpha: 0.34),
-            shape: BoxShape.circle,
-            border: Border.all(
-              color: Colors.white.withValues(alpha: 0.42),
-              width: 1,
-            ),
-          ),
-          child: AnimatedBuilder(
+    return TweenAnimationBuilder<double>(
+      tween: Tween(begin: 0, end: 1),
+      duration: const Duration(milliseconds: 180),
+      curve: Curves.easeOutCubic,
+      builder: (context, opacity, child) {
+        return Opacity(opacity: opacity, child: child);
+      },
+      child: Stack(
+        fit: StackFit.expand,
+        children: [
+          AnimatedBuilder(
             animation: _controller,
             builder: (context, child) {
+              final pulse = Curves.easeInOut.transform(
+                (_controller.value <= 0.5
+                        ? _controller.value * 2
+                        : (1 - _controller.value) * 2)
+                    .clamp(0.0, 1.0),
+              );
               return CustomPaint(
-                painter: _CaptureProgressPainter(_controller.value),
-                child: child,
+                painter: _CaptureHoldPainter(pulse),
               );
             },
-            child: const Center(
-              child: Icon(
-                Icons.camera_alt_rounded,
-                color: Colors.white,
-                size: 28,
-              ),
-            ),
           ),
-        ),
+        ],
       ),
     );
   }
 }
 
-class _CaptureProgressPainter extends CustomPainter {
-  final double progress;
+class _CaptureHoldPainter extends CustomPainter {
+  final double pulse;
 
-  _CaptureProgressPainter(this.progress);
+  _CaptureHoldPainter(this.pulse);
 
   @override
   void paint(Canvas canvas, Size size) {
-    final center = Offset(size.width / 2, size.height / 2);
-    final radius = (size.shortestSide / 2) - 7;
-    final rect = Rect.fromCircle(center: center, radius: radius);
+    final dimPaint = Paint()
+      ..color = Colors.black.withValues(alpha: 0.07 + (pulse * 0.08));
+    canvas.drawRect(Offset.zero & size, dimPaint);
+
+    final frameWidth = size.width * (0.5 + pulse * 0.02);
+    final frameHeight = size.height * (0.36 + pulse * 0.01);
+    final rect = Rect.fromCenter(
+      center: Offset(size.width / 2, size.height / 2),
+      width: frameWidth.clamp(180.0, size.width - 48),
+      height: frameHeight.clamp(140.0, size.height - 180),
+    );
+    final corner = (rect.shortestSide * 0.14).clamp(18.0, 34.0);
     final paint = Paint()
       ..style = PaintingStyle.stroke
-      ..strokeWidth = 3
+      ..strokeWidth = 2.6
       ..strokeCap = StrokeCap.round
-      ..color = Colors.white.withValues(alpha: 0.88);
+      ..color = Colors.white.withValues(alpha: 0.42 + pulse * 0.28);
 
-    canvas.drawArc(
-      rect,
-      (progress * 6.283185307179586) - 1.5707963267948966,
-      1.65,
-      false,
-      paint,
-    );
+    canvas.drawLine(rect.topLeft, rect.topLeft + Offset(corner, 0), paint);
+    canvas.drawLine(rect.topLeft, rect.topLeft + Offset(0, corner), paint);
+    canvas.drawLine(rect.topRight, rect.topRight - Offset(corner, 0), paint);
+    canvas.drawLine(rect.topRight, rect.topRight + Offset(0, corner), paint);
+    canvas.drawLine(
+        rect.bottomLeft, rect.bottomLeft + Offset(corner, 0), paint);
+    canvas.drawLine(
+        rect.bottomLeft, rect.bottomLeft - Offset(0, corner), paint);
+    canvas.drawLine(
+        rect.bottomRight, rect.bottomRight - Offset(corner, 0), paint);
+    canvas.drawLine(
+        rect.bottomRight, rect.bottomRight - Offset(0, corner), paint);
   }
 
   @override
-  bool shouldRepaint(covariant _CaptureProgressPainter oldDelegate) {
-    return oldDelegate.progress != progress;
+  bool shouldRepaint(covariant _CaptureHoldPainter oldDelegate) {
+    return oldDelegate.pulse != pulse;
   }
 }
