@@ -31,6 +31,10 @@ final cameraViewModelProvider =
   return CameraViewModel(ref);
 });
 
+const Duration _photoCaptureTimeout = Duration(seconds: 12);
+const Duration _autoExposureSettleDelay = Duration(milliseconds: 220);
+const Duration _flashExposureSettleDelay = Duration(milliseconds: 140);
+
 class CameraViewModel extends StateNotifier<CameraState>
     with WidgetsBindingObserver {
   final Ref ref;
@@ -94,6 +98,32 @@ class CameraViewModel extends StateNotifier<CameraState>
           videoProcessingError: null,
         );
         unawaited(ref.read(galleryFilesProvider.notifier).refresh());
+      } else if (message['type'] == 'image_complete') {
+        final originalPath = message['originalPath'] as String?;
+        final savedPath = message['path'] as String?;
+        if (savedPath != null && savedPath.isNotEmpty) {
+          final savedFile = File(savedPath);
+          ref.read(lastImageProvider.notifier).state = savedFile;
+          if (originalPath != null && originalPath.isNotEmpty) {
+            ref
+                .read(galleryProcessingProvider.notifier)
+                .complete(File(originalPath), savedFile);
+            ref
+                .read(galleryFilesProvider.notifier)
+                .showFileImmediately(savedFile, replace: File(originalPath));
+          } else {
+            ref.read(galleryFilesProvider.notifier).showFileImmediately(
+                  savedFile,
+                );
+          }
+        } else {
+          unawaited(ref.read(galleryFilesProvider.notifier).refresh());
+        }
+      } else if (message['type'] == 'image_error') {
+        final originalPath = message['originalPath'] as String?;
+        if (originalPath != null && originalPath.isNotEmpty) {
+          ref.read(galleryProcessingProvider.notifier).fail(File(originalPath));
+        }
       } else if (message['type'] == 'error') {
         state = state.copyWith(
           clearProcessingProgress: true,
@@ -104,7 +134,7 @@ class CameraViewModel extends StateNotifier<CameraState>
         state = state.copyWith(
           clearProcessingProgress: true,
           processingMessage:
-              message['message'] as String? ?? 'Video processing cancelled.',
+              message['message'] as String? ?? 'Processing cancelled.',
           videoProcessingError: null,
         );
       }
@@ -575,7 +605,8 @@ class CameraViewModel extends StateNotifier<CameraState>
         ? CameraLensType.normal
         : CameraLensType.front;
 
-    state = state.copyWith(currentLens: nextLens, isReady: false, clearController: true);
+    state = state.copyWith(
+        currentLens: nextLens, isReady: false, clearController: true);
 
     try {
       final repo = ref.read(cameraRepositoryProvider);
@@ -726,19 +757,14 @@ class CameraViewModel extends StateNotifier<CameraState>
     try {
       final repo = ref.read(cameraRepositoryProvider);
 
-      if (controller.value.isInitialized) {
-        await controller
-            .setExposureMode(ExposureMode.auto)
-            .timeout(const Duration(milliseconds: 250))
-            .catchError((e) => debugPrint("Capture exposure mode skipped: $e"));
-      }
+      await _prepareSmartPhotoExposure(controller);
 
       if (state.flashMode == FlashMode.always) {
         if (state.currentLens == CameraLensType.front) {
-          await Future.delayed(const Duration(milliseconds: 80));
+          await Future.delayed(const Duration(milliseconds: 30));
         } else {
           await controller.setFlashMode(FlashMode.torch);
-          await Future.delayed(const Duration(milliseconds: 100));
+          await Future.delayed(_flashExposureSettleDelay);
         }
       } else {
         unawaited(controller
@@ -746,7 +772,7 @@ class CameraViewModel extends StateNotifier<CameraState>
             .catchError((e) => debugPrint("Capture flash-off skipped: $e")));
       }
 
-      final path = await repo.takePicture().timeout(const Duration(seconds: 6));
+      final path = await repo.takePicture().timeout(_photoCaptureTimeout);
 
       if (state.flashMode == FlashMode.always) {
         unawaited(_nuclearFlashKill(controller));
@@ -773,6 +799,36 @@ class CameraViewModel extends StateNotifier<CameraState>
       _captureInFlight = false;
       unawaited(_restoreCameraState(controller));
       state = state.copyWith(isCapturing: false);
+    }
+  }
+
+  Future<void> _prepareSmartPhotoExposure(CameraController controller) async {
+    try {
+      if (!controller.value.isInitialized) return;
+
+      await controller
+          .setExposureMode(ExposureMode.auto)
+          .catchError((e) => debugPrint("Smart exposure mode skipped: $e"));
+
+      if (!state.isManualFocus) {
+        await controller
+            .setExposurePoint(const Offset(0.5, 0.5))
+            .catchError((e) => debugPrint("Smart exposure point skipped: $e"));
+      }
+
+      try {
+        await controller.setExposureOffset(
+            _currentExposure.clamp(_minExposure, _maxExposure));
+      } catch (e) {
+        debugPrint("Smart exposure offset skipped: $e");
+      }
+
+      // The camera plugin does not expose direct ISO control. A short settle
+      // window lets the native auto-exposure/ISO pipeline react to bright or
+      // dark areas before the still image is taken.
+      await Future.delayed(_autoExposureSettleDelay);
+    } catch (e) {
+      debugPrint("Smart exposure preparation skipped: $e");
     }
   }
 
@@ -914,7 +970,7 @@ class CameraViewModel extends StateNotifier<CameraState>
 
     state = state.copyWith(
       clearProcessingProgress: true,
-      processingMessage: 'Video processing cancelled.',
+      processingMessage: 'Processing cancelled.',
       videoProcessingError: null,
     );
 
@@ -1052,8 +1108,8 @@ class CameraViewModel extends StateNotifier<CameraState>
     FlutterForegroundTask.init(
       androidNotificationOptions: AndroidNotificationOptions(
         channelId: 'processing_channel',
-        channelName: 'Video Processing',
-        channelDescription: 'Shows progress of video watermarking',
+        channelName: 'Media Processing',
+        channelDescription: 'Shows progress of media processing',
         channelImportance: NotificationChannelImportance.LOW,
         priority: NotificationPriority.LOW,
         iconData: const NotificationIconData(
@@ -1078,14 +1134,14 @@ class CameraViewModel extends StateNotifier<CameraState>
     final isRunning = await FlutterForegroundTask.isRunningService;
     if (isRunning) {
       await FlutterForegroundTask.updateService(
-        notificationTitle: 'SurveyCam - Video processing',
-        notificationText: 'Preparing video watermark...',
+        notificationTitle: 'SurveyCam - Media processing',
+        notificationText: 'Preparing media...',
         callback: startCallback,
       );
     } else {
       await FlutterForegroundTask.startService(
-        notificationTitle: 'SurveyCam - Video processing',
-        notificationText: 'Preparing video watermark...',
+        notificationTitle: 'SurveyCam - Media processing',
+        notificationText: 'Preparing media...',
         callback: startCallback,
       );
     }
@@ -1103,12 +1159,20 @@ class CameraViewModel extends StateNotifier<CameraState>
         );
       }
 
+      final previousImageFailure =
+          await VideoProcessingTaskHandler.takeLastImageFailure();
+      if (previousImageFailure != null) {
+        debugPrint('Pending photo save failed: $previousImageFailure');
+      }
+
       if (await VideoProcessingTaskHandler.hasPendingJob()) {
         state = state.copyWith(
           processingProgress: 0.05,
           processingMessage: 'Resuming video processing...',
           videoProcessingError: null,
         );
+        await _startForegroundService();
+      } else if (await VideoProcessingTaskHandler.hasPendingImageJob()) {
         await _startForegroundService();
       }
     } catch (e) {

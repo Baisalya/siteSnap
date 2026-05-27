@@ -1,22 +1,29 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:io';
 import 'dart:isolate';
+import 'dart:ui';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_foreground_task/flutter_foreground_task.dart';
+import 'package:surveycam/core/services/image_processing_job.dart';
 import 'package:surveycam/core/services/video_processing_job.dart';
 import 'package:surveycam/core/utils/gallery_saver.dart';
 import 'package:surveycam/core/utils/thumbnail_utils.dart';
 import 'package:surveycam/features/camera/domain/camera_lens_type.dart';
+import 'package:surveycam/features/overlay/presentation/overlay_painter.dart';
 import 'package:surveycam/features/overlay/presentation/video_watermark_processor.dart';
 
 @pragma('vm:entry-point')
 void startCallback() {
+  DartPluginRegistrant.ensureInitialized();
   FlutterForegroundTask.setTaskHandler(VideoProcessingTaskHandler());
 }
 
 class VideoProcessingTaskHandler extends TaskHandler {
   static const String pendingJobKey = 'pending_video_processing_job';
+  static const String pendingImageJobKey = 'pending_image_processing_job';
   static const String lastFailureKey = 'last_video_processing_failure';
+  static const String lastImageFailureKey = 'last_image_processing_failure';
   static const String cancelRequestedKey = 'cancel_video_processing_requested';
 
   static bool _isProcessing = false;
@@ -29,6 +36,13 @@ class VideoProcessingTaskHandler extends TaskHandler {
     return jobJson != null && jobJson.isNotEmpty;
   }
 
+  static Future<bool> hasPendingImageJob() async {
+    final jobJson = await FlutterForegroundTask.getData<String>(
+      key: pendingImageJobKey,
+    );
+    return _decodeImageJobQueue(jobJson).isNotEmpty;
+  }
+
   static Future<void> enqueueJob(VideoProcessingJob job) async {
     await FlutterForegroundTask.removeData(key: lastFailureKey);
     await FlutterForegroundTask.removeData(key: cancelRequestedKey);
@@ -39,17 +53,49 @@ class VideoProcessingTaskHandler extends TaskHandler {
     _lastFailedJobId = null;
   }
 
+  static Future<void> enqueueImageJob(ImageProcessingJob job) async {
+    await FlutterForegroundTask.removeData(key: lastImageFailureKey);
+    final existingJobJson = await FlutterForegroundTask.getData<String>(
+      key: pendingImageJobKey,
+    );
+    final queue = _decodeImageJobQueue(existingJobJson)..add(job.toJson());
+    await FlutterForegroundTask.saveData(
+      key: pendingImageJobKey,
+      value: jsonEncode(queue),
+    );
+  }
+
+  static List<Map<String, dynamic>> _decodeImageJobQueue(String? jobJson) {
+    if (jobJson == null || jobJson.isEmpty) return [];
+    try {
+      final decoded = jsonDecode(jobJson);
+      if (decoded is List) {
+        return decoded
+            .map((item) => Map<String, dynamic>.from(item as Map))
+            .toList();
+      }
+      if (decoded is Map) {
+        return [Map<String, dynamic>.from(decoded)];
+      }
+    } catch (_) {
+      return [];
+    }
+    return [];
+  }
+
   static Future<void> cancelProcessing() async {
     await FlutterForegroundTask.saveData(
       key: cancelRequestedKey,
       value: 'true',
     );
     await FlutterForegroundTask.removeData(key: pendingJobKey);
+    await FlutterForegroundTask.removeData(key: pendingImageJobKey);
     await FlutterForegroundTask.removeData(key: lastFailureKey);
+    await FlutterForegroundTask.removeData(key: lastImageFailureKey);
     await VideoWatermarkProcessor.cancelActiveProcessing();
     await FlutterForegroundTask.updateService(
-      notificationTitle: 'SurveyCam - Video processing',
-      notificationText: 'Video processing cancelled',
+      notificationTitle: 'SurveyCam - Media processing',
+      notificationText: 'Processing cancelled',
     );
     unawaited(Future.delayed(const Duration(seconds: 1), () {
       FlutterForegroundTask.stopService();
@@ -62,6 +108,17 @@ class VideoProcessingTaskHandler extends TaskHandler {
     );
     if (failure != null && failure.isNotEmpty) {
       await FlutterForegroundTask.removeData(key: lastFailureKey);
+      return failure;
+    }
+    return null;
+  }
+
+  static Future<String?> takeLastImageFailure() async {
+    final failure = await FlutterForegroundTask.getData<String>(
+      key: lastImageFailureKey,
+    );
+    if (failure != null && failure.isNotEmpty) {
+      await FlutterForegroundTask.removeData(key: lastImageFailureKey);
       return failure;
     }
     return null;
@@ -96,7 +153,15 @@ class VideoProcessingTaskHandler extends TaskHandler {
       final jobJson = await FlutterForegroundTask.getData<String>(
         key: pendingJobKey,
       );
+      final imageJobJson = await FlutterForegroundTask.getData<String>(
+        key: pendingImageJobKey,
+      );
       if (jobJson == null || jobJson.isEmpty) {
+        if (_decodeImageJobQueue(imageJobJson).isNotEmpty) {
+          _isProcessing = true;
+          await _processPendingImageJob(sendPort, imageJobJson!);
+          return;
+        }
         await FlutterForegroundTask.stopService();
         return;
       }
@@ -256,7 +321,7 @@ class VideoProcessingTaskHandler extends TaskHandler {
       });
 
       unawaited(Future.delayed(const Duration(seconds: 2), () {
-        FlutterForegroundTask.stopService();
+        _stopServiceIfIdle();
       }));
     } on _VideoProcessingCancelledException {
       await FlutterForegroundTask.removeData(key: pendingJobKey);
@@ -267,7 +332,7 @@ class VideoProcessingTaskHandler extends TaskHandler {
       });
       await _updateNotification('Video processing cancelled');
       unawaited(Future.delayed(const Duration(seconds: 1), () {
-        FlutterForegroundTask.stopService();
+        _stopServiceIfIdle();
       }));
     } catch (e, stackTrace) {
       debugPrint('Background video processing error: $e\n$stackTrace');
@@ -283,18 +348,132 @@ class VideoProcessingTaskHandler extends TaskHandler {
       });
       await _updateNotification('Video processing failed. Tap to reopen.');
       unawaited(Future.delayed(const Duration(seconds: 8), () {
-        FlutterForegroundTask.stopService();
+        _stopServiceIfIdle();
       }));
     } finally {
       _isProcessing = false;
+      if (await _hasAnyPendingJob()) {
+        unawaited(Future.microtask(() => _processPendingJob(sendPort)));
+      }
+    }
+  }
+
+  Future<bool> _hasAnyPendingJob() async {
+    final videoJobJson = await FlutterForegroundTask.getData<String>(
+      key: pendingJobKey,
+    );
+    if (videoJobJson != null && videoJobJson.isNotEmpty) return true;
+
+    final imageJobJson = await FlutterForegroundTask.getData<String>(
+      key: pendingImageJobKey,
+    );
+    return _decodeImageJobQueue(imageJobJson).isNotEmpty;
+  }
+
+  Future<void> _stopServiceIfIdle() async {
+    if (!await _hasAnyPendingJob()) {
+      await FlutterForegroundTask.stopService();
+    }
+  }
+
+  Future<void> _processPendingImageJob(
+    SendPort? sendPort,
+    String jobJson,
+  ) async {
+    ImageProcessingJob? imageJob;
+    try {
+      final queue = _decodeImageJobQueue(jobJson);
+      if (queue.isEmpty) {
+        await FlutterForegroundTask.removeData(key: pendingImageJobKey);
+        return;
+      }
+      imageJob = ImageProcessingJob.fromJson(queue.first);
+      if (imageJob.originalPath.isEmpty) {
+        await _removeImageJobFromQueue(imageJob.id);
+        return;
+      }
+
+      final originalFile = File(imageJob.originalPath);
+      if (!await originalFile.exists()) {
+        throw Exception('Original photo file was not found');
+      }
+
+      await _imageProgress('Saving photo in background... 8%');
+      final bytes = await WatermarkProcessor.drawOverlay(
+        originalFile,
+        imageJob.overlayData,
+        imageJob.orientation,
+        showOverlay: imageJob.showOverlay,
+        showWatermark: imageJob.showWatermark,
+        aspectRatio: imageJob.aspectRatio,
+        mirror: imageJob.mirror,
+        settings: imageJob.settings,
+      );
+
+      await _imageProgress('Finishing photo save... 88%');
+      final savedFile = await GallerySaver.saveImageBytes(bytes);
+
+      await _removeImageJobFromQueue(imageJob.id);
+      await FlutterForegroundTask.removeData(key: lastImageFailureKey);
+      await _updateNotification('Photo saved successfully!');
+      _send(sendPort, {
+        'type': 'image_complete',
+        'originalPath': imageJob.originalPath,
+        'path': savedFile.path,
+      });
+
+      unawaited(Future.delayed(const Duration(seconds: 2), () {
+        _stopServiceIfIdle();
+      }));
+    } catch (e, stackTrace) {
+      debugPrint('Background image processing error: $e\n$stackTrace');
+      if (imageJob != null) {
+        await _removeImageJobFromQueue(imageJob.id);
+      } else {
+        await FlutterForegroundTask.removeData(key: pendingImageJobKey);
+      }
+      await FlutterForegroundTask.saveData(
+        key: lastImageFailureKey,
+        value: e.toString(),
+      );
+      await _updateNotification('Photo save failed. Tap to reopen.');
+      _send(sendPort, {
+        'type': 'image_error',
+        'originalPath': imageJob?.originalPath,
+        'error': e.toString(),
+      });
+      unawaited(Future.delayed(const Duration(seconds: 8), () {
+        _stopServiceIfIdle();
+      }));
+    }
+  }
+
+  Future<void> _removeImageJobFromQueue(String jobId) async {
+    final jobJson = await FlutterForegroundTask.getData<String>(
+      key: pendingImageJobKey,
+    );
+    final queue = _decodeImageJobQueue(jobJson)
+        .where((job) => job['id'] != jobId)
+        .toList();
+    if (queue.isEmpty) {
+      await FlutterForegroundTask.removeData(key: pendingImageJobKey);
+    } else {
+      await FlutterForegroundTask.saveData(
+        key: pendingImageJobKey,
+        value: jsonEncode(queue),
+      );
     }
   }
 
   Future<void> _updateNotification(String text) {
     return FlutterForegroundTask.updateService(
-      notificationTitle: 'SurveyCam - Video processing',
+      notificationTitle: 'SurveyCam - Media processing',
       notificationText: text,
     );
+  }
+
+  Future<void> _imageProgress(String message) {
+    return _updateNotification(message);
   }
 
   Future<void> _progress(SendPort? sendPort, double value, String message) {

@@ -1,3 +1,5 @@
+import 'dart:async';
+import 'dart:convert';
 import 'dart:math';
 import 'dart:io';
 import 'dart:ui' as ui;
@@ -37,12 +39,16 @@ class ImagePreviewScreen extends ConsumerStatefulWidget {
   ConsumerState<ImagePreviewScreen> createState() => _ImagePreviewScreenState();
 }
 
+enum _PreviewBusyAction { save, share }
+
 class _ImagePreviewScreenState extends ConsumerState<ImagePreviewScreen> {
+  static const int _previewDecodeWidth = 1600;
+
   final TransformationController _transformationController =
       TransformationController();
   TapDownDetails? _doubleTapDetails;
 
-  bool _saving = false;
+  _PreviewBusyAction? _busyAction;
   bool _showUI = true;
   double? _aspectRatio;
 
@@ -55,6 +61,11 @@ class _ImagePreviewScreenState extends ConsumerState<ImagePreviewScreen> {
   DeviceOrientation? _captureOrientation;
   CameraAspectRatio? _captureAspectRatio;
   CameraLensType? _captureLens;
+  Timer? _prepareSaveTimer;
+  String? _preparedSaveKey;
+  Future<Uint8List>? _preparedSaveFuture;
+
+  bool get _saving => _busyAction != null;
 
   @override
   void initState() {
@@ -67,9 +78,11 @@ class _ImagePreviewScreenState extends ConsumerState<ImagePreviewScreen> {
   void _loadPreviewImage() async {
     try {
       final bytes = await widget.originalFile.readAsBytes();
-      // Use instantiateImageCodec with targetWidth/Height if we want to downsample for preview speed,
-      // but here we want full quality for CustomPaint. Still, we can do it in background.
-      final codec = await ui.instantiateImageCodec(bytes);
+      final codec = await ui.instantiateImageCodec(
+        bytes,
+        targetWidth: _previewDecodeWidth,
+        allowUpscaling: false,
+      );
       final frame = await codec.getNextFrame();
 
       if (!mounted) {
@@ -148,8 +161,72 @@ class _ImagePreviewScreenState extends ConsumerState<ImagePreviewScreen> {
     }
   }
 
+  String _preparedSaveSignature({
+    required CameraState cameraState,
+    required OverlayData overlayData,
+    required OverlaySettings settings,
+  }) {
+    final orientation = _captureOrientation ??
+        cameraState.captureOrientation ??
+        cameraState.orientation;
+    final aspectRatio = _captureAspectRatio ?? cameraState.aspectRatio;
+    final mirror =
+        (_captureLens ?? cameraState.captureLens) == CameraLensType.front;
+
+    return jsonEncode({
+      'path': widget.originalFile.path,
+      'overlayData': overlayData.toJson(),
+      'settings': settings.toJson(),
+      'showOverlay': _showOverlay,
+      'showWatermark': _showTextWatermark,
+      'orientation': orientation.index,
+      'aspectRatio': aspectRatio.index,
+      'mirror': mirror,
+    });
+  }
+
+  void _schedulePreparedSave({
+    required String signature,
+    required CameraState cameraState,
+    required OverlayData overlayData,
+    required OverlaySettings settings,
+  }) {
+    if (_saving || _preparedSaveKey == signature) return;
+
+    _prepareSaveTimer?.cancel();
+    _prepareSaveTimer = Timer(const Duration(milliseconds: 220), () {
+      if (!mounted || _saving) return;
+
+      final orientation = _captureOrientation ??
+          cameraState.captureOrientation ??
+          cameraState.orientation;
+      final aspectRatio = _captureAspectRatio ?? cameraState.aspectRatio;
+      final mirror =
+          (_captureLens ?? cameraState.captureLens) == CameraLensType.front;
+
+      _preparedSaveKey = signature;
+      _preparedSaveFuture = ref
+          .read(overlayViewModelProvider.notifier)
+          .processImage(
+            widget.originalFile,
+            orientation,
+            overlayData: overlayData,
+            showOverlay: _showOverlay,
+            showWatermark: _showTextWatermark,
+            aspectRatio: aspectRatio,
+            mirror: mirror,
+            settingsOverride: settings,
+          )
+          .catchError((Object error, StackTrace stackTrace) {
+        debugPrint("Prepared save failed: $error");
+        return Uint8List(0);
+      });
+    });
+  }
+
   @override
   void dispose() {
+    _prepareSaveTimer?.cancel();
     _transformationController.dispose();
     _previewImage?.dispose();
     _customLogoImage?.dispose();
@@ -157,12 +234,13 @@ class _ImagePreviewScreenState extends ConsumerState<ImagePreviewScreen> {
   }
 
   /// ================= SAVE =================
-  void _saveImage() {
+  Future<void> _saveImage() async {
     if (_saving) return;
 
     final cameraState = ref.read(cameraViewModelProvider);
     final captured = ref.read(capturedOverlayProvider);
     final live = ref.read(overlayPreviewProvider);
+    final settings = ref.read(overlaySettingsProvider);
 
     final overlayData = (captured ?? live).copyWith(
       note: live.note,
@@ -175,11 +253,18 @@ class _ImagePreviewScreenState extends ConsumerState<ImagePreviewScreen> {
         cameraState.captureOrientation ??
         cameraState.orientation;
     final aspectRatio = _captureAspectRatio ?? cameraState.aspectRatio;
+    final saveSignature = _preparedSaveSignature(
+      cameraState: cameraState,
+      overlayData: overlayData,
+      settings: settings,
+    );
+    final preparedSaveFuture =
+        _preparedSaveKey == saveSignature ? _preparedSaveFuture : null;
 
     // Return the save future so the camera screen can keep the gallery current
     // while the final watermarked file is produced.
-    final saveFuture =
-        ref.read(overlayViewModelProvider.notifier).saveCapturedImage(
+    final saveFuture = preparedSaveFuture == null
+        ? ref.read(overlayViewModelProvider.notifier).saveCapturedImage(
               original: widget.originalFile,
               orientation: orientation,
               overlayData: overlayData,
@@ -187,10 +272,20 @@ class _ImagePreviewScreenState extends ConsumerState<ImagePreviewScreen> {
               showWatermark: _showTextWatermark,
               aspectRatio: aspectRatio,
               mirror: isMirror,
+            )
+        : ref.read(overlayViewModelProvider.notifier).savePreparedCapturedImage(
+              original: widget.originalFile,
+              preparedBytes: preparedSaveFuture,
             );
 
     if (mounted) {
       HapticFeedback.mediumImpact();
+      setState(() {
+        _busyAction = _PreviewBusyAction.save;
+        _showUI = true;
+      });
+      await Future<void>.delayed(const Duration(seconds: 1));
+      if (!mounted) return;
       Navigator.of(context).pop(saveFuture);
     }
   }
@@ -199,11 +294,15 @@ class _ImagePreviewScreenState extends ConsumerState<ImagePreviewScreen> {
   Future<void> _shareImage() async {
     if (_saving) return;
 
+    HapticFeedback.lightImpact();
     setState(() {
-      _saving = true;
+      _busyAction = _PreviewBusyAction.share;
     });
 
     try {
+      await Future<void>.delayed(const Duration(milliseconds: 120));
+      if (!mounted) return;
+
       final cameraState = ref.read(cameraViewModelProvider);
       final captured = ref.read(capturedOverlayProvider);
       final live = ref.read(overlayPreviewProvider);
@@ -258,7 +357,7 @@ class _ImagePreviewScreenState extends ConsumerState<ImagePreviewScreen> {
     } finally {
       if (mounted) {
         setState(() {
-          _saving = false;
+          _busyAction = null;
         });
       }
     }
@@ -294,6 +393,20 @@ class _ImagePreviewScreenState extends ConsumerState<ImagePreviewScreen> {
       note: live.note,
       position: live.position,
     );
+    final preparedSaveSignature = _preparedSaveSignature(
+      cameraState: cameraState,
+      overlayData: overlayData,
+      settings: settings,
+    );
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      _schedulePreparedSave(
+        signature: preparedSaveSignature,
+        cameraState: cameraState,
+        overlayData: overlayData,
+        settings: settings,
+      );
+    });
 
     return PopScope(
       canPop: !_saving,
@@ -346,6 +459,11 @@ class _ImagePreviewScreenState extends ConsumerState<ImagePreviewScreen> {
             ),
 
             /// ✅ FLOATING APP BAR
+            if (_busyAction == _PreviewBusyAction.save)
+              const Positioned.fill(
+                child: _PhotoSaveFeedbackOverlay(),
+              ),
+
             AnimatedPositioned(
               duration: const Duration(milliseconds: 300),
               curve: Curves.easeInOut,
@@ -409,7 +527,25 @@ class _ImagePreviewScreenState extends ConsumerState<ImagePreviewScreen> {
     return SafeArea(
       child: Padding(
         padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
-        child: _buildActionBar(),
+        child: AnimatedSwitcher(
+          duration: const Duration(milliseconds: 240),
+          switchInCurve: Curves.easeOutCubic,
+          switchOutCurve: Curves.easeInCubic,
+          transitionBuilder: (child, animation) {
+            return FadeTransition(
+              opacity: animation,
+              child: ScaleTransition(
+                scale: Tween<double>(begin: 0.96, end: 1).animate(animation),
+                child: child,
+              ),
+            );
+          },
+          child: switch (_busyAction) {
+            _PreviewBusyAction.save => _buildSavingBar(),
+            _PreviewBusyAction.share => _buildSharingBar(),
+            null => _buildActionBar(),
+          },
+        ),
       ),
     );
   }
@@ -502,29 +638,102 @@ class _ImagePreviewScreenState extends ConsumerState<ImagePreviewScreen> {
       child: BackdropFilter(
         filter: ui.ImageFilter.blur(sigmaX: 12, sigmaY: 12),
         child: Container(
-          padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 20),
+          padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
           decoration: BoxDecoration(
-            color: Colors.black.withValues(alpha: 0.4),
+            color: const Color(0xFF12B76A).withValues(alpha: 0.88),
             borderRadius: BorderRadius.circular(28),
+            border: Border.all(
+              color: Colors.white.withValues(alpha: 0.28),
+              width: 0.6,
+            ),
+            boxShadow: [
+              BoxShadow(
+                color: const Color(0xFF12B76A).withValues(alpha: 0.32),
+                blurRadius: 24,
+                offset: const Offset(0, 8),
+              ),
+            ],
           ),
           child: const Row(
             mainAxisAlignment: MainAxisAlignment.center,
             children: [
               SizedBox(
-                width: 22,
-                height: 22,
-                child: CircularProgressIndicator(
-                  strokeWidth: 2.5,
-                  color: Colors.white,
+                width: 24,
+                height: 24,
+                child: _SavePreparingIcon(),
+              ),
+              SizedBox(width: 14),
+              Flexible(
+                child: Text(
+                  "Saving photo...",
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                    color: Colors.white,
+                    fontWeight: FontWeight.w800,
+                    fontSize: 15,
+                  ),
                 ),
               ),
-              SizedBox(width: 16),
+              SizedBox(width: 14),
               Text(
-                "Processing & Saving...",
+                "Background task",
                 style: TextStyle(
-                  color: Colors.white,
-                  fontWeight: FontWeight.w500,
-                  fontSize: 16,
+                  color: Colors.white70,
+                  fontWeight: FontWeight.w700,
+                  fontSize: 12,
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  /// ================= SHARING BAR =================
+  Widget _buildSharingBar() {
+    return ClipRRect(
+      key: const ValueKey("sharingBar"),
+      borderRadius: BorderRadius.circular(28),
+      child: BackdropFilter(
+        filter: ui.ImageFilter.blur(sigmaX: 12, sigmaY: 12),
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
+          decoration: BoxDecoration(
+            color: Colors.black.withValues(alpha: 0.46),
+            borderRadius: BorderRadius.circular(28),
+            border: Border.all(
+              color: Colors.white.withValues(alpha: 0.14),
+              width: 0.5,
+            ),
+          ),
+          child: Row(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              const SizedBox(
+                width: 24,
+                height: 24,
+                child: _SharePreparingIcon(),
+              ),
+              const SizedBox(width: 14),
+              const Flexible(
+                child: Text(
+                  "Preparing share...",
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                    color: Colors.white,
+                    fontWeight: FontWeight.w700,
+                    fontSize: 15,
+                  ),
+                ),
+              ),
+              const SizedBox(width: 14),
+              Text(
+                "Opening options",
+                style: TextStyle(
+                  color: Colors.white.withValues(alpha: 0.64),
+                  fontWeight: FontWeight.w600,
+                  fontSize: 12,
                 ),
               ),
             ],
@@ -572,6 +781,182 @@ class _ImagePreviewScreenState extends ConsumerState<ImagePreviewScreen> {
             ),
           ),
         ],
+      ),
+    );
+  }
+}
+
+class _SharePreparingIcon extends StatefulWidget {
+  const _SharePreparingIcon();
+
+  @override
+  State<_SharePreparingIcon> createState() => _SharePreparingIconState();
+}
+
+class _SharePreparingIconState extends State<_SharePreparingIcon>
+    with SingleTickerProviderStateMixin {
+  late final AnimationController _controller;
+  late final Animation<double> _scale;
+
+  @override
+  void initState() {
+    super.initState();
+    _controller = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 900),
+    )..repeat(reverse: true);
+    _scale = Tween<double>(begin: 0.9, end: 1.08).animate(
+      CurvedAnimation(parent: _controller, curve: Curves.easeInOut),
+    );
+  }
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Stack(
+      alignment: Alignment.center,
+      children: [
+        const CircularProgressIndicator(
+          strokeWidth: 2.2,
+          color: Colors.white,
+        ),
+        ScaleTransition(
+          scale: _scale,
+          child: const Icon(
+            Icons.ios_share_outlined,
+            color: Colors.white,
+            size: 13,
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+class _SavePreparingIcon extends StatefulWidget {
+  const _SavePreparingIcon();
+
+  @override
+  State<_SavePreparingIcon> createState() => _SavePreparingIconState();
+}
+
+class _SavePreparingIconState extends State<_SavePreparingIcon>
+    with SingleTickerProviderStateMixin {
+  late final AnimationController _controller;
+
+  @override
+  void initState() {
+    super.initState();
+    _controller = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 700),
+    )..repeat(reverse: true);
+  }
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AnimatedBuilder(
+      animation: _controller,
+      builder: (context, child) {
+        final scale = 0.92 + (_controller.value * 0.14);
+        return Transform.scale(
+          scale: scale,
+          child: child,
+        );
+      },
+      child: DecoratedBox(
+        decoration: BoxDecoration(
+          color: Colors.white.withValues(alpha: 0.18),
+          shape: BoxShape.circle,
+        ),
+        child: const Icon(
+          Icons.check_rounded,
+          color: Colors.white,
+          size: 18,
+        ),
+      ),
+    );
+  }
+}
+
+class _PhotoSaveFeedbackOverlay extends StatelessWidget {
+  const _PhotoSaveFeedbackOverlay();
+
+  @override
+  Widget build(BuildContext context) {
+    return IgnorePointer(
+      child: TweenAnimationBuilder<double>(
+        tween: Tween(begin: 0, end: 1),
+        duration: const Duration(milliseconds: 620),
+        curve: Curves.easeOutCubic,
+        builder: (context, value, child) {
+          final pulseOpacity = (1 - value).clamp(0.0, 1.0);
+          final pulseScale = 0.72 + (value * 1.2);
+
+          return Stack(
+            fit: StackFit.expand,
+            children: [
+              DecoratedBox(
+                decoration: BoxDecoration(
+                  color: const Color(0xFF12B76A)
+                      .withValues(alpha: 0.18 + (pulseOpacity * 0.1)),
+                ),
+              ),
+              Center(
+                child: Transform.scale(
+                  scale: pulseScale,
+                  child: Opacity(
+                    opacity: pulseOpacity,
+                    child: Container(
+                      width: 132,
+                      height: 132,
+                      decoration: BoxDecoration(
+                        shape: BoxShape.circle,
+                        border: Border.all(
+                          color: Colors.white.withValues(alpha: 0.72),
+                          width: 2.6,
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+              Center(
+                child: Container(
+                  width: 88,
+                  height: 88,
+                  decoration: BoxDecoration(
+                    color: const Color(0xFF12B76A),
+                    shape: BoxShape.circle,
+                    boxShadow: [
+                      BoxShadow(
+                        color: const Color(0xFF12B76A).withValues(alpha: 0.46),
+                        blurRadius: 28,
+                        spreadRadius: 4,
+                      ),
+                    ],
+                  ),
+                  child: const Icon(
+                    Icons.check_rounded,
+                    color: Colors.white,
+                    size: 48,
+                  ),
+                ),
+              ),
+            ],
+          );
+        },
       ),
     );
   }

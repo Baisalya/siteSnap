@@ -134,6 +134,15 @@ class _CameraScreenState extends ConsumerState<CameraScreen>
     });
   }
 
+  void _finishPhotoCapture() {
+    _shutterFeedbackTimer?.cancel();
+    if (!mounted) return;
+    setState(() {
+      _isCapturing = false;
+      _showShutterFeedback = false;
+    });
+  }
+
   void _showCameraSnack(String message) {
     if (!mounted) return;
     final messenger = ScaffoldMessenger.of(context);
@@ -397,7 +406,7 @@ class _CameraScreenState extends ConsumerState<CameraScreen>
           });
           _scheduleProcessingBubbleDim();
         }
-        _showCameraSnack("Video processing failed: $processingError");
+        _showCameraSnack("Processing failed: $processingError");
         return;
       }
 
@@ -1024,9 +1033,7 @@ class _CameraScreenState extends ConsumerState<CameraScreen>
                                     try {
                                       final path = await cameraVM.capture();
 
-                                      if (mounted) {
-                                        setState(() => _isCapturing = false);
-                                      }
+                                      _finishPhotoCapture();
 
                                       if (path != null && context.mounted) {
                                         // Fire-and-forget navigation for zero-lag feeling
@@ -1035,9 +1042,7 @@ class _CameraScreenState extends ConsumerState<CameraScreen>
                                       }
                                     } catch (e) {
                                       debugPrint("Capture error: $e");
-                                      if (mounted) {
-                                        setState(() => _isCapturing = false);
-                                      }
+                                      _finishPhotoCapture();
                                     }
                                   },
                                 ),
@@ -1100,6 +1105,12 @@ class _CameraScreenState extends ConsumerState<CameraScreen>
                         cameraState.currentLens == CameraLensType.front &&
                             cameraState.flashMode == FlashMode.always,
                   ),
+                ),
+              ),
+            if (_isCapturing && !_showShutterFeedback)
+              const Positioned.fill(
+                child: IgnorePointer(
+                  child: _CaptureProgressOverlay(),
                 ),
               ),
             if (hasProcessingBubble && _processingBubbleExpanded)
@@ -1180,7 +1191,7 @@ class _CameraScreenState extends ConsumerState<CameraScreen>
                       });
                       _wakeProcessingBubble();
                       await cameraVM.cancelVideoProcessing();
-                      _showCameraSnack("Video processing cancelled.");
+                      _showCameraSnack("Processing cancelled.");
                     },
                     onDismiss: () {
                       setState(() {
@@ -1325,7 +1336,7 @@ class _VideoProcessingBubble extends StatelessWidget {
                           Expanded(
                             child: Text(
                               hasError
-                                  ? "Video processing failed"
+                                  ? "Processing failed"
                                   : "Video processing",
                               maxLines: 1,
                               overflow: TextOverflow.ellipsis,
@@ -1522,5 +1533,109 @@ class _ShutterFeedbackOverlay extends StatelessWidget {
         );
       },
     );
+  }
+}
+
+class _CaptureProgressOverlay extends StatefulWidget {
+  const _CaptureProgressOverlay();
+
+  @override
+  State<_CaptureProgressOverlay> createState() =>
+      _CaptureProgressOverlayState();
+}
+
+class _CaptureProgressOverlayState extends State<_CaptureProgressOverlay>
+    with SingleTickerProviderStateMixin {
+  late final AnimationController _controller;
+
+  @override
+  void initState() {
+    super.initState();
+    _controller = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 900),
+    )..repeat();
+  }
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Center(
+      child: TweenAnimationBuilder<double>(
+        tween: Tween(begin: 0, end: 1),
+        duration: const Duration(milliseconds: 160),
+        curve: Curves.easeOut,
+        builder: (context, opacity, child) {
+          return Opacity(
+            opacity: opacity,
+            child: child,
+          );
+        },
+        child: Container(
+          width: 84,
+          height: 84,
+          decoration: BoxDecoration(
+            color: Colors.black.withValues(alpha: 0.34),
+            shape: BoxShape.circle,
+            border: Border.all(
+              color: Colors.white.withValues(alpha: 0.42),
+              width: 1,
+            ),
+          ),
+          child: AnimatedBuilder(
+            animation: _controller,
+            builder: (context, child) {
+              return CustomPaint(
+                painter: _CaptureProgressPainter(_controller.value),
+                child: child,
+              );
+            },
+            child: const Center(
+              child: Icon(
+                Icons.camera_alt_rounded,
+                color: Colors.white,
+                size: 28,
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _CaptureProgressPainter extends CustomPainter {
+  final double progress;
+
+  _CaptureProgressPainter(this.progress);
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final center = Offset(size.width / 2, size.height / 2);
+    final radius = (size.shortestSide / 2) - 7;
+    final rect = Rect.fromCircle(center: center, radius: radius);
+    final paint = Paint()
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 3
+      ..strokeCap = StrokeCap.round
+      ..color = Colors.white.withValues(alpha: 0.88);
+
+    canvas.drawArc(
+      rect,
+      (progress * 6.283185307179586) - 1.5707963267948966,
+      1.65,
+      false,
+      paint,
+    );
+  }
+
+  @override
+  bool shouldRepaint(covariant _CaptureProgressPainter oldDelegate) {
+    return oldDelegate.progress != progress;
   }
 }

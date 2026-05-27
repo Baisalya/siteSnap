@@ -72,7 +72,7 @@ void main() {
         frameSize: const Size(1080, 1920),
         orientation: DeviceOrientation.landscapeLeft,
       ),
-      DeviceOrientation.portraitUp,
+      DeviceOrientation.landscapeLeft,
     );
     expect(
       VideoWatermarkProcessor.overlayPaintOrientationForFrame(

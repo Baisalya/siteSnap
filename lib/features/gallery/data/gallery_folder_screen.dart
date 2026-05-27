@@ -214,6 +214,11 @@ class GalleryItem extends ConsumerWidget {
 
     final isVideo = file.path.toLowerCase().endsWith('.mp4') ||
         file.path.toLowerCase().endsWith('.mov');
+    final processingItem = ref.watch(
+      galleryProcessingProvider.select((items) => items[file.path]),
+    );
+    final isProcessing = processingItem?.isProcessing ?? false;
+    final processingFailed = processingItem?.failed ?? false;
 
     return RepaintBoundary(
       child: Material(
@@ -272,15 +277,24 @@ class GalleryItem extends ConsumerWidget {
                   borderRadius: BorderRadius.circular(10),
                   child: Hero(
                     tag: file.path,
-                    child: isVideo
-                        ? VideoThumbnailWidget(videoPath: file.path)
-                        : Image.file(
-                            file,
-                            fit: BoxFit.cover,
-                            width: double.infinity,
-                            height: double.infinity,
-                            cacheWidth: 300,
-                          ),
+                    child: AnimatedSwitcher(
+                      duration: const Duration(milliseconds: 450),
+                      switchInCurve: Curves.easeOutCubic,
+                      switchOutCurve: Curves.easeInCubic,
+                      child: isVideo
+                          ? VideoThumbnailWidget(
+                              key: ValueKey(file.path),
+                              videoPath: file.path,
+                            )
+                          : Image.file(
+                              file,
+                              key: ValueKey(file.path),
+                              fit: BoxFit.cover,
+                              width: double.infinity,
+                              height: double.infinity,
+                              cacheWidth: 300,
+                            ),
+                    ),
                   ),
                 ),
 
@@ -318,7 +332,87 @@ class GalleryItem extends ConsumerWidget {
                       ),
                     ),
                   ),
+
+                if (isProcessing || processingFailed)
+                  Positioned.fill(
+                    child: _ProcessingOverlay(failed: processingFailed),
+                  ),
               ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _ProcessingOverlay extends StatelessWidget {
+  final bool failed;
+
+  const _ProcessingOverlay({required this.failed});
+
+  @override
+  Widget build(BuildContext context) {
+    return IgnorePointer(
+      child: DecoratedBox(
+        decoration: BoxDecoration(
+          borderRadius: BorderRadius.circular(10),
+          gradient: LinearGradient(
+            begin: Alignment.topCenter,
+            end: Alignment.bottomCenter,
+            colors: [
+              Colors.black.withValues(alpha: 0.12),
+              Colors.black.withValues(alpha: 0.64),
+            ],
+          ),
+        ),
+        child: Align(
+          alignment: Alignment.bottomCenter,
+          child: Padding(
+            padding: const EdgeInsets.all(8),
+            child: DecoratedBox(
+              decoration: BoxDecoration(
+                color: Colors.black.withValues(alpha: 0.72),
+                borderRadius: BorderRadius.circular(18),
+                border: Border.all(
+                  color: Colors.white.withValues(alpha: 0.14),
+                ),
+              ),
+              child: Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 6),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    if (failed)
+                      const Icon(
+                        Icons.error_outline,
+                        color: Colors.orangeAccent,
+                        size: 14,
+                      )
+                    else
+                      const SizedBox(
+                        width: 12,
+                        height: 12,
+                        child: CircularProgressIndicator(
+                          strokeWidth: 2,
+                          color: Colors.white,
+                        ),
+                      ),
+                    const SizedBox(width: 6),
+                    Flexible(
+                      child: Text(
+                        failed ? 'Raw saved' : 'Adding overlay',
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(
+                          color: Colors.white,
+                          fontSize: 10,
+                          fontWeight: FontWeight.w700,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
             ),
           ),
         ),

@@ -28,4 +28,26 @@ void main() {
 
     expect(repo.cachedFiles?.map((file) => file.path), [saved.path]);
   });
+
+  test('gallery processing state tracks raw to processed image swap', () {
+    final notifier = GalleryProcessingNotifier();
+    final raw = File('raw_capture.jpg');
+    final processed = File('SurveyCam_processed.jpg');
+    final states = <Map<String, GalleryProcessingItem>>[];
+    final removeListener = notifier.addListener(
+      states.add,
+      fireImmediately: true,
+    );
+
+    notifier.start(raw);
+
+    expect(states.last[raw.path]?.isProcessing, isTrue);
+
+    notifier.complete(raw, processed);
+
+    expect(states.last[raw.path]?.isComplete, isTrue);
+    expect(states.last[raw.path]?.processedFile?.path, processed.path);
+
+    removeListener();
+  });
 }

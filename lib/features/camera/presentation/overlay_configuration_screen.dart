@@ -431,7 +431,7 @@ class _OverlayConfigurationScreenState
         Align(
           alignment: Alignment.centerLeft,
           child: Text(
-            "Free for now. This section is ready to be gated later for custom branding.",
+            "This section is ready to be gated later for custom branding.",
             style: TextStyle(
               color: Colors.amberAccent.withValues(alpha: 0.78),
               fontSize: 11,

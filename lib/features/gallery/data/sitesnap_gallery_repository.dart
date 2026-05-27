@@ -15,6 +15,70 @@ final galleryFilesProvider =
   return notifier;
 });
 
+final galleryProcessingProvider = StateNotifierProvider<
+    GalleryProcessingNotifier, Map<String, GalleryProcessingItem>>((ref) {
+  return GalleryProcessingNotifier();
+});
+
+class GalleryProcessingItem {
+  final File originalFile;
+  final File? processedFile;
+  final bool failed;
+
+  const GalleryProcessingItem({
+    required this.originalFile,
+    this.processedFile,
+    this.failed = false,
+  });
+
+  bool get isComplete => processedFile != null;
+  bool get isProcessing => !isComplete && !failed;
+
+  GalleryProcessingItem copyWith({
+    File? processedFile,
+    bool? failed,
+  }) {
+    return GalleryProcessingItem(
+      originalFile: originalFile,
+      processedFile: processedFile ?? this.processedFile,
+      failed: failed ?? this.failed,
+    );
+  }
+}
+
+class GalleryProcessingNotifier
+    extends StateNotifier<Map<String, GalleryProcessingItem>> {
+  GalleryProcessingNotifier() : super(const {});
+
+  void start(File original) {
+    state = {
+      ...state,
+      original.path: GalleryProcessingItem(originalFile: original),
+    };
+  }
+
+  void complete(File original, File processed) {
+    final existing =
+        state[original.path] ?? GalleryProcessingItem(originalFile: original);
+    state = {
+      ...state,
+      original.path: existing.copyWith(
+        processedFile: processed,
+        failed: false,
+      ),
+    };
+  }
+
+  void fail(File original) {
+    final existing =
+        state[original.path] ?? GalleryProcessingItem(originalFile: original);
+    state = {
+      ...state,
+      original.path: existing.copyWith(failed: true),
+    };
+  }
+}
+
 class GalleryFilesNotifier extends StateNotifier<AsyncValue<List<File>>> {
   GalleryFilesNotifier(this._repo)
       : super(_repo.cachedFiles == null
