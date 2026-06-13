@@ -1,20 +1,15 @@
 import 'dart:async';
 import 'package:flutter/services.dart';
-import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_riverpod/legacy.dart';
 import 'package:sensors_plus/sensors_plus.dart';
 
 final deviceOrientationProvider =
-StateNotifierProvider<DeviceOrientationNotifier,
-    DeviceOrientation>((ref) {
+    StateNotifierProvider<DeviceOrientationNotifier, DeviceOrientation>((ref) {
   return DeviceOrientationNotifier();
 });
 
-class DeviceOrientationNotifier
-    extends StateNotifier<DeviceOrientation> {
-
-  DeviceOrientationNotifier()
-      : super(DeviceOrientation.portraitUp) {
+class DeviceOrientationNotifier extends StateNotifier<DeviceOrientation> {
+  DeviceOrientationNotifier() : super(DeviceOrientation.portraitUp) {
     _startListening();
   }
 
@@ -23,39 +18,32 @@ class DeviceOrientationNotifier
   static const double _threshold = 6.0;
 
   void _startListening() {
-    _subscription =
-        accelerometerEvents.listen((event) {
+    _subscription = accelerometerEvents.listen((event) {
+      final x = event.x;
+      final y = event.y;
 
-          final x = event.x;
-          final y = event.y;
+      DeviceOrientation? newOrientation;
 
-          DeviceOrientation? newOrientation;
+      if (x.abs() > y.abs()) {
+        // LANDSCAPE
+        if (x > _threshold) {
+          newOrientation = DeviceOrientation.landscapeRight;
+        } else if (x < -_threshold) {
+          newOrientation = DeviceOrientation.landscapeLeft;
+        }
+      } else {
+        // PORTRAIT (fixed direction)
+        if (y > _threshold) {
+          newOrientation = DeviceOrientation.portraitUp;
+        } else if (y < -_threshold) {
+          newOrientation = DeviceOrientation.portraitDown;
+        }
+      }
 
-          if (x.abs() > y.abs()) {
-            // LANDSCAPE
-            if (x > _threshold) {
-              newOrientation =
-                  DeviceOrientation.landscapeRight;
-            } else if (x < -_threshold) {
-              newOrientation =
-                  DeviceOrientation.landscapeLeft;
-            }
-          } else {
-            // PORTRAIT (fixed direction)
-            if (y > _threshold) {
-              newOrientation =
-                  DeviceOrientation.portraitUp;
-            } else if (y < -_threshold) {
-              newOrientation =
-                  DeviceOrientation.portraitDown;
-            }
-          }
-
-          if (newOrientation != null &&
-              newOrientation != state) {
-            state = newOrientation;
-          }
-        });
+      if (newOrientation != null && newOrientation != state) {
+        state = newOrientation;
+      }
+    });
   }
 
   @override

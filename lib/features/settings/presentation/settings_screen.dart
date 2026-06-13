@@ -1,6 +1,5 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:flutter/material.dart';
 import 'package:surveycam/features/overlay/presentation/overlay_settings_provider.dart';
 
 class SettingsScreen extends ConsumerWidget {
@@ -29,10 +28,18 @@ class SettingsScreen extends ConsumerWidget {
             trailing: Row(
               mainAxisSize: MainAxisSize.min,
               children: [
-                _colorCircle((c) => notifier.setBackgroundColor(c), Colors.white, settings.backgroundColor == Colors.white),
-                _colorCircle((c) => notifier.setBackgroundColor(c), Colors.black, settings.backgroundColor == Colors.black),
-                _colorCircle((c) => notifier.setBackgroundColor(c), const Color(0xFF1976D2), settings.backgroundColor == const Color(0xFF1976D2)),
-                _colorCircle((c) => notifier.setBackgroundColor(c), const Color(0xFF388E3C), settings.backgroundColor == const Color(0xFF388E3C)),
+                _colorCircle((c) => notifier.setBackgroundColor(c),
+                    Colors.white, settings.backgroundColor == Colors.white),
+                _colorCircle((c) => notifier.setBackgroundColor(c),
+                    Colors.black, settings.backgroundColor == Colors.black),
+                _colorCircle(
+                    (c) => notifier.setBackgroundColor(c),
+                    const Color(0xFF1976D2),
+                    settings.backgroundColor == const Color(0xFF1976D2)),
+                _colorCircle(
+                    (c) => notifier.setBackgroundColor(c),
+                    const Color(0xFF388E3C),
+                    settings.backgroundColor == const Color(0xFF388E3C)),
               ],
             ),
           ),
@@ -41,10 +48,18 @@ class SettingsScreen extends ConsumerWidget {
             trailing: Row(
               mainAxisSize: MainAxisSize.min,
               children: [
-                _colorCircle((c) => notifier.setTextColor(c), Colors.white, settings.textColor == Colors.white),
-                _colorCircle((c) => notifier.setTextColor(c), Colors.black, settings.textColor == Colors.black),
-                _colorCircle((c) => notifier.setTextColor(c), Colors.blue.shade100, settings.textColor == Colors.blue.shade100),
-                _colorCircle((c) => notifier.setTextColor(c), Colors.green.shade100, settings.textColor == Colors.green.shade100),
+                _colorCircle((c) => notifier.setTextColor(c), Colors.white,
+                    settings.textColor == Colors.white),
+                _colorCircle((c) => notifier.setTextColor(c), Colors.black,
+                    settings.textColor == Colors.black),
+                _colorCircle(
+                    (c) => notifier.setTextColor(c),
+                    Colors.blue.shade100,
+                    settings.textColor == Colors.blue.shade100),
+                _colorCircle(
+                    (c) => notifier.setTextColor(c),
+                    Colors.green.shade100,
+                    settings.textColor == Colors.green.shade100),
               ],
             ),
           ),

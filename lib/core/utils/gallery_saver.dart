@@ -6,6 +6,7 @@ import 'package:intl/intl.dart';
 import 'package:path/path.dart' as p;
 import 'package:path_provider/path_provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:surveycam/core/services/media_audit_service.dart';
 
 class GallerySaver {
   static const String _imageCountKey = 'surveycam_image_count';
@@ -41,7 +42,15 @@ class GallerySaver {
       final localFile = File(p.join(localDir.path, name));
 
       await localFile.writeAsBytes(bytes);
-      unawaited(_putImageInSystemGallery(localFile.path));
+      unawaited(_putImageInSystemGallery(localFile.path).then((saved) {
+        if (!saved) {
+          return MediaAuditService.recordFailure(
+            event: 'system_gallery_image_save_failed',
+            error: 'Unable to insert image into system gallery',
+            details: {'localPath': localFile.path},
+          );
+        }
+      }));
 
       return localFile;
     } catch (e) {
@@ -49,7 +58,7 @@ class GallerySaver {
     }
   }
 
-  static Future<void> _putImageInSystemGallery(String path) async {
+  static Future<bool> _putImageInSystemGallery(String path) async {
     try {
       if (_hasAccessCached != true) {
         _hasAccessCached = await Gal.hasAccess();
@@ -59,8 +68,10 @@ class GallerySaver {
       }
 
       await Gal.putImage(path, album: 'surveycam');
+      return true;
     } catch (_) {
       _hasAccessCached = false;
+      return false;
     }
   }
 
@@ -129,7 +140,15 @@ class GallerySaver {
       }
 
       // 2. Put in system gallery asynchronously
-      unawaited(_putVideoInSystemGallery(finalLocalPath));
+      unawaited(_putVideoInSystemGallery(finalLocalPath).then((saved) {
+        if (!saved) {
+          return MediaAuditService.recordFailure(
+            event: 'system_gallery_video_save_failed',
+            error: 'Unable to insert video into system gallery',
+            details: {'localPath': finalLocalPath},
+          );
+        }
+      }));
 
       return finalLocalPath;
     } catch (e) {
@@ -137,7 +156,7 @@ class GallerySaver {
     }
   }
 
-  static Future<void> _putVideoInSystemGallery(String path) async {
+  static Future<bool> _putVideoInSystemGallery(String path) async {
     try {
       if (_hasAccessCached != true) {
         _hasAccessCached = await Gal.hasAccess();
@@ -146,8 +165,10 @@ class GallerySaver {
         }
       }
       await Gal.putVideo(path, album: 'surveycam');
+      return true;
     } catch (_) {
       _hasAccessCached = false;
+      return false;
     }
   }
 }

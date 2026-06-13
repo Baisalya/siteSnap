@@ -51,6 +51,16 @@ class _CameraScreenState extends ConsumerState<CameraScreen>
   bool _processingBubbleDimmed = false;
   Offset? _processingBubbleOffset;
   int _resumeCounter = 0;
+  Position? _lastWeatherFetchPosition;
+  Position? _lastAddressFetchPosition;
+  DateTime? _lastWeatherFetchAt;
+  DateTime? _lastAddressFetchAt;
+  int _locationFetchSerial = 0;
+
+  static const Duration _weatherFetchInterval = Duration(minutes: 1);
+  static const Duration _addressFetchInterval = Duration(seconds: 30);
+  static const double _weatherFetchDistanceMeters = 50;
+  static const double _addressFetchDistanceMeters = 25;
 
   @override
   void initState() {
@@ -59,8 +69,6 @@ class _CameraScreenState extends ConsumerState<CameraScreen>
 
     /// INITIALIZE CAMERA FIRST, THEN NON-CRITICAL PROMPTS
     WidgetsBinding.instance.addPostFrameCallback((_) async {
-      unawaited(ref.read(cameraViewModelProvider.notifier).initialize());
-
       await RateUsService.init();
       if (mounted) {
         await RateUsService.showRateDialogIfMeetsCriteria(context);
@@ -119,6 +127,26 @@ class _CameraScreenState extends ConsumerState<CameraScreen>
     final extraNote = lines.length > 1 ? lines.skip(1).join('\n').trim() : '';
     if (extraNote.isEmpty) return location;
     return "$location\n$extraNote";
+  }
+
+  bool _shouldRefreshLocationBackedData({
+    required Position current,
+    required Position? previous,
+    required DateTime? lastFetchAt,
+    required Duration minInterval,
+    required double minDistanceMeters,
+  }) {
+    final now = DateTime.now();
+    if (lastFetchAt == null || previous == null) return true;
+    if (now.difference(lastFetchAt) >= minInterval) return true;
+
+    final distance = Geolocator.distanceBetween(
+      previous.latitude,
+      previous.longitude,
+      current.latitude,
+      current.longitude,
+    );
+    return distance >= minDistanceMeters;
   }
 
   void _startPhotoCapture() {
@@ -345,30 +373,60 @@ class _CameraScreenState extends ConsumerState<CameraScreen>
             clearLocationWarning: true,
           );
 
-          // Fetch Weather, Humidity, Air Quality
-          final weatherData = await WeatherService.fetchWeather(
-            position.latitude,
-            position.longitude,
-          );
-          if (weatherData != null && mounted) {
-            ref.read(overlayPreviewProvider.notifier).state =
-                ref.read(overlayPreviewProvider.notifier).state.copyWith(
-                      weather: weatherData.temp,
-                      humidity: weatherData.humidity,
-                      air: weatherData.airQuality,
-                      pressure: weatherData.pressure,
-                    );
+          final fetchSerial = ++_locationFetchSerial;
+          final overlaySettingsForLocation = ref.read(overlaySettingsProvider);
+          final wantsWeatherData = overlaySettingsForLocation.showWeather ||
+              overlaySettingsForLocation.showHumidity ||
+              overlaySettingsForLocation.showAir ||
+              overlaySettingsForLocation.showPressure;
+
+          if (wantsWeatherData &&
+              _shouldRefreshLocationBackedData(
+                current: position,
+                previous: _lastWeatherFetchPosition,
+                lastFetchAt: _lastWeatherFetchAt,
+                minInterval: _weatherFetchInterval,
+                minDistanceMeters: _weatherFetchDistanceMeters,
+              )) {
+            _lastWeatherFetchPosition = position;
+            _lastWeatherFetchAt = DateTime.now();
+
+            final weatherData = await WeatherService.fetchWeather(
+              position.latitude,
+              position.longitude,
+            );
+            if (weatherData != null &&
+                mounted &&
+                fetchSerial == _locationFetchSerial) {
+              ref.read(overlayPreviewProvider.notifier).state =
+                  ref.read(overlayPreviewProvider.notifier).state.copyWith(
+                        weather: weatherData.temp,
+                        humidity: weatherData.humidity,
+                        air: weatherData.airQuality,
+                        pressure: weatherData.pressure,
+                      );
+            }
           }
 
           final settings = ref.read(cameraSettingsProvider);
-          if (settings.autoFetchLocation) {
-            final overlaySettings = ref.read(overlaySettingsProvider);
+          if (settings.autoFetchLocation &&
+              _shouldRefreshLocationBackedData(
+                current: position,
+                previous: _lastAddressFetchPosition,
+                lastFetchAt: _lastAddressFetchAt,
+                minInterval: _addressFetchInterval,
+                minDistanceMeters: _addressFetchDistanceMeters,
+              )) {
+            _lastAddressFetchPosition = position;
+            _lastAddressFetchAt = DateTime.now();
             final name = await LocationService.getLocationName(
               position.latitude,
               position.longitude,
-              language: overlaySettings.language,
+              language: overlaySettingsForLocation.language,
             );
-            if (name != null && mounted) {
+            if (name != null &&
+                mounted &&
+                fetchSerial == _locationFetchSerial) {
               final currentNote = ref.read(overlayPreviewProvider).note;
               ref.read(overlayPreviewProvider.notifier).state =
                   ref.read(overlayPreviewProvider.notifier).state.copyWith(

@@ -65,7 +65,8 @@ class _ImagePreviewScreenState extends ConsumerState<ImagePreviewScreen> {
   CameraLensType? _captureLens;
   Timer? _prepareSaveTimer;
   String? _preparedSaveKey;
-  String? _scheduledSignature; // 🔥 Track the signature currently being prepared
+  String?
+      _scheduledSignature; // 🔥 Track the signature currently being prepared
   Future<Uint8List>? _preparedSaveFuture;
 
   bool get _saving => _busyAction != null;
@@ -217,7 +218,9 @@ class _ImagePreviewScreenState extends ConsumerState<ImagePreviewScreen> {
     // This prevents the "softness" of the UI (renders) from delaying the background processing.
     if (_saving ||
         _preparedSaveKey == signature ||
-        _scheduledSignature == signature) return;
+        _scheduledSignature == signature) {
+      return;
+    }
 
     _prepareSaveTimer?.cancel();
     _scheduledSignature = signature;
@@ -294,7 +297,7 @@ class _ImagePreviewScreenState extends ConsumerState<ImagePreviewScreen> {
       overlayData: overlayData,
       settings: settings,
     );
-    
+
     // Check if we have a background-prepared future for this specific image state
     final preparedSaveFuture =
         _preparedSaveKey == saveSignature ? _preparedSaveFuture : null;
@@ -312,13 +315,19 @@ class _ImagePreviewScreenState extends ConsumerState<ImagePreviewScreen> {
         : ref.read(overlayViewModelProvider.notifier).savePreparedCapturedImage(
               original: widget.originalFile,
               preparedBytes: preparedSaveFuture,
+              overlayData: overlayData,
+              settings: settings,
+              orientation: orientation,
+              showOverlay: _showOverlay,
+              showWatermark: _showTextWatermark,
+              mirror: isMirror,
             );
 
     // Give enough time for the "Checkmark" animation to be visible.
-    // Increased to 1100ms to give background processing more time to finish 
+    // Increased to 1100ms to give background processing more time to finish
     // before the screen pops, ensuring the gallery gets the overlay version instantly.
     await Future<void>.delayed(const Duration(milliseconds: 1100));
-    
+
     if (mounted) {
       Navigator.of(context).pop(saveFuture);
     }
@@ -471,24 +480,24 @@ class _ImagePreviewScreenState extends ConsumerState<ImagePreviewScreen> {
                                 ? const SizedBox.shrink()
                                 : CustomPaint(
                                     painter: _CapturedPhotoPreviewPainter(
-                                image: _previewImage!,
-                                data: overlayData,
-                                showOverlay: _showOverlay,
-                                showWatermark: _showTextWatermark,
-                                orientation: _captureOrientation ??
-                                    cameraState.captureOrientation ??
-                                    cameraState.orientation,
-                                aspectRatio: _captureAspectRatio ??
-                                    cameraState.aspectRatio,
-                                mirror:
-                                    (_captureLens ?? cameraState.captureLens) ==
-                                        CameraLensType.front,
-                                svgPicture: _svgPicture,
-                                customLogo: _customLogoImage,
-                                settings: settings,
-                              ),
-                              child: const SizedBox.expand(),
-                            ),
+                                      image: _previewImage!,
+                                      data: overlayData,
+                                      showOverlay: _showOverlay,
+                                      showWatermark: _showTextWatermark,
+                                      orientation: _captureOrientation ??
+                                          cameraState.captureOrientation ??
+                                          cameraState.orientation,
+                                      aspectRatio: _captureAspectRatio ??
+                                          cameraState.aspectRatio,
+                                      mirror: (_captureLens ??
+                                              cameraState.captureLens) ==
+                                          CameraLensType.front,
+                                      svgPicture: _svgPicture,
+                                      customLogo: _customLogoImage,
+                                      settings: settings,
+                                    ),
+                                    child: const SizedBox.expand(),
+                                  ),
                           ),
                   ),
                 ),

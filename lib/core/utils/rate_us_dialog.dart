@@ -1,4 +1,3 @@
-import 'dart:math' as math;
 import 'dart:ui';
 import 'package:flutter/material.dart';
 import 'package:lottie/lottie.dart';
@@ -14,7 +13,8 @@ class RateUsDialog extends StatefulWidget {
   State<RateUsDialog> createState() => _RateUsDialogState();
 }
 
-class _RateUsDialogState extends State<RateUsDialog> with TickerProviderStateMixin {
+class _RateUsDialogState extends State<RateUsDialog>
+    with TickerProviderStateMixin {
   int _selectedRating = 0;
   bool _isRatingSent = false;
   late final AnimationController _entranceController;
@@ -86,7 +86,8 @@ class _RateUsDialogState extends State<RateUsDialog> with TickerProviderStateMix
                         end: Alignment.bottomRight,
                         colors: [
                           Colors.white.withAlpha(230), // ~0.9 opacity
-                          const Color(0xFFFFF0F5).withAlpha(204), // ~0.8 opacity
+                          const Color(0xFFFFF0F5)
+                              .withAlpha(204), // ~0.8 opacity
                         ],
                       ),
                       borderRadius: BorderRadius.circular(32),
@@ -106,7 +107,7 @@ class _RateUsDialogState extends State<RateUsDialog> with TickerProviderStateMix
                       mainAxisSize: MainAxisSize.min,
                       children: [
                         const SizedBox(height: 40),
-                        
+
                         // Heartwarming Text
                         Text(
                           'Enjoying SurveyCam?',
@@ -127,19 +128,19 @@ class _RateUsDialogState extends State<RateUsDialog> with TickerProviderStateMix
                             fontWeight: FontWeight.w500,
                           ),
                         ),
-                        
+
                         const SizedBox(height: 24),
-                        
+
                         // Interactive Stars
                         _buildStarRating(),
-                        
+
                         const SizedBox(height: 32),
-                        
+
                         // Action Buttons
                         _buildActionButtons(),
-                        
+
                         const SizedBox(height: 12),
-                        
+
                         // "No Thanks" Option
                         TextButton(
                           onPressed: () async {
@@ -170,7 +171,8 @@ class _RateUsDialogState extends State<RateUsDialog> with TickerProviderStateMix
                 child: Center(
                   child: ScaleTransition(
                     scale: Tween(begin: 1.0, end: 1.05).animate(
-                      CurvedAnimation(parent: _pulseController, curve: Curves.easeInOut),
+                      CurvedAnimation(
+                          parent: _pulseController, curve: Curves.easeInOut),
                     ),
                     child: SizedBox(
                       height: 160,
@@ -183,7 +185,7 @@ class _RateUsDialogState extends State<RateUsDialog> with TickerProviderStateMix
                   ),
                 ),
               ),
-              
+
               // Confetti Layer
               if (_isRatingSent)
                 Positioned.fill(
@@ -216,14 +218,18 @@ class _RateUsDialogState extends State<RateUsDialog> with TickerProviderStateMix
             });
           },
           child: TweenAnimationBuilder(
-            tween: Tween<double>(begin: 1, end: _selectedRating > index ? 1.2 : 1.0),
+            tween: Tween<double>(
+                begin: 1, end: _selectedRating > index ? 1.2 : 1.0),
             duration: const Duration(milliseconds: 300),
             builder: (context, scale, child) {
               return Transform.scale(
                 scale: scale,
                 child: Icon(
-                  index < _selectedRating ? Icons.star_rounded : Icons.star_outline_rounded,
-                  color: index < _selectedRating ? Colors.amber : Colors.grey[300],
+                  index < _selectedRating
+                      ? Icons.star_rounded
+                      : Icons.star_outline_rounded,
+                  color:
+                      index < _selectedRating ? Colors.amber : Colors.grey[300],
                   size: 48,
                 ),
               );
@@ -247,16 +253,17 @@ class _RateUsDialogState extends State<RateUsDialog> with TickerProviderStateMix
               if (_selectedRating == 0) {
                 if (mounted) {
                   ScaffoldMessenger.of(context).showSnackBar(
-                    const SnackBar(content: Text('Please select a star rating first!')),
+                    const SnackBar(
+                        content: Text('Please select a star rating first!')),
                   );
                 }
                 return;
               }
-              
+
               final navigator = Navigator.of(context);
               setState(() => _isRatingSent = true);
               await RateUsService.markAsRated();
-              
+
               // Delay slightly for confetti effect
               await Future.delayed(const Duration(milliseconds: 1000));
               if (mounted) {
@@ -265,7 +272,8 @@ class _RateUsDialogState extends State<RateUsDialog> with TickerProviderStateMix
               }
             },
             style: ElevatedButton.styleFrom(
-              backgroundColor: _selectedRating > 0 ? Colors.pink[400] : Colors.grey[300],
+              backgroundColor:
+                  _selectedRating > 0 ? Colors.pink[400] : Colors.grey[300],
               foregroundColor: Colors.white,
               shape: RoundedRectangleBorder(
                 borderRadius: BorderRadius.circular(16),
@@ -287,7 +295,7 @@ class _RateUsDialogState extends State<RateUsDialog> with TickerProviderStateMix
           ),
         ),
         const SizedBox(height: 12),
-        
+
         // Maybe Later Button
         SizedBox(
           width: double.infinity,

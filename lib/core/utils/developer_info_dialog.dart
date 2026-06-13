@@ -1,6 +1,5 @@
 import 'package:flutter/material.dart';
 import 'package:url_launcher/url_launcher.dart';
-import '../services/rate_us_service.dart';
 import 'rate_us_dialog.dart';
 
 class DeveloperInfoDialog extends StatelessWidget {
@@ -43,8 +42,7 @@ class DeveloperInfoDialog extends StatelessWidget {
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            const Icon(Icons.camera_alt,
-                color: Colors.white, size: 40),
+            const Icon(Icons.camera_alt, color: Colors.white, size: 40),
 
             const SizedBox(height: 12),
 
@@ -71,8 +69,7 @@ class DeveloperInfoDialog extends StatelessWidget {
               width: double.infinity,
               child: OutlinedButton(
                 onPressed: () {
-                  _openLink(
-                      "https://baisalya.github.io/Baisalya-Roul/");
+                  _openLink("https://baisalya.github.io/Baisalya-Roul/");
                 },
                 style: OutlinedButton.styleFrom(
                   foregroundColor: Colors.white,

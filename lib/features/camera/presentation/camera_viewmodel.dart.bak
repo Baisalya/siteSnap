@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:io';
+import 'dart:isolate';
 import 'package:camera/camera.dart' hide CameraLensType;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -374,8 +375,7 @@ class CameraViewModel extends StateNotifier<CameraState>
               debugPrint("Error pausing preview: $e. Falling back to dispose.");
               _isDisposing = true;
               await ref.read(cameraRepositoryProvider).dispose();
-              this.state =
-                  this.state.copyWith(clearController: true, isReady: false);
+              this.state = this.state.copyWith(clearController: true, isReady: false);
               _isDisposing = false;
             }
           }
@@ -396,8 +396,7 @@ class CameraViewModel extends StateNotifier<CameraState>
           // 🔥 Nudge the UI to rebuild the texture surface
           this.state = this.state.copyWith();
         } catch (e) {
-          debugPrint(
-              "Instant resume or health check failed: $e. Re-initializing...");
+          debugPrint("Instant resume or health check failed: $e. Re-initializing...");
           await initialize();
         }
       } else {
@@ -755,11 +754,9 @@ class CameraViewModel extends StateNotifier<CameraState>
     try {
       final repo = ref.read(cameraRepositoryProvider);
 
-      // 🔥 SPEED OPTIMIZATION: Skip redundant exposure preparation if we are already in
+      // 🔥 SPEED OPTIMIZATION: Skip redundant exposure preparation if we are already in 
       // a standard auto state with Flash OFF. This avoids re-triggering AE/AF scans.
-      if (state.isManualFocus ||
-          state.flashMode != FlashMode.off ||
-          _currentExposure != 0.0) {
+      if (state.isManualFocus || state.flashMode != FlashMode.off || _currentExposure != 0.0) {
         await _prepareSmartPhotoExposure(controller);
       }
 
@@ -811,23 +808,16 @@ class CameraViewModel extends StateNotifier<CameraState>
 
       // Only re-apply auto mode if we are doing a manual reset
       if (!state.isManualFocus) {
-        tasks.add(
-            controller.setExposureMode(ExposureMode.auto).catchError((_) {}));
+        tasks.add(controller.setExposureMode(ExposureMode.auto).catchError((_) {}));
         tasks.add(controller.setFocusMode(FocusMode.auto).catchError((_) {}));
-        tasks.add(controller
-            .setExposurePoint(const Offset(0.5, 0.5))
-            .catchError((_) {}));
-        tasks.add(controller
-            .setFocusPoint(const Offset(0.5, 0.5))
-            .catchError((_) {}));
+        tasks.add(controller.setExposurePoint(const Offset(0.5, 0.5)).catchError((_) {}));
+        tasks.add(controller.setFocusPoint(const Offset(0.5, 0.5)).catchError((_) {}));
       }
 
       // Re-apply current exposure offset if it's set
       if (_currentExposure != 0.0) {
-        tasks.add(controller
-            .setExposureOffset(
-                _currentExposure.clamp(_minExposure, _maxExposure))
-            .catchError((_) => 0.0));
+        tasks.add(controller.setExposureOffset(
+            _currentExposure.clamp(_minExposure, _maxExposure)).catchError((_) => 0.0));
       }
 
       if (tasks.isNotEmpty) {

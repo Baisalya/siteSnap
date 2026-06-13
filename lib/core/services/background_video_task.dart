@@ -1,10 +1,10 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
-import 'dart:isolate';
 import 'dart:ui';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_foreground_task/flutter_foreground_task.dart';
+import 'package:surveycam/core/services/media_audit_service.dart';
 import 'package:surveycam/core/services/image_processing_job.dart';
 import 'package:surveycam/core/services/video_processing_job.dart';
 import 'package:surveycam/core/utils/gallery_saver.dart';
@@ -283,6 +283,15 @@ class VideoProcessingTaskHandler extends TaskHandler {
 
       if (processedPath != null) {
         final savedPath = await GallerySaver.saveVideo(processedPath);
+        await MediaAuditService.recordVideoSave(
+          sourceFiles:
+              job.segments.map((segment) => File(segment.path)).toList(),
+          outputFile: File(savedPath),
+          overlayHistory: job.history.map((sample) => sample.toJson()).toList(),
+          durationMs: job.durationMs,
+          jobId: job.id,
+          savedWithoutOverlay: false,
+        );
         await ThumbnailUtils.generateVideoThumbnail(savedPath);
         savedPaths.add(savedPath);
       } else {
@@ -301,6 +310,16 @@ class VideoProcessingTaskHandler extends TaskHandler {
         );
         for (final rawPath in rawPaths) {
           final savedPath = await GallerySaver.saveVideo(rawPath);
+          await MediaAuditService.recordVideoSave(
+            sourceFiles:
+                job.segments.map((segment) => File(segment.path)).toList(),
+            outputFile: File(savedPath),
+            overlayHistory:
+                job.history.map((sample) => sample.toJson()).toList(),
+            durationMs: job.durationMs,
+            jobId: job.id,
+            savedWithoutOverlay: true,
+          );
           await ThumbnailUtils.generateVideoThumbnail(savedPath);
           savedPaths.add(savedPath);
         }
@@ -409,6 +428,17 @@ class VideoProcessingTaskHandler extends TaskHandler {
 
       await _imageProgress('Finishing photo save... 88%');
       final savedFile = await GallerySaver.saveImageBytes(bytes);
+      await MediaAuditService.recordImageSave(
+        originalFile: originalFile,
+        outputFile: savedFile,
+        overlayData: imageJob.overlayData.toJson(),
+        overlaySettings: imageJob.settings.toJson(),
+        orientation: imageJob.orientation.name,
+        showOverlay: imageJob.showOverlay,
+        showWatermark: imageJob.showWatermark,
+        mirror: imageJob.mirror,
+        jobId: imageJob.id,
+      );
 
       await _removeImageJobFromQueue(imageJob.id);
       await FlutterForegroundTask.removeData(key: lastImageFailureKey);

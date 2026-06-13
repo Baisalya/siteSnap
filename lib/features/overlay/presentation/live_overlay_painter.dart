@@ -164,8 +164,6 @@ class LiveOverlayPainter extends CustomPainter {
     // ===============================
     final paddingH = baseSize * 0.03;
     final paddingV = baseSize * 0.02;
-    final marginX = baseSize * 0.04;
-    final marginY = baseSize * 0.04;
 
     final boxWidth = textPainter.width + (paddingH * 2);
     final boxHeight = textPainter.height + (paddingV * 2);

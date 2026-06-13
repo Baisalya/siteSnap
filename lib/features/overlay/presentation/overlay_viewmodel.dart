@@ -7,6 +7,7 @@ import 'package:flutter_riverpod/legacy.dart';
 import 'package:surveycam/core/permissions/permission_service.dart';
 import 'package:surveycam/core/services/background_video_task.dart';
 import 'package:surveycam/core/services/image_processing_job.dart';
+import 'package:surveycam/core/services/media_audit_service.dart';
 import 'package:surveycam/core/utils/gallery_saver.dart';
 import 'package:surveycam/features/gallery/data/sitesnap_gallery_repository.dart';
 import 'package:surveycam/features/gallery/presentation/last_image_provider.dart';
@@ -95,6 +96,11 @@ class OverlayViewModel extends StateNotifier<void> {
       return null;
     } catch (e) {
       debugPrint("Background Save Failed: $e");
+      await MediaAuditService.recordFailure(
+        event: 'image_background_save_enqueue_failed',
+        error: e,
+        details: {'originalPath': original.path},
+      );
       ref.read(galleryProcessingProvider.notifier).fail(original);
       return null;
     }
@@ -121,6 +127,17 @@ class OverlayViewModel extends StateNotifier<void> {
       );
 
       final savedFile = await GallerySaver.saveImageBytes(bytes);
+      final settings = ref.read(overlaySettingsProvider);
+      await MediaAuditService.recordImageSave(
+        originalFile: original,
+        outputFile: savedFile,
+        overlayData: overlayData.toJson(),
+        overlaySettings: settings.toJson(),
+        orientation: orientation.name,
+        showOverlay: showOverlay,
+        showWatermark: showWatermark,
+        mirror: mirror,
+      );
       ref.read(lastImageProvider.notifier).state = savedFile;
       ref
           .read(galleryProcessingProvider.notifier)
@@ -132,6 +149,11 @@ class OverlayViewModel extends StateNotifier<void> {
       return savedFile;
     } catch (e) {
       debugPrint("In-app Save Failed: $e");
+      await MediaAuditService.recordFailure(
+        event: 'image_in_app_save_failed',
+        error: e,
+        details: {'originalPath': original.path},
+      );
       ref.read(galleryProcessingProvider.notifier).fail(original);
       return null;
     }
@@ -140,10 +162,16 @@ class OverlayViewModel extends StateNotifier<void> {
   Future<File?> savePreparedCapturedImage({
     required File original,
     required Future<Uint8List> preparedBytes,
+    required OverlayData overlayData,
+    required OverlaySettings settings,
+    required DeviceOrientation orientation,
+    required bool showOverlay,
+    required bool showWatermark,
+    required bool mirror,
   }) async {
     try {
       // 🔥 OPTIMIZATION: Try to wait for the prepared bytes for a very short window (150ms).
-      // If they are ready, we skip showing the "original" (no-overlay) image in the gallery 
+      // If they are ready, we skip showing the "original" (no-overlay) image in the gallery
       // entirely, avoiding the "flash" of a raw photo before the watermarked one appears.
       Uint8List? bytes;
       try {
@@ -155,10 +183,18 @@ class OverlayViewModel extends StateNotifier<void> {
       if (bytes != null) {
         if (bytes.isEmpty) throw Exception('Prepared image was empty');
         final savedFile = await GallerySaver.saveImageBytes(bytes);
+        await MediaAuditService.recordImageSave(
+          originalFile: original,
+          outputFile: savedFile,
+          overlayData: overlayData.toJson(),
+          overlaySettings: settings.toJson(),
+          orientation: orientation.name,
+          showOverlay: showOverlay,
+          showWatermark: showWatermark,
+          mirror: mirror,
+        );
         ref.read(lastImageProvider.notifier).state = savedFile;
-        ref
-            .read(galleryFilesProvider.notifier)
-            .showFileImmediately(savedFile);
+        ref.read(galleryFilesProvider.notifier).showFileImmediately(savedFile);
         return savedFile;
       }
 
@@ -173,6 +209,16 @@ class OverlayViewModel extends StateNotifier<void> {
       }
 
       final savedFile = await GallerySaver.saveImageBytes(finalBytes);
+      await MediaAuditService.recordImageSave(
+        originalFile: original,
+        outputFile: savedFile,
+        overlayData: overlayData.toJson(),
+        overlaySettings: settings.toJson(),
+        orientation: orientation.name,
+        showOverlay: showOverlay,
+        showWatermark: showWatermark,
+        mirror: mirror,
+      );
       ref.read(lastImageProvider.notifier).state = savedFile;
       ref
           .read(galleryProcessingProvider.notifier)
@@ -184,6 +230,11 @@ class OverlayViewModel extends StateNotifier<void> {
       return savedFile;
     } catch (e) {
       debugPrint("Prepared Save Failed: $e");
+      await MediaAuditService.recordFailure(
+        event: 'image_prepared_save_failed',
+        error: e,
+        details: {'originalPath': original.path},
+      );
       ref.read(galleryProcessingProvider.notifier).fail(original);
       return null;
     }

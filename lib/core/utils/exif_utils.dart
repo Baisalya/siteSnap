@@ -1,9 +1,7 @@
 import 'dart:io';
-import 'package:camera/camera.dart';
 import 'package:flutter/services.dart';
 
 class ExifUtils {
-
   /// Camera plugin already saves correct EXIF orientation.
   /// Do NOT rotate pixels manually.
   ///

@@ -10,10 +10,10 @@ class SavedNote {
   });
 
   Map<String, dynamic> toJson() => {
-    'id': id,
-    'text': text,
-    'lastUsedAt': lastUsedAt,
-  };
+        'id': id,
+        'text': text,
+        'lastUsedAt': lastUsedAt,
+      };
 
   factory SavedNote.fromJson(Map<String, dynamic> json) {
     return SavedNote(
@@ -23,10 +23,10 @@ class SavedNote {
     );
   }
 
-  SavedNote copyWith({int? lastUsedAt}) {
+  SavedNote copyWith({String? text, int? lastUsedAt}) {
     return SavedNote(
       id: id,
-      text: text,
+      text: text ?? this.text,
       lastUsedAt: lastUsedAt ?? this.lastUsedAt,
     );
   }

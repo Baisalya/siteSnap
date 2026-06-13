@@ -62,6 +62,16 @@ class _NoteInputSheetState extends ConsumerState<NoteInputSheet> {
     return lines.skip(1).join('\n').trim();
   }
 
+  String _historyExtraNoteText(String value) {
+    final normalized = value.trim();
+    if (normalized.isEmpty) return '';
+
+    final extraNote = _extraNoteFromWatermark(normalized);
+    if (extraNote.isNotEmpty) return extraNote;
+
+    return normalized;
+  }
+
   String _composeWatermarkText() {
     final location = locationController.text.trim();
     final extraNote = extraNoteController.text.trim();
@@ -640,7 +650,8 @@ class _NoteInputSheetState extends ConsumerState<NoteInputSheet> {
         itemBuilder: (context, i) {
           return ActionChip(
             label: Text(
-              recent[i].text.replaceAll(RegExp(r'\s*\r?\n\s*'), '  |  '),
+              _historyExtraNoteText(recent[i].text)
+                  .replaceAll(RegExp(r'\s*\r?\n\s*'), '  |  '),
               maxLines: 1,
               overflow: TextOverflow.ellipsis,
             ),
@@ -680,7 +691,7 @@ class _NoteInputSheetState extends ConsumerState<NoteInputSheet> {
               contentPadding:
                   const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
               title: Text(
-                note.text,
+                _historyExtraNoteText(note.text),
                 maxLines: 2,
                 overflow: TextOverflow.ellipsis,
                 style: const TextStyle(color: Colors.white, fontSize: 14),
@@ -771,8 +782,11 @@ class _NoteInputSheetState extends ConsumerState<NoteInputSheet> {
 
   Future<void> _submitNote() async {
     final value = _composeWatermarkText();
+    final extraNote = extraNoteController.text.trim();
     if (value.isNotEmpty) {
-      await ref.read(savedNotesProvider.notifier).addNote(value);
+      if (extraNote.isNotEmpty) {
+        await ref.read(savedNotesProvider.notifier).addNote(extraNote);
+      }
       final overlay = ref.read(overlayPreviewProvider);
       ref.read(overlayPreviewProvider.notifier).state =
           overlay.copyWith(note: value);
@@ -782,11 +796,10 @@ class _NoteInputSheetState extends ConsumerState<NoteInputSheet> {
 
   void _useNote(dynamic note) {
     ref.read(savedNotesProvider.notifier).markAsUsed(note);
-    locationController.text = _locationLineFromWatermark(note.text);
-    extraNoteController.text = _extraNoteFromWatermark(note.text);
+    extraNoteController.text = _historyExtraNoteText(note.text);
+    final value = _composeWatermarkText();
     final overlay = ref.read(overlayPreviewProvider);
     ref.read(overlayPreviewProvider.notifier).state =
-        overlay.copyWith(note: note.text);
-    Navigator.pop(context);
+        overlay.copyWith(note: value);
   }
 }

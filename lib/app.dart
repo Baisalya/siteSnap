@@ -2,7 +2,6 @@ import 'package:flutter/material.dart';
 
 import 'RootScreen.dart';
 import 'core/theme/app_theme.dart';
-import 'features/camera/presentation/camera_screen.dart';
 
 class SurveyCamApp extends StatelessWidget {
   const SurveyCamApp({super.key});
