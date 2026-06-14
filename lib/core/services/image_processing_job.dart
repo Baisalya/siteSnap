@@ -14,6 +14,7 @@ class ImageProcessingJob {
   final CameraAspectRatio? aspectRatio;
   final bool mirror;
   final int createdAtMs;
+  final String? projectId;
 
   const ImageProcessingJob({
     required this.id,
@@ -26,6 +27,7 @@ class ImageProcessingJob {
     required this.aspectRatio,
     required this.mirror,
     required this.createdAtMs,
+    this.projectId,
   });
 
   factory ImageProcessingJob.fromJson(Map<String, dynamic> json) {
@@ -51,6 +53,7 @@ class ImageProcessingJob {
               aspectRatioIndex.clamp(0, CameraAspectRatio.values.length - 1)],
       mirror: json['mirror'] as bool? ?? false,
       createdAtMs: json['createdAtMs'] as int? ?? 0,
+      projectId: json['projectId'] as String?,
     );
   }
 
@@ -66,6 +69,7 @@ class ImageProcessingJob {
       'aspectRatio': aspectRatio?.index,
       'mirror': mirror,
       'createdAtMs': createdAtMs,
+      'projectId': projectId,
     };
   }
 }

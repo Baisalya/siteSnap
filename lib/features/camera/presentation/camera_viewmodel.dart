@@ -25,6 +25,7 @@ import 'package:surveycam/features/overlay/presentation/captured_overlay_provide
 import 'package:surveycam/features/overlay/presentation/overlay_preview_state.dart';
 import 'package:surveycam/features/gallery/data/sitesnap_gallery_repository.dart';
 import 'package:surveycam/features/overlay/domain/video_overlay_sample.dart';
+import 'package:surveycam/features/projects/presentation/project_provider.dart';
 
 final cameraViewModelProvider =
     StateNotifierProvider<CameraViewModel, CameraState>((ref) {
@@ -1078,6 +1079,7 @@ class CameraViewModel extends StateNotifier<CameraState>
         history: history,
         durationMs: totalDurationMs,
         createdAtMs: now.millisecondsSinceEpoch,
+        projectId: ref.read(projectProvider).activeProjectId,
       );
 
       await VideoProcessingTaskHandler.enqueueJob(job);

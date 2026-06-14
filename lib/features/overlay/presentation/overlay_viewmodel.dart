@@ -11,6 +11,7 @@ import 'package:surveycam/core/services/media_audit_service.dart';
 import 'package:surveycam/core/utils/gallery_saver.dart';
 import 'package:surveycam/features/gallery/data/sitesnap_gallery_repository.dart';
 import 'package:surveycam/features/gallery/presentation/last_image_provider.dart';
+import 'package:surveycam/features/projects/presentation/project_provider.dart';
 
 import 'package:surveycam/features/overlay/domain/overlay_model.dart';
 import 'package:surveycam/features/overlay/domain/overlay_settings.dart';
@@ -74,8 +75,12 @@ class OverlayViewModel extends StateNotifier<void> {
       ref.read(lastImageProvider.notifier).state = original;
       ref.read(galleryFilesProvider.notifier).showFileImmediately(original);
       ref.read(galleryProcessingProvider.notifier).start(original);
+      await ref
+          .read(projectProvider.notifier)
+          .assignFileToActiveProject(original);
 
       final settings = ref.read(overlaySettingsProvider);
+      final projectId = ref.read(projectProvider).activeProjectId;
       final now = DateTime.now();
       await VideoProcessingTaskHandler.enqueueImageJob(
         ImageProcessingJob(
@@ -89,6 +94,7 @@ class OverlayViewModel extends StateNotifier<void> {
           aspectRatio: aspectRatio,
           mirror: mirror,
           createdAtMs: now.millisecondsSinceEpoch,
+          projectId: projectId,
         ),
       );
       await _startForegroundImageService();
@@ -128,6 +134,9 @@ class OverlayViewModel extends StateNotifier<void> {
 
       final savedFile = await GallerySaver.saveImageBytes(bytes);
       final settings = ref.read(overlaySettingsProvider);
+      await ref
+          .read(projectProvider.notifier)
+          .assignFileToActiveProject(savedFile, replace: original);
       await MediaAuditService.recordImageSave(
         originalFile: original,
         outputFile: savedFile,
@@ -183,6 +192,9 @@ class OverlayViewModel extends StateNotifier<void> {
       if (bytes != null) {
         if (bytes.isEmpty) throw Exception('Prepared image was empty');
         final savedFile = await GallerySaver.saveImageBytes(bytes);
+        await ref
+            .read(projectProvider.notifier)
+            .assignFileToActiveProject(savedFile);
         await MediaAuditService.recordImageSave(
           originalFile: original,
           outputFile: savedFile,
@@ -202,6 +214,9 @@ class OverlayViewModel extends StateNotifier<void> {
       ref.read(lastImageProvider.notifier).state = original;
       ref.read(galleryFilesProvider.notifier).showFileImmediately(original);
       ref.read(galleryProcessingProvider.notifier).start(original);
+      await ref
+          .read(projectProvider.notifier)
+          .assignFileToActiveProject(original);
 
       final finalBytes = await preparedBytes;
       if (finalBytes.isEmpty) {
@@ -209,6 +224,9 @@ class OverlayViewModel extends StateNotifier<void> {
       }
 
       final savedFile = await GallerySaver.saveImageBytes(finalBytes);
+      await ref
+          .read(projectProvider.notifier)
+          .assignFileToActiveProject(savedFile, replace: original);
       await MediaAuditService.recordImageSave(
         originalFile: original,
         outputFile: savedFile,

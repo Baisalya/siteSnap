@@ -18,6 +18,7 @@ dependencies:
   camera_android_camerax: ^0.7.2
   image: ^4.1.7
   path_provider: ^2.1.2
+  pdf: ^3.11.3
   photo_view: ^0.15.0
   ffmpeg_kit_flutter_new_https_gpl: ^2.1.0
   vector_graphics: ^1.1.11+1
@@ -86,6 +87,7 @@ flutter:
     - Assets/surveycam_logo.svg
     - Assets/App_logo.png
     - Assets/lottie/
+    - Assets/fonts/
 # -------------------------------
 # ✅ APP ICON CONFIG
 # -------------------------------

@@ -39,6 +39,7 @@ class VideoProcessingJob {
   final List<VideoOverlaySample> history;
   final int durationMs;
   final int createdAtMs;
+  final String? projectId;
 
   const VideoProcessingJob({
     required this.id,
@@ -46,6 +47,7 @@ class VideoProcessingJob {
     required this.history,
     required this.durationMs,
     required this.createdAtMs,
+    this.projectId,
   });
 
   factory VideoProcessingJob.fromJson(Map<String, dynamic> json) {
@@ -62,6 +64,7 @@ class VideoProcessingJob {
           .toList(),
       durationMs: json['durationMs'] as int? ?? 0,
       createdAtMs: json['createdAtMs'] as int? ?? 0,
+      projectId: json['projectId'] as String?,
     );
   }
 
@@ -72,6 +75,7 @@ class VideoProcessingJob {
       'history': history.map((sample) => sample.toJson()).toList(),
       'durationMs': durationMs,
       'createdAtMs': createdAtMs,
+      'projectId': projectId,
     };
   }
 }

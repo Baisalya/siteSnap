@@ -19,6 +19,8 @@ import 'package:surveycam/features/location/presentation/location_viewmodel.dart
 import 'package:surveycam/features/overlay/presentation/live_overlay_painter.dart';
 import 'package:surveycam/features/overlay/presentation/overlay_preview_state.dart';
 import 'package:surveycam/features/overlay/presentation/overlay_settings_provider.dart';
+import 'package:surveycam/features/projects/presentation/project_picker_sheet.dart';
+import 'package:surveycam/features/projects/presentation/project_provider.dart';
 import 'package:surveycam/privacypolicy/privacyProvider.dart';
 import '../domain/camera_lens_type.dart';
 
@@ -277,6 +279,8 @@ class _CameraScreenState extends ConsumerState<CameraScreen>
     final privacyAccepted = ref.watch(privacyProvider);
     final cameraState = ref.watch(cameraViewModelProvider);
     final cameraVM = ref.read(cameraViewModelProvider.notifier);
+    final activeProject =
+        ref.watch(projectProvider.select((value) => value.activeProject));
 
     final lastImage = ref.watch(lastImageProvider);
     final focusPoint = ref.watch(focusPointProvider);
@@ -836,19 +840,70 @@ class _CameraScreenState extends ConsumerState<CameraScreen>
                           Positioned(
                             top: 16,
                             left: 16,
-                            child: IconButton(
-                              icon: Icon(
-                                Icons.info_outline,
-                                color: isSelfieFlashActive
-                                    ? Colors.black54
-                                    : Colors.amberAccent,
-                              ),
-                              onPressed: () {
-                                showDialog(
-                                  context: context,
-                                  builder: (_) => const DeveloperInfoDialog(),
-                                );
-                              },
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                IconButton(
+                                  icon: Icon(
+                                    Icons.info_outline,
+                                    color: isSelfieFlashActive
+                                        ? Colors.black54
+                                        : Colors.amberAccent,
+                                  ),
+                                  onPressed: () {
+                                    showDialog(
+                                      context: context,
+                                      builder: (_) =>
+                                          const DeveloperInfoDialog(),
+                                    );
+                                  },
+                                ),
+                                const SizedBox(height: 8),
+                                InkWell(
+                                  onTap: () => showProjectPickerSheet(context),
+                                  borderRadius: BorderRadius.circular(999),
+                                  child: Container(
+                                    constraints:
+                                        const BoxConstraints(maxWidth: 180),
+                                    padding: const EdgeInsets.symmetric(
+                                      horizontal: 10,
+                                      vertical: 7,
+                                    ),
+                                    decoration: BoxDecoration(
+                                      color:
+                                          Colors.black.withValues(alpha: 0.46),
+                                      borderRadius: BorderRadius.circular(999),
+                                      border: Border.all(
+                                        color: Colors.amberAccent
+                                            .withValues(alpha: 0.5),
+                                      ),
+                                    ),
+                                    child: Row(
+                                      mainAxisSize: MainAxisSize.min,
+                                      children: [
+                                        const Icon(
+                                          Icons.folder_special_rounded,
+                                          color: Colors.amberAccent,
+                                          size: 16,
+                                        ),
+                                        const SizedBox(width: 6),
+                                        Flexible(
+                                          child: Text(
+                                            activeProject?.name ?? 'All',
+                                            maxLines: 1,
+                                            overflow: TextOverflow.ellipsis,
+                                            style: const TextStyle(
+                                              color: Colors.white,
+                                              fontSize: 12,
+                                              fontWeight: FontWeight.w800,
+                                            ),
+                                          ),
+                                        ),
+                                      ],
+                                    ),
+                                  ),
+                                ),
+                              ],
                             ),
                           ),
                           Positioned(

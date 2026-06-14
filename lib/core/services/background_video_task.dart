@@ -12,6 +12,7 @@ import 'package:surveycam/core/utils/thumbnail_utils.dart';
 import 'package:surveycam/features/camera/domain/camera_lens_type.dart';
 import 'package:surveycam/features/overlay/presentation/overlay_painter.dart';
 import 'package:surveycam/features/overlay/presentation/video_watermark_processor.dart';
+import 'package:surveycam/features/projects/data/project_storage.dart';
 
 @pragma('vm:entry-point')
 void startCallback() {
@@ -283,6 +284,10 @@ class VideoProcessingTaskHandler extends TaskHandler {
 
       if (processedPath != null) {
         final savedPath = await GallerySaver.saveVideo(processedPath);
+        await ProjectStorage().assignFilePath(
+          filePath: savedPath,
+          projectId: job.projectId,
+        );
         await MediaAuditService.recordVideoSave(
           sourceFiles:
               job.segments.map((segment) => File(segment.path)).toList(),
@@ -310,6 +315,10 @@ class VideoProcessingTaskHandler extends TaskHandler {
         );
         for (final rawPath in rawPaths) {
           final savedPath = await GallerySaver.saveVideo(rawPath);
+          await ProjectStorage().assignFilePath(
+            filePath: savedPath,
+            projectId: job.projectId,
+          );
           await MediaAuditService.recordVideoSave(
             sourceFiles:
                 job.segments.map((segment) => File(segment.path)).toList(),
@@ -428,6 +437,11 @@ class VideoProcessingTaskHandler extends TaskHandler {
 
       await _imageProgress('Finishing photo save... 88%');
       final savedFile = await GallerySaver.saveImageBytes(bytes);
+      await ProjectStorage().assignFilePath(
+        filePath: savedFile.path,
+        projectId: imageJob.projectId,
+        replacePath: imageJob.originalPath,
+      );
       await MediaAuditService.recordImageSave(
         originalFile: originalFile,
         outputFile: savedFile,
