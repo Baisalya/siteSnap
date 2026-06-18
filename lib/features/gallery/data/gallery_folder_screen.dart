@@ -53,7 +53,7 @@ class _GalleryFolderScreenState extends ConsumerState<GalleryFolderScreen>
   void _shareSelected() {
     final selectedImages = ref.read(gallerySelectionProvider);
     if (selectedImages.isEmpty) {
-      _showSnack('Select images to create a PDF proof report.');
+      _showSnack('Select images to share.');
       return;
     }
 
@@ -70,7 +70,14 @@ class _GalleryFolderScreenState extends ConsumerState<GalleryFolderScreen>
     if (_isExportingPdf) return;
 
     final selectedImages = ref.read(gallerySelectionProvider);
-    if (selectedImages.isEmpty) return;
+    if (selectedImages.isEmpty) {
+      await showModalBottomSheet<void>(
+        context: context,
+        backgroundColor: Colors.transparent,
+        builder: (_) => const _PdfSelectionHelpSheet(),
+      );
+      return;
+    }
 
     final canUsePdfReports =
         ref.read(premiumPolicyProvider).canUse(PremiumFeature.pdfReports);
@@ -454,6 +461,82 @@ class _PdfActionButton extends StatelessWidget {
             ),
           ),
         ],
+      ),
+    );
+  }
+}
+
+class _PdfSelectionHelpSheet extends StatelessWidget {
+  const _PdfSelectionHelpSheet();
+
+  @override
+  Widget build(BuildContext context) {
+    return SafeArea(
+      child: Padding(
+        padding: const EdgeInsets.all(14),
+        child: Material(
+          color: const Color(0xFF171717),
+          borderRadius: BorderRadius.circular(22),
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(18, 14, 18, 18),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Container(
+                  width: 40,
+                  height: 4,
+                  decoration: BoxDecoration(
+                    color: Colors.white24,
+                    borderRadius: BorderRadius.circular(99),
+                  ),
+                ),
+                const SizedBox(height: 16),
+                const Icon(
+                  Icons.photo_library_rounded,
+                  color: Colors.amberAccent,
+                  size: 38,
+                ),
+                const SizedBox(height: 12),
+                const Text(
+                  'Select pictures to create PDF',
+                  textAlign: TextAlign.center,
+                  style: TextStyle(
+                    color: Colors.white,
+                    fontSize: 18,
+                    fontWeight: FontWeight.w800,
+                  ),
+                ),
+                const SizedBox(height: 8),
+                const Text(
+                  'Long press a photo, select one or more pictures, then tap the PDF button again to add title, project name, and photo descriptions.',
+                  textAlign: TextAlign.center,
+                  style: TextStyle(
+                    color: Colors.white54,
+                    fontSize: 13,
+                    height: 1.35,
+                  ),
+                ),
+                const SizedBox(height: 16),
+                SizedBox(
+                  width: double.infinity,
+                  height: 46,
+                  child: ElevatedButton.icon(
+                    onPressed: () => Navigator.pop(context),
+                    icon: const Icon(Icons.check_rounded),
+                    label: const Text('Got it'),
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: Colors.amberAccent,
+                      foregroundColor: Colors.black,
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(14),
+                      ),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
       ),
     );
   }
