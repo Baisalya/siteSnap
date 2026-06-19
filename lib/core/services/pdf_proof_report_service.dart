@@ -10,6 +10,8 @@ import 'package:path_provider/path_provider.dart';
 import 'package:pdf/pdf.dart';
 import 'package:pdf/widgets.dart' as pw;
 
+import 'package:surveycam/core/utils/thumbnail_utils.dart';
+
 enum ProofReportTemplate {
   standard,
   compact,
@@ -36,10 +38,12 @@ class PdfProofReportService {
     final generated = generatedAt ?? DateTime.now();
     final entries = <_ProofReportEntry>[];
     for (final file in existingFiles) {
+      final isVideo = _isVideoFile(file.path);
       entries.add(
         await _buildEntry(
           file,
           description: photoDescriptions[file.path]?.trim() ?? '',
+          isVideo: isVideo,
         ),
       );
     }
@@ -155,9 +159,15 @@ class PdfProofReportService {
     );
   }
 
+  bool _isVideoFile(String path) {
+    final ext = p.extension(path).toLowerCase();
+    return ext == '.mp4' || ext == '.mov' || ext == '.avi' || ext == '.mkv';
+  }
+
   Future<_ProofReportEntry> _buildEntry(
     File file, {
     required String description,
+    required bool isVideo,
   }) async {
     final stat = await file.stat();
     final sha = await _sha256(file);
@@ -168,13 +178,27 @@ class PdfProofReportService {
       modifiedAt: stat.modified,
       sha256: sha,
       description: description,
-      previewBytes: await _previewBytes(file),
+      previewBytes: await _previewBytes(file, isVideo: isVideo),
+      isVideo: isVideo,
     );
   }
 
-  Future<Uint8List?> _previewBytes(File file) async {
+  Future<Uint8List?> _previewBytes(File file, {required bool isVideo}) async {
     try {
-      final bytes = await file.readAsBytes();
+      Uint8List bytes;
+      if (isVideo) {
+        // Use high resolution for PDF reports
+        final thumbPath = await ThumbnailUtils.generateVideoThumbnail(
+          file.path,
+          maxWidth: 1280,
+          quality: 90,
+        );
+        if (thumbPath == null) return null;
+        bytes = await File(thumbPath).readAsBytes();
+      } else {
+        bytes = await file.readAsBytes();
+      }
+
       final decoded = img.decodeImage(bytes);
       if (decoded == null) return null;
 
@@ -273,6 +297,10 @@ class PdfProofReportService {
         children: [
           _previewBox(entry, height: 290),
           pw.SizedBox(height: 10),
+          if (entry.isVideo) ...[
+            _videoBadge(),
+            pw.SizedBox(height: 8),
+          ],
           _entryNarrative(entry),
           pw.SizedBox(height: 10),
           _entryDetails(entry),
@@ -298,6 +326,10 @@ class PdfProofReportService {
             children: [
               _previewBox(entry, height: 150),
               pw.SizedBox(height: 8),
+              if (entry.isVideo) ...[
+                _videoBadge(compact: true),
+                pw.SizedBox(height: 4),
+              ],
               pw.Text(
                 entry.fileName,
                 maxLines: 1,
@@ -346,9 +378,63 @@ class PdfProofReportService {
       height: height,
       alignment: pw.Alignment.center,
       color: PdfColors.grey100,
-      child: pw.Image(
-        pw.MemoryImage(preview),
-        fit: pw.BoxFit.contain,
+      child: pw.Stack(
+        alignment: pw.Alignment.center,
+        children: [
+          pw.Image(
+            pw.MemoryImage(preview),
+            fit: pw.BoxFit.contain,
+          ),
+          if (entry.isVideo)
+            pw.Container(
+              width: height * 0.2,
+              height: height * 0.2,
+              decoration: const pw.BoxDecoration(
+                color: PdfColors.white,
+                shape: pw.BoxShape.circle,
+              ),
+              child: pw.Center(
+                child: pw.Container(
+                  width: height * 0.1,
+                  height: height * 0.1,
+                  child: pw.Polygon(
+                    points: [
+                      PdfPoint(0, 0),
+                      PdfPoint(height * 0.1, (height * 0.1) / 2),
+                      PdfPoint(0, height * 0.1),
+                    ],
+                    fillColor: PdfColors.black,
+                  ),
+                ),
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+
+  pw.Widget _videoBadge({bool compact = false}) {
+    return pw.Container(
+      padding: pw.EdgeInsets.symmetric(
+        horizontal: compact ? 6 : 8,
+        vertical: compact ? 2 : 4,
+      ),
+      decoration: pw.BoxDecoration(
+        color: PdfColors.red700,
+        borderRadius: pw.BorderRadius.circular(compact ? 4 : 6),
+      ),
+      child: pw.Row(
+        mainAxisSize: pw.MainAxisSize.min,
+        children: [
+          pw.Text(
+            'VIDEO FILE',
+            style: pw.TextStyle(
+              color: PdfColors.white,
+              fontSize: compact ? 7 : 9,
+              fontWeight: pw.FontWeight.bold,
+            ),
+          ),
+        ],
       ),
     );
   }
@@ -455,6 +541,7 @@ class _ProofReportEntry {
     required this.sha256,
     required this.description,
     required this.previewBytes,
+    required this.isVideo,
   });
 
   final String fileName;
@@ -464,6 +551,7 @@ class _ProofReportEntry {
   final String sha256;
   final String description;
   final Uint8List? previewBytes;
+  final bool isVideo;
 
   String get shortHash => sha256.substring(0, 16);
 }

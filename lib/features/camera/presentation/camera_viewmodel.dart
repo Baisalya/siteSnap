@@ -69,8 +69,14 @@ class CameraViewModel extends StateNotifier<CameraState>
       overlaySettingsProvider,
       (_, __) => _recordCurrentVideoOverlaySample(),
     );
-    _initBackgroundService();
-    unawaited(_resumePendingVideoProcessing());
+    
+    // Defer initialization work to avoid blocking the main thread during constructor execution (ANR prevention)
+    Future.microtask(() {
+      if (mounted) {
+        _initBackgroundService();
+        unawaited(_resumePendingVideoProcessing());
+      }
+    });
     // Removed automatic initialize() to allow manual/early trigger
   }
 
@@ -1126,26 +1132,7 @@ class CameraViewModel extends StateNotifier<CameraState>
     // 0. Ensure notification permission
     await PermissionService.requestNotificationPermission();
 
-    // 1. Initialize notification options
-    FlutterForegroundTask.init(
-      androidNotificationOptions: AndroidNotificationOptions(
-        channelId: 'processing_channel',
-        channelName: 'Media Processing',
-        channelDescription: 'Shows progress of media processing',
-        channelImportance: NotificationChannelImportance.LOW,
-        priority: NotificationPriority.LOW,
-      ),
-      iosNotificationOptions: const IOSNotificationOptions(
-        showNotification: true,
-        playSound: false,
-      ),
-      foregroundTaskOptions: ForegroundTaskOptions(
-        eventAction: ForegroundTaskEventAction.repeat(5000),
-        autoRunOnBoot: false,
-        allowWakeLock: true,
-        allowWifiLock: true,
-      ),
-    );
+    // 1. Core initialization is now in main.dart to ensure it's called early and once.
 
     final isRunning = await FlutterForegroundTask.isRunningService;
     if (isRunning) {

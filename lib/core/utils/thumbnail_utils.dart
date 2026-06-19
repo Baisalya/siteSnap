@@ -7,11 +7,17 @@ import 'package:path/path.dart' as p;
 class ThumbnailUtils {
   static String? _tempDirPath;
 
-  static Future<String?> generateVideoThumbnail(String videoPath) async {
+  static Future<String?> generateVideoThumbnail(
+    String videoPath, {
+    int maxWidth = 1280,
+    int quality = 90,
+  }) async {
     try {
       _tempDirPath ??= (await getTemporaryDirectory()).path;
       final fileName = p.basenameWithoutExtension(videoPath);
-      final thumbnailPath = p.join(_tempDirPath!, 'thumb_$fileName.jpg');
+      // Append resolution and quality to filename to avoid using low-quality cached versions
+      final thumbnailPath =
+          p.join(_tempDirPath!, 'thumb_${fileName}_${maxWidth}q$quality.jpg');
 
       if (await File(thumbnailPath).exists()) {
         return thumbnailPath;
@@ -21,8 +27,8 @@ class ThumbnailUtils {
         video: videoPath,
         thumbnailPath: _tempDirPath!,
         imageFormat: ImageFormat.jpeg,
-        maxWidth: 300,
-        quality: 75,
+        maxWidth: maxWidth,
+        quality: quality,
       );
     } catch (e) {
       debugPrint("Thumbnail generation error: $e");

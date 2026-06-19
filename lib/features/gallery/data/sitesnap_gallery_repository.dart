@@ -5,6 +5,7 @@ import 'package:path_provider/path_provider.dart';
 import 'package:path/path.dart' as p;
 import 'package:surveycam/core/services/surveycam_media_store_service.dart';
 import 'package:surveycam/core/utils/gallery_saver.dart';
+import 'package:surveycam/features/projects/presentation/project_provider.dart';
 
 final galleryRepositoryProvider =
     Provider((ref) => SurveyCamGalleryRepository());
@@ -15,6 +16,21 @@ final galleryFilesProvider =
   final notifier = GalleryFilesNotifier(repo);
   notifier.ensureLoaded();
   return notifier;
+});
+
+final filteredGalleryFilesProvider = Provider<List<File>>((ref) {
+  final galleryAsync = ref.watch(galleryFilesProvider);
+  final projectController = ref.watch(projectProvider.notifier);
+
+  return galleryAsync.maybeWhen(
+    data: (images) => projectController.filterFilesForActiveProject(images),
+    loading: () {
+      final cached =
+          ref.read(galleryRepositoryProvider).cachedFiles ?? const <File>[];
+      return projectController.filterFilesForActiveProject(cached);
+    },
+    orElse: () => const <File>[],
+  );
 });
 
 final galleryProcessingProvider = StateNotifierProvider<
@@ -116,6 +132,7 @@ class GalleryFilesNotifier extends StateNotifier<AsyncValue<List<File>>> {
       return _loadFuture!;
     }
 
+    // Only show full-screen loading if we don't have data already
     if (!state.hasValue) {
       state = const AsyncValue.loading();
     }
@@ -237,11 +254,11 @@ class SurveyCamGalleryRepository {
   }
 
   Future<List<File>> loadImages({bool forceRefresh = false}) async {
-    // Return cached results only if they are very fresh (less than 2 seconds old)
-    // to prevent redundant disk IO during rapid UI rebuilds.
+    // Return cached results if they are fresh (less than 60 seconds old)
+    // This prevents redundant disk IO during frequent navigation.
     if (!forceRefresh && _cachedFiles != null && _lastFetchTime != null) {
       if (DateTime.now().difference(_lastFetchTime!) <
-          const Duration(seconds: 2)) {
+          const Duration(seconds: 60)) {
         return _cachedFiles!;
       }
     }

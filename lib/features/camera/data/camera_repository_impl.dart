@@ -114,38 +114,61 @@ class CameraRepositoryImpl implements CameraRepository {
   }
 
   Future<void> _initController(CameraDescription camera) async {
-    final controller = CameraController(
-      camera,
-      ResolutionPreset.ultraHigh, // 🔥 Standardize on 4K (UltraHigh) instead of sensor Max
-      enableAudio: true,
-      imageFormatGroup: ImageFormatGroup.jpeg,
-    );
+    final resolutions = [
+      ResolutionPreset.ultraHigh,
+      ResolutionPreset.veryHigh,
+      ResolutionPreset.high,
+    ];
 
-    _controller = controller;
+    Object? lastError;
 
-    try {
-      await controller.initialize();
+    for (final resolution in resolutions) {
+      final controller = CameraController(
+        camera,
+        resolution,
+        enableAudio: true,
+        imageFormatGroup: ImageFormatGroup.jpeg,
+      );
 
-      // Initial quality settings - only if supported
-      if (controller.value.isInitialized) {
-        try {
-          await controller.setFocusMode(FocusMode.auto);
-        } catch (e) {
-          debugPrint("Focus mode auto not supported: $e");
+      _controller = controller;
+
+      try {
+        await controller.initialize();
+
+        // Initial quality settings - only if supported
+        if (controller.value.isInitialized) {
+          try {
+            await controller.setFocusMode(FocusMode.auto);
+          } catch (e) {
+            debugPrint("Focus mode auto not supported: $e");
+          }
+
+          try {
+            await controller.setExposureMode(ExposureMode.auto);
+          } catch (e) {
+            debugPrint("Exposure mode auto not supported: $e");
+          }
+
+          debugPrint("Camera initialized successfully with $resolution");
+          return; // Success!
         }
+      } catch (e) {
+        lastError = e;
+        debugPrint("Camera initialization failed with $resolution: $e");
+        await controller.dispose();
+        _controller = null;
 
-        try {
-          await controller.setExposureMode(ExposureMode.auto);
-        } catch (e) {
-          debugPrint("Exposure mode auto not supported: $e");
-        }
+        // If it's not a resolution-related error, we might want to rethrow immediately,
+        // but often the error message doesn't explicitly say it's resolution.
+        // Continuing the loop to try lower resolution.
       }
-    } catch (e) {
-      // If initialization fails, dispose and rethrow
-      await controller.dispose();
-      _controller = null;
-      rethrow;
     }
+
+    // If we reach here, all resolutions failed
+    if (lastError != null) {
+      throw lastError;
+    }
+    throw Exception('Failed to initialize camera with any resolution preset');
   }
 
   @override

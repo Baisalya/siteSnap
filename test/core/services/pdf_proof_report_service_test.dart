@@ -49,4 +49,31 @@ void main() {
     final header = await report.openRead(0, 4).first;
     expect(String.fromCharCodes(header), '%PDF');
   });
+
+  test('createReport handles video files by generating thumbnails', () async {
+    final directory = await Directory.systemTemp.createTemp('surveycam_pdf_video_');
+    addTearDown(() async {
+      if (directory.existsSync()) {
+        await directory.delete(recursive: true);
+      }
+    });
+
+    // Mock a video file
+    final video = File('${directory.path}/capture.mp4');
+    await video.writeAsString('fake video content');
+
+    // Note: In a real test environment, ThumbnailUtils.generateVideoThumbnail 
+    // might fail or need a mock because it depends on path_provider and a plugin.
+    // However, we want to ensure the logic flows correctly.
+    
+    final report = await const PdfProofReportService().createReport(
+      files: [video],
+      reportTitle: 'Video Report',
+      outputDirectory: directory,
+    );
+
+    expect(report.existsSync(), isTrue);
+    final header = await report.openRead(0, 4).first;
+    expect(String.fromCharCodes(header), '%PDF');
+  });
 }

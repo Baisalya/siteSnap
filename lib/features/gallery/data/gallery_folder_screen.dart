@@ -35,9 +35,8 @@ class _GalleryFolderScreenState extends ConsumerState<GalleryFolderScreen>
     Future.microtask(() async {
       await PermissionService.requestGalleryAccessIfNeeded();
       if (!mounted) return;
-      await ref
-          .read(galleryFilesProvider.notifier)
-          .ensureLoaded(forceRefresh: true);
+      // Load cached photos immediately, refresh in background if needed
+      await ref.read(galleryFilesProvider.notifier).ensureLoaded();
     });
   }
 
@@ -163,6 +162,7 @@ class _GalleryFolderScreenState extends ConsumerState<GalleryFolderScreen>
   @override
   Widget build(BuildContext context) {
     final galleryAsync = ref.watch(galleryFilesProvider);
+    final filteredImages = ref.watch(filteredGalleryFilesProvider);
     final projectState = ref.watch(projectProvider);
     final activeProject = projectState.activeProject;
     final selectedImages = ref.watch(gallerySelectionProvider);
@@ -199,13 +199,7 @@ class _GalleryFolderScreenState extends ConsumerState<GalleryFolderScreen>
           if (selectionMode) ...[
             IconButton(
               icon: const Icon(Icons.select_all, color: Colors.white),
-              onPressed: () {
-                galleryAsync.whenData(
-                  (images) => _selectAll(
-                    projectState.filterFilesForActiveProject(images),
-                  ),
-                );
-              },
+              onPressed: () => _selectAll(filteredImages),
             ),
             if (_isExportingPdf)
               const Padding(
@@ -245,9 +239,7 @@ class _GalleryFolderScreenState extends ConsumerState<GalleryFolderScreen>
 
       /// ================= BODY =================
       body: galleryAsync.when(
-        data: (images) {
-          final filteredImages =
-              projectState.filterFilesForActiveProject(images);
+        data: (_) {
           if (filteredImages.isEmpty) return _emptyView(activeProject?.name);
 
           return _galleryGridWithHint(
@@ -256,16 +248,15 @@ class _GalleryFolderScreenState extends ConsumerState<GalleryFolderScreen>
           );
         },
         loading: () {
-          final cachedImages =
-              ref.read(galleryRepositoryProvider).cachedFiles ?? const <File>[];
-          final filteredImages =
-              projectState.filterFilesForActiveProject(cachedImages);
-          return filteredImages.isEmpty
-              ? _loadingView()
-              : _galleryGridWithHint(
-                  images: filteredImages,
-                  showHint: !selectionMode,
-                );
+          // If we have filtered images from a previous load or cache, show them
+          // instead of a full screen loading indicator.
+          if (filteredImages.isNotEmpty) {
+            return _galleryGridWithHint(
+              images: filteredImages,
+              showHint: !selectionMode,
+            );
+          }
+          return _loadingView();
         },
         error: (err, stack) => Center(
           child: Text("Error: $err", style: const TextStyle(color: Colors.red)),
@@ -669,68 +660,92 @@ class _PdfReportDetailsSheetState extends State<_PdfReportDetailsSheet> {
                   ),
                 ),
                 Flexible(
-                  child: ListView(
+                  child: ListView.builder(
                     shrinkWrap: true,
                     padding: const EdgeInsets.fromLTRB(18, 12, 18, 18),
-                    children: [
-                      _ReportTextField(
-                        controller: _titleController,
-                        label: 'Report title',
-                        icon: Icons.title_rounded,
-                        textInputAction: TextInputAction.next,
-                      ),
-                      const SizedBox(height: 10),
-                      _ReportTextField(
-                        controller: _projectController,
-                        label: 'Project name',
-                        icon: Icons.business_center_rounded,
-                        textInputAction: TextInputAction.next,
-                      ),
-                      const SizedBox(height: 14),
-                      const Text(
-                        'Template',
-                        style: TextStyle(
-                          color: Colors.white,
-                          fontWeight: FontWeight.w800,
-                        ),
-                      ),
-                      const SizedBox(height: 8),
-                      _PdfTemplateChoice(
-                        icon: Icons.article_rounded,
-                        title: 'Standard report',
-                        subtitle: 'Large photo proof with full file details',
-                        selected: _template == ProofReportTemplate.standard,
-                        onTap: () => setState(
-                          () => _template = ProofReportTemplate.standard,
-                        ),
-                      ),
-                      const SizedBox(height: 8),
-                      _PdfTemplateChoice(
-                        icon: Icons.grid_view_rounded,
-                        title: 'Compact report',
-                        subtitle: 'Two-column summary for more photos per page',
-                        selected: _template == ProofReportTemplate.compact,
-                        onTap: () => setState(
-                          () => _template = ProofReportTemplate.compact,
-                        ),
-                      ),
-                      const SizedBox(height: 16),
-                      const Text(
-                        'Photo descriptions',
-                        style: TextStyle(
-                          color: Colors.white,
-                          fontWeight: FontWeight.w800,
-                        ),
-                      ),
-                      const SizedBox(height: 8),
-                      for (final file in widget.files) ...[
-                        _PhotoDescriptionField(
-                          file: file,
-                          controller: _descriptionControllers[file.path]!,
-                        ),
-                        const SizedBox(height: 10),
-                      ],
-                    ],
+                    itemCount: 4 + widget.files.length,
+                    itemBuilder: (context, index) {
+                      if (index == 0) {
+                        return Padding(
+                          padding: const EdgeInsets.only(bottom: 10),
+                          child: _ReportTextField(
+                            controller: _titleController,
+                            label: 'Report title',
+                            icon: Icons.title_rounded,
+                            textInputAction: TextInputAction.next,
+                          ),
+                        );
+                      }
+                      if (index == 1) {
+                        return Padding(
+                          padding: const EdgeInsets.only(bottom: 14),
+                          child: _ReportTextField(
+                            controller: _projectController,
+                            label: 'Project name',
+                            icon: Icons.business_center_rounded,
+                            textInputAction: TextInputAction.next,
+                          ),
+                        );
+                      }
+                      if (index == 2) {
+                        return Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            const Text(
+                              'Template',
+                              style: TextStyle(
+                                color: Colors.white,
+                                fontWeight: FontWeight.w800,
+                              ),
+                            ),
+                            const SizedBox(height: 8),
+                            _PdfTemplateChoice(
+                              icon: Icons.article_rounded,
+                              title: 'Standard report',
+                              subtitle:
+                                  'Large photo proof with full file details',
+                              selected:
+                                  _template == ProofReportTemplate.standard,
+                              onTap: () => setState(
+                                () => _template = ProofReportTemplate.standard,
+                              ),
+                            ),
+                            const SizedBox(height: 8),
+                            _PdfTemplateChoice(
+                              icon: Icons.grid_view_rounded,
+                              title: 'Compact report',
+                              subtitle:
+                                  'Two-column summary for more photos per page',
+                              selected:
+                                  _template == ProofReportTemplate.compact,
+                              onTap: () => setState(
+                                () => _template = ProofReportTemplate.compact,
+                              ),
+                            ),
+                            const SizedBox(height: 16),
+                            const Text(
+                              'Photo descriptions',
+                              style: TextStyle(
+                                color: Colors.white,
+                                fontWeight: FontWeight.w800,
+                              ),
+                            ),
+                            const SizedBox(height: 8),
+                          ],
+                        );
+                      }
+                      if (index >= 3 && index < 3 + widget.files.length) {
+                        final file = widget.files[index - 3];
+                        return Padding(
+                          padding: const EdgeInsets.only(bottom: 10),
+                          child: _PhotoDescriptionField(
+                            file: file,
+                            controller: _descriptionControllers[file.path]!,
+                          ),
+                        );
+                      }
+                      return const SizedBox.shrink();
+                    },
                   ),
                 ),
                 Padding(
@@ -942,9 +957,12 @@ class GalleryItem extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final selectedImages = ref.watch(gallerySelectionProvider);
-    final isSelected = selectedImages.contains(file);
-    final selectionMode = selectedImages.isNotEmpty;
+    final isSelected = ref.watch(
+      gallerySelectionProvider.select((state) => state.contains(file)),
+    );
+    final selectionMode = ref.watch(
+      gallerySelectionProvider.select((state) => state.isNotEmpty),
+    );
 
     final isVideo = file.path.toLowerCase().endsWith('.mp4') ||
         file.path.toLowerCase().endsWith('.mov');

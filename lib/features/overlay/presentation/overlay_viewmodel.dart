@@ -262,25 +262,7 @@ class OverlayViewModel extends StateNotifier<void> {
   Future<void> _startForegroundImageService() async {
     await PermissionService.requestNotificationPermission();
 
-    FlutterForegroundTask.init(
-      androidNotificationOptions: AndroidNotificationOptions(
-        channelId: 'processing_channel',
-        channelName: 'Media Processing',
-        channelDescription: 'Shows progress of media processing',
-        channelImportance: NotificationChannelImportance.LOW,
-        priority: NotificationPriority.LOW,
-      ),
-      iosNotificationOptions: const IOSNotificationOptions(
-        showNotification: true,
-        playSound: false,
-      ),
-      foregroundTaskOptions: ForegroundTaskOptions(
-        eventAction: ForegroundTaskEventAction.repeat(5000),
-        autoRunOnBoot: false,
-        allowWakeLock: true,
-        allowWifiLock: true,
-      ),
-    );
+    // 1. Core initialization is now in main.dart
 
     final isRunning = await FlutterForegroundTask.isRunningService;
     if (isRunning) {
