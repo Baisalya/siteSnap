@@ -177,24 +177,21 @@ class OverlayViewModel extends StateNotifier<void> {
     required bool showOverlay,
     required bool showWatermark,
     required bool mirror,
+    bool showRawPlaceholder = true,
   }) async {
     try {
+      var rawPlaceholderShown = false;
+
       // 🔥 OPTIMIZATION: Try to wait for the prepared bytes for a very short window (150ms).
       // If they are ready, we skip showing the "original" (no-overlay) image in the gallery
       // entirely, avoiding the "flash" of a raw photo before the watermarked one appears.
-      Uint8List? bytes;
-      try {
-        bytes = await preparedBytes.timeout(const Duration(milliseconds: 150));
-      } catch (_) {
-        // Not ready yet, proceed with showing the original as a placeholder
-      }
-
-      if (bytes != null) {
+      Future<File> saveFinalBytes(Uint8List bytes) async {
         if (bytes.isEmpty) throw Exception('Prepared image was empty');
+
         final savedFile = await GallerySaver.saveImageBytes(bytes);
         await ref
             .read(projectProvider.notifier)
-            .assignFileToActiveProject(savedFile);
+            .assignFileToActiveProject(savedFile, replace: original);
         await MediaAuditService.recordImageSave(
           originalFile: original,
           outputFile: savedFile,
@@ -206,14 +203,38 @@ class OverlayViewModel extends StateNotifier<void> {
           mirror: mirror,
         );
         ref.read(lastImageProvider.notifier).state = savedFile;
-        ref.read(galleryFilesProvider.notifier).showFileImmediately(savedFile);
+        if (rawPlaceholderShown) {
+          ref
+              .read(galleryProcessingProvider.notifier)
+              .complete(original, savedFile);
+        }
+        ref
+            .read(galleryFilesProvider.notifier)
+            .showFileImmediately(savedFile, replace: original);
         return savedFile;
+      }
+
+      Uint8List? bytes;
+      if (showRawPlaceholder) {
+        try {
+          bytes =
+              await preparedBytes.timeout(const Duration(milliseconds: 150));
+        } catch (_) {
+          // Not ready yet, proceed with showing the original as a placeholder.
+        }
+      } else {
+        bytes = await preparedBytes;
+      }
+
+      if (bytes != null) {
+        return await saveFinalBytes(bytes);
       }
 
       // If we are here, processing is taking longer. Show original with a processing indicator.
       ref.read(lastImageProvider.notifier).state = original;
       ref.read(galleryFilesProvider.notifier).showFileImmediately(original);
       ref.read(galleryProcessingProvider.notifier).start(original);
+      rawPlaceholderShown = true;
       await ref
           .read(projectProvider.notifier)
           .assignFileToActiveProject(original);
@@ -223,29 +244,7 @@ class OverlayViewModel extends StateNotifier<void> {
         throw Exception('Prepared image was empty');
       }
 
-      final savedFile = await GallerySaver.saveImageBytes(finalBytes);
-      await ref
-          .read(projectProvider.notifier)
-          .assignFileToActiveProject(savedFile, replace: original);
-      await MediaAuditService.recordImageSave(
-        originalFile: original,
-        outputFile: savedFile,
-        overlayData: overlayData.toJson(),
-        overlaySettings: settings.toJson(),
-        orientation: orientation.name,
-        showOverlay: showOverlay,
-        showWatermark: showWatermark,
-        mirror: mirror,
-      );
-      ref.read(lastImageProvider.notifier).state = savedFile;
-      ref
-          .read(galleryProcessingProvider.notifier)
-          .complete(original, savedFile);
-      ref
-          .read(galleryFilesProvider.notifier)
-          .showFileImmediately(savedFile, replace: original);
-
-      return savedFile;
+      return await saveFinalBytes(finalBytes);
     } catch (e) {
       debugPrint("Prepared Save Failed: $e");
       await MediaAuditService.recordFailure(
@@ -253,7 +252,9 @@ class OverlayViewModel extends StateNotifier<void> {
         error: e,
         details: {'originalPath': original.path},
       );
-      ref.read(galleryProcessingProvider.notifier).fail(original);
+      if (showRawPlaceholder) {
+        ref.read(galleryProcessingProvider.notifier).fail(original);
+      }
       return null;
     }
   }

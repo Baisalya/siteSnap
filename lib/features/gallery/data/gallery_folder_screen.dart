@@ -5,6 +5,7 @@ import 'package:flutter_riverpod/legacy.dart';
 import 'package:share_plus/share_plus.dart';
 import 'package:surveycam/core/monetization/premium_feature.dart';
 import 'package:surveycam/core/monetization/premium_policy.dart';
+import 'package:surveycam/core/permissions/permission_service.dart';
 import 'package:surveycam/core/services/pdf_proof_report_service.dart';
 import 'package:surveycam/core/utils/thumbnail_utils.dart';
 import 'package:surveycam/features/gallery/data/sitesnap_gallery_repository.dart';
@@ -31,9 +32,13 @@ class _GalleryFolderScreenState extends ConsumerState<GalleryFolderScreen>
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
-    Future.microtask(
-      () => ref.read(galleryFilesProvider.notifier).ensureLoaded(),
-    );
+    Future.microtask(() async {
+      await PermissionService.requestGalleryAccessIfNeeded();
+      if (!mounted) return;
+      await ref
+          .read(galleryFilesProvider.notifier)
+          .ensureLoaded(forceRefresh: true);
+    });
   }
 
   @override

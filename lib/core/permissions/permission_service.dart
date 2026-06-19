@@ -72,6 +72,18 @@ class PermissionService {
 
   /// GALLERY / STORAGE (used when saving image/video)
   static Future<void> requestGalleryPermission() async {
+    final granted = await requestGalleryAccessIfNeeded(
+      openSettingsOnPermanentDenied: true,
+    );
+
+    if (!granted) {
+      throw Exception('Gallery permission not granted');
+    }
+  }
+
+  static Future<bool> requestGalleryAccessIfNeeded({
+    bool openSettingsOnPermanentDenied = false,
+  }) async {
     PermissionStatus status;
 
     if (Platform.isAndroid) {
@@ -80,9 +92,10 @@ class PermissionService {
         Permission.photos,
         Permission.videos,
       ].request();
-      
-      status = statuses[Permission.photos]!.isGranted || statuses[Permission.videos]!.isGranted 
-          ? PermissionStatus.granted 
+
+      status = statuses[Permission.photos]!.isGranted ||
+              statuses[Permission.videos]!.isGranted
+          ? PermissionStatus.granted
           : PermissionStatus.denied;
 
       // fallback for older Android
@@ -95,13 +108,13 @@ class PermissionService {
     }
 
     if (status.isPermanentlyDenied) {
-      await openAppSettings();
-      throw Exception('Gallery permission permanently denied');
+      if (openSettingsOnPermanentDenied) {
+        await openAppSettings();
+      }
+      return false;
     }
 
-    if (!status.isGranted) {
-      throw Exception('Gallery permission not granted');
-    }
+    return status.isGranted || status.isLimited;
   }
 
   /// NOTIFICATION (used for background video processing)

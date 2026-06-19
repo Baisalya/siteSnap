@@ -1,12 +1,16 @@
 package com.baishalya.surveycam
 
 import android.content.Context
+import android.database.Cursor
 import android.hardware.Sensor
 import android.hardware.SensorEvent
 import android.hardware.SensorEventListener
 import android.hardware.SensorManager
+import android.net.Uri
+import android.os.Build
 import android.os.Handler
 import android.os.Looper
+import android.provider.MediaStore
 import io.flutter.embedding.android.FlutterActivity
 import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.plugins.GeneratedPluginRegistrant
@@ -27,9 +31,85 @@ class MainActivity : FlutterActivity() {
             when (call.method) {
                 "getSensorAvailability" -> result.success(getSensorAvailability())
                 "readEnvironment" -> readEnvironmentSensors(result)
+                "listSurveyCamMedia" -> result.success(listSurveyCamMedia())
                 else -> result.notImplemented()
             }
         }
+    }
+
+    private fun listSurveyCamMedia(): List<Map<String, Any>> {
+        return try {
+            val media = mutableListOf<Map<String, Any>>()
+            media.addAll(querySurveyCamMedia(MediaStore.Images.Media.EXTERNAL_CONTENT_URI))
+            media.addAll(querySurveyCamMedia(MediaStore.Video.Media.EXTERNAL_CONTENT_URI))
+            media.sortedByDescending { it["modifiedMs"] as? Long ?: 0L }
+        } catch (_: Exception) {
+            emptyList()
+        }
+    }
+
+    private fun querySurveyCamMedia(uri: Uri): List<Map<String, Any>> {
+        val projection = mutableListOf(
+            MediaStore.MediaColumns.DATA,
+            MediaStore.MediaColumns.DISPLAY_NAME,
+            MediaStore.MediaColumns.DATE_MODIFIED,
+            MediaStore.MediaColumns.DATE_ADDED,
+            MediaStore.MediaColumns.SIZE,
+            MediaStore.MediaColumns.MIME_TYPE,
+        )
+        val selection: String
+        val selectionArgs: Array<String>
+
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            projection.add(MediaStore.MediaColumns.RELATIVE_PATH)
+            selection = "LOWER(${MediaStore.MediaColumns.DISPLAY_NAME}) LIKE ? OR " +
+                "LOWER(${MediaStore.MediaColumns.RELATIVE_PATH}) LIKE ?"
+            selectionArgs = arrayOf("%surveycam%", "%surveycam%")
+        } else {
+            selection = "LOWER(${MediaStore.MediaColumns.DISPLAY_NAME}) LIKE ? OR " +
+                "LOWER(${MediaStore.MediaColumns.DATA}) LIKE ?"
+            selectionArgs = arrayOf("%surveycam%", "%surveycam%")
+        }
+
+        val sortOrder = "${MediaStore.MediaColumns.DATE_MODIFIED} DESC"
+        val rows = mutableListOf<Map<String, Any>>()
+        contentResolver.query(
+            uri,
+            projection.toTypedArray(),
+            selection,
+            selectionArgs,
+            sortOrder,
+        )?.use { cursor ->
+            while (cursor.moveToNext()) {
+                val path = cursor.stringOrNull(MediaStore.MediaColumns.DATA)
+                if (path.isNullOrBlank()) continue
+
+                val modifiedSeconds =
+                    cursor.longOrNull(MediaStore.MediaColumns.DATE_MODIFIED)
+                        ?: cursor.longOrNull(MediaStore.MediaColumns.DATE_ADDED)
+                        ?: 0L
+                rows.add(
+                    mapOf(
+                        "path" to path,
+                        "name" to (cursor.stringOrNull(MediaStore.MediaColumns.DISPLAY_NAME) ?: ""),
+                        "mimeType" to (cursor.stringOrNull(MediaStore.MediaColumns.MIME_TYPE) ?: ""),
+                        "size" to (cursor.longOrNull(MediaStore.MediaColumns.SIZE) ?: 0L),
+                        "modifiedMs" to modifiedSeconds * 1000L,
+                    )
+                )
+            }
+        }
+        return rows
+    }
+
+    private fun Cursor.stringOrNull(columnName: String): String? {
+        val index = getColumnIndex(columnName)
+        return if (index >= 0 && !isNull(index)) getString(index) else null
+    }
+
+    private fun Cursor.longOrNull(columnName: String): Long? {
+        val index = getColumnIndex(columnName)
+        return if (index >= 0 && !isNull(index)) getLong(index) else null
     }
 
     private fun getSensorAvailability(): Map<String, Boolean> {

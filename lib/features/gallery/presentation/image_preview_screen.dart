@@ -212,6 +212,8 @@ class _ImagePreviewScreenState extends ConsumerState<ImagePreviewScreen> {
     required CameraState cameraState,
     required OverlayData overlayData,
     required OverlaySettings settings,
+    required bool showOverlay,
+    required bool showWatermark,
   }) {
     // 🔥 OPTIMIZATION: If we are already saving, or have finished this signature,
     // or a timer is already counting down for this EXACT signature, don't restart it.
@@ -227,6 +229,9 @@ class _ImagePreviewScreenState extends ConsumerState<ImagePreviewScreen> {
 
     // Reduced delay from 220ms to 80ms for much more aggressive "instant" feel.
     _prepareSaveTimer = Timer(const Duration(milliseconds: 80), () {
+      if (_scheduledSignature == signature) {
+        _scheduledSignature = null;
+      }
       if (!mounted || _saving) return;
 
       final orientation = _captureOrientation ??
@@ -243,8 +248,8 @@ class _ImagePreviewScreenState extends ConsumerState<ImagePreviewScreen> {
             widget.originalFile,
             orientation,
             overlayData: overlayData,
-            showOverlay: _showOverlay,
-            showWatermark: _showTextWatermark,
+            showOverlay: showOverlay,
+            showWatermark: showWatermark,
             aspectRatio: aspectRatio,
             mirror: mirror,
             settingsOverride: settings,
@@ -298,38 +303,66 @@ class _ImagePreviewScreenState extends ConsumerState<ImagePreviewScreen> {
       settings: settings,
     );
 
+    _prepareSaveTimer?.cancel();
+    _scheduledSignature = null;
+
     // Check if we have a background-prepared future for this specific image state
     final preparedSaveFuture =
         _preparedSaveKey == saveSignature ? _preparedSaveFuture : null;
 
-    final saveFuture = preparedSaveFuture == null
-        ? ref.read(overlayViewModelProvider.notifier).saveCapturedImage(
-              original: widget.originalFile,
-              orientation: orientation,
+    final preparedBytes = preparedSaveFuture ??
+        ref.read(overlayViewModelProvider.notifier).processImage(
+              widget.originalFile,
+              orientation,
               overlayData: overlayData,
               showOverlay: _showOverlay,
               showWatermark: _showTextWatermark,
               aspectRatio: aspectRatio,
               mirror: isMirror,
-            )
-        : ref.read(overlayViewModelProvider.notifier).savePreparedCapturedImage(
+              settingsOverride: settings,
+            );
+
+    final saveFuture =
+        ref.read(overlayViewModelProvider.notifier).savePreparedCapturedImage(
               original: widget.originalFile,
-              preparedBytes: preparedSaveFuture,
+              preparedBytes: preparedBytes,
               overlayData: overlayData,
               settings: settings,
               orientation: orientation,
               showOverlay: _showOverlay,
               showWatermark: _showTextWatermark,
               mirror: isMirror,
+              showRawPlaceholder: false,
             );
 
-    // Give enough time for the "Checkmark" animation to be visible.
-    // Increased to 1100ms to give background processing more time to finish
-    // before the screen pops, ensuring the gallery gets the overlay version instantly.
-    await Future<void>.delayed(const Duration(milliseconds: 1100));
+    try {
+      final results = await Future.wait<Object?>([
+        saveFuture,
+        Future<void>.delayed(const Duration(milliseconds: 500)),
+      ]);
+      final savedFile = results.first as File?;
 
-    if (mounted) {
-      Navigator.of(context).pop(saveFuture);
+      if (!mounted) return;
+      if (savedFile != null) {
+        Navigator.of(context).pop(savedFile);
+        return;
+      }
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text("Failed to save image")),
+      );
+      setState(() {
+        _busyAction = null;
+      });
+    } catch (error) {
+      debugPrint("Save image failed: $error");
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text("Failed to save image")),
+      );
+      setState(() {
+        _busyAction = null;
+      });
     }
   }
 
@@ -450,6 +483,8 @@ class _ImagePreviewScreenState extends ConsumerState<ImagePreviewScreen> {
         cameraState: cameraState,
         overlayData: overlayData,
         settings: settings,
+        showOverlay: _showOverlay,
+        showWatermark: _showTextWatermark,
       );
     });
 
@@ -722,7 +757,7 @@ class _ImagePreviewScreenState extends ConsumerState<ImagePreviewScreen> {
               ),
               SizedBox(width: 14),
               Text(
-                "Background task",
+                "Full-quality save",
                 style: TextStyle(
                   color: Colors.white70,
                   fontWeight: FontWeight.w700,

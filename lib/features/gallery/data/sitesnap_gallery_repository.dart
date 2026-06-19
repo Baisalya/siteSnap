@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_riverpod/legacy.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:path/path.dart' as p;
+import 'package:surveycam/core/services/surveycam_media_store_service.dart';
 import 'package:surveycam/core/utils/gallery_saver.dart';
 
 final galleryRepositoryProvider =
@@ -139,9 +140,25 @@ class GalleryFilesNotifier extends StateNotifier<AsyncValue<List<File>>> {
 }
 
 class SurveyCamGalleryRepository {
+  SurveyCamGalleryRepository({
+    Future<Directory> Function()? localAlbumDirectory,
+    Future<List<File>> Function()? mediaStoreFiles,
+    bool? isAndroid,
+    bool? isIOS,
+  })  : _localAlbumDirectory =
+            localAlbumDirectory ?? GallerySaver.localAlbumDirectory,
+        _mediaStoreFiles =
+            mediaStoreFiles ?? SurveyCamMediaStoreService.listSurveyCamMedia,
+        _isAndroid = isAndroid ?? Platform.isAndroid,
+        _isIOS = isIOS ?? Platform.isIOS;
+
   List<File>? _cachedFiles;
   DateTime? _lastFetchTime;
   final Map<String, File> _optimisticFilesByPath = {};
+  final Future<Directory> Function() _localAlbumDirectory;
+  final Future<List<File>> Function() _mediaStoreFiles;
+  final bool _isAndroid;
+  final bool _isIOS;
 
   List<File>? get cachedFiles =>
       _cachedFiles == null ? null : List<File>.unmodifiable(_cachedFiles!);
@@ -178,6 +195,47 @@ class SurveyCamGalleryRepository {
     return merged;
   }
 
+  bool _isSupportedMediaFile(File file, {required bool isSurveyCamDirectory}) {
+    final path = file.path.toLowerCase();
+    if (!isSurveyCamDirectory) {
+      final name = p.basename(path);
+      if (!name.contains('surveycam')) {
+        return false;
+      }
+    }
+
+    return path.endsWith('.jpg') ||
+        path.endsWith('.jpeg') ||
+        path.endsWith('.png') ||
+        path.endsWith('.mp4') ||
+        path.endsWith('.mov');
+  }
+
+  Future<List<File>> _listFilesInDirectory(Directory directory) async {
+    try {
+      if (!await directory.exists()) return const <File>[];
+
+      final isSurveyCamDirectory =
+          directory.path.toLowerCase().contains('surveycam');
+      final files = <File>[];
+      await for (final entity in directory.list(
+        recursive: isSurveyCamDirectory,
+        followLinks: false,
+      )) {
+        if (entity is File &&
+            _isSupportedMediaFile(
+              entity,
+              isSurveyCamDirectory: isSurveyCamDirectory,
+            )) {
+          files.add(entity);
+        }
+      }
+      return files;
+    } catch (_) {
+      return const <File>[];
+    }
+  }
+
   Future<List<File>> loadImages({bool forceRefresh = false}) async {
     // Return cached results only if they are very fresh (less than 2 seconds old)
     // to prevent redundant disk IO during rapid UI rebuilds.
@@ -189,9 +247,9 @@ class SurveyCamGalleryRepository {
     }
 
     final List<Directory> directories = [];
-    directories.add(await GallerySaver.localAlbumDirectory());
+    directories.add(await _localAlbumDirectory());
 
-    if (Platform.isAndroid) {
+    if (_isAndroid) {
       // ✅ Check common Pictures and Movies folders
       directories.add(Directory('/storage/emulated/0/Pictures/surveycam'));
       directories.add(Directory('/storage/emulated/0/Movies/surveycam'));
@@ -199,55 +257,32 @@ class SurveyCamGalleryRepository {
       // Also check standard DCIM and common camera folders
       directories.add(Directory('/storage/emulated/0/DCIM/surveycam'));
       directories.add(Directory('/storage/emulated/0/DCIM/Camera/surveycam'));
-    } else if (Platform.isIOS) {
+    } else if (_isIOS) {
       final docDir = await getApplicationDocumentsDirectory();
       directories.add(Directory('${docDir.path}/surveycam'));
     }
 
     final Map<String, File> allFilesByName = {};
 
-    // Parallelize directory listing
-    final results = await Future.wait(directories.map((directory) async {
-      try {
-        if (await directory.exists()) {
-          final isSurveyCam =
-              directory.path.toLowerCase().contains('surveycam');
-
-          final List<File> files = [];
-          // Using listSync for faster processing if the directory exists
-          final List<FileSystemEntity> entities =
-              directory.listSync(recursive: isSurveyCam);
-
-          for (var entity in entities) {
-            if (entity is File) {
-              final path = entity.path.toLowerCase();
-              if (!isSurveyCam) {
-                final name = p.basename(path);
-                if (!name.contains('surveycam')) {
-                  continue;
-                }
-              }
-
-              if (path.endsWith('.jpg') ||
-                  path.endsWith('.jpeg') ||
-                  path.endsWith('.png') ||
-                  path.endsWith('.mp4') ||
-                  path.endsWith('.mov')) {
-                files.add(entity);
-              }
-            }
-          }
-          return files;
-        }
-      } catch (e) {
-        // Silently skip
-      }
-      return <File>[];
-    }));
+    final results = await Future.wait(
+      directories.map(_listFilesInDirectory),
+    );
 
     for (var files in results) {
       for (final file in files) {
-        allFilesByName[p.basename(file.path).toLowerCase()] = file;
+        allFilesByName.putIfAbsent(
+          p.basename(file.path).toLowerCase(),
+          () => file,
+        );
+      }
+    }
+
+    if (_isAndroid) {
+      for (final file in await _mediaStoreFiles()) {
+        allFilesByName.putIfAbsent(
+          p.basename(file.path).toLowerCase(),
+          () => file,
+        );
       }
     }
 
