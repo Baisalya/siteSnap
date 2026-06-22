@@ -21,20 +21,51 @@ void startCallback() {
 }
 
 class VideoProcessingTaskHandler extends TaskHandler {
+  // Legacy single-slot key kept so existing pending work can migrate.
   static const String pendingJobKey = 'pending_video_processing_job';
+  static const String pendingJobQueueKey = 'pending_video_processing_jobs';
   static const String pendingImageJobKey = 'pending_image_processing_job';
   static const String lastFailureKey = 'last_video_processing_failure';
   static const String lastImageFailureKey = 'last_image_processing_failure';
   static const String cancelRequestedKey = 'cancel_video_processing_requested';
 
   static bool _isProcessing = false;
-  static String? _lastFailedJobId;
+  static final Set<String> _failedJobIdsThisRun = <String>{};
 
   static Future<bool> hasPendingJob() async {
-    final jobJson = await FlutterForegroundTask.getData<String>(
-      key: pendingJobKey,
+    return (await _loadVideoJobQueue()).isNotEmpty;
+  }
+
+  static Future<VideoProcessingRecoveryReport>
+      preparePendingVideoJobsForRestart({
+    required bool serviceWasRunning,
+  }) async {
+    final queue = await _loadVideoJobQueue();
+    if (queue.isEmpty || serviceWasRunning) {
+      return VideoProcessingRecoveryReport(
+        pendingVideoJobCount: queue.length,
+        interruptedVideoJobCount: 0,
+      );
+    }
+
+    final interruptedCount =
+        VideoProcessingJobRecovery.countUnmarkedInterruptedAttempts(queue);
+    if (interruptedCount == 0) {
+      return VideoProcessingRecoveryReport(
+        pendingVideoJobCount: queue.length,
+        interruptedVideoJobCount: 0,
+      );
+    }
+
+    final recoveredQueue = VideoProcessingJobRecovery.markInterruptedJobs(
+      queue,
+      nowMs: DateTime.now().millisecondsSinceEpoch,
     );
-    return jobJson != null && jobJson.isNotEmpty;
+    await _saveVideoJobQueue(recoveredQueue);
+    return VideoProcessingRecoveryReport(
+      pendingVideoJobCount: recoveredQueue.length,
+      interruptedVideoJobCount: interruptedCount,
+    );
   }
 
   static Future<bool> hasPendingImageJob() async {
@@ -47,11 +78,13 @@ class VideoProcessingTaskHandler extends TaskHandler {
   static Future<void> enqueueJob(VideoProcessingJob job) async {
     await FlutterForegroundTask.removeData(key: lastFailureKey);
     await FlutterForegroundTask.removeData(key: cancelRequestedKey);
-    await FlutterForegroundTask.saveData(
-      key: pendingJobKey,
-      value: jsonEncode(job.toJson()),
-    );
-    _lastFailedJobId = null;
+    final stagedJob = await VideoProcessingJobStorage.stageSegments(job);
+    final queue = await _loadVideoJobQueue();
+    await _saveVideoJobQueue([
+      ...VideoProcessingJobQueue.withoutJob(queue, stagedJob.id),
+      stagedJob,
+    ]);
+    _failedJobIdsThisRun.remove(stagedJob.id);
   }
 
   static Future<void> enqueueImageJob(ImageProcessingJob job) async {
@@ -85,14 +118,20 @@ class VideoProcessingTaskHandler extends TaskHandler {
   }
 
   static Future<void> cancelProcessing() async {
+    final queuedJobs = await _loadVideoJobQueue();
+    await Future.wait(
+      queuedJobs.map(VideoProcessingJobStorage.cleanupJob),
+    );
     await FlutterForegroundTask.saveData(
       key: cancelRequestedKey,
       value: 'true',
     );
     await FlutterForegroundTask.removeData(key: pendingJobKey);
+    await FlutterForegroundTask.removeData(key: pendingJobQueueKey);
     await FlutterForegroundTask.removeData(key: pendingImageJobKey);
     await FlutterForegroundTask.removeData(key: lastFailureKey);
     await FlutterForegroundTask.removeData(key: lastImageFailureKey);
+    _failedJobIdsThisRun.clear();
     await VideoWatermarkProcessor.cancelActiveProcessing();
     await FlutterForegroundTask.updateService(
       notificationTitle: 'SurveyCam - Media processing',
@@ -125,8 +164,78 @@ class VideoProcessingTaskHandler extends TaskHandler {
     return null;
   }
 
+  static Future<List<VideoProcessingJob>> _loadVideoJobQueue() async {
+    final queueJson = await FlutterForegroundTask.getData<String>(
+      key: pendingJobQueueKey,
+    );
+    final legacyJobJson = await FlutterForegroundTask.getData<String>(
+      key: pendingJobKey,
+    );
+    final queue = VideoProcessingJobQueue.decode(
+      queueJson,
+      legacyJobJson: legacyJobJson,
+    );
+
+    if (legacyJobJson != null && legacyJobJson.isNotEmpty) {
+      await _saveVideoJobQueue(queue);
+      await FlutterForegroundTask.removeData(key: pendingJobKey);
+    }
+
+    return queue;
+  }
+
+  static Future<void> _saveVideoJobQueue(
+    List<VideoProcessingJob> queue,
+  ) async {
+    await FlutterForegroundTask.removeData(key: pendingJobKey);
+    if (queue.isEmpty) {
+      await FlutterForegroundTask.removeData(key: pendingJobQueueKey);
+      return;
+    }
+
+    await FlutterForegroundTask.saveData(
+      key: pendingJobQueueKey,
+      value: VideoProcessingJobQueue.encode(queue),
+    );
+  }
+
+  static VideoProcessingJob? _nextRunnableVideoJob(
+    List<VideoProcessingJob> queue,
+  ) {
+    for (final job in queue) {
+      if (!_failedJobIdsThisRun.contains(job.id)) return job;
+    }
+    return null;
+  }
+
+  static Future<void> _completeVideoJob(VideoProcessingJob job) async {
+    final queue = await _loadVideoJobQueue();
+    await _saveVideoJobQueue(
+      VideoProcessingJobQueue.withoutJob(queue, job.id),
+    );
+    _failedJobIdsThisRun.remove(job.id);
+    await VideoProcessingJobStorage.cleanupJob(job);
+  }
+
+  static Future<void> _moveFailedVideoJobToQueueEnd(
+    VideoProcessingJob failedJob,
+  ) async {
+    final queue = await _loadVideoJobQueue();
+    await _saveVideoJobQueue(
+      VideoProcessingJobQueue.moveToEnd(queue, failedJob),
+    );
+  }
+
+  static Future<void> _replaceVideoJob(VideoProcessingJob updatedJob) async {
+    final queue = await _loadVideoJobQueue();
+    await _saveVideoJobQueue(
+      VideoProcessingJobQueue.replaceOrAppend(queue, updatedJob),
+    );
+  }
+
   @override
   Future<void> onStart(DateTime timestamp, TaskStarter starter) async {
+    _failedJobIdsThisRun.clear();
     unawaited(_processPendingJob());
   }
 
@@ -137,7 +246,16 @@ class VideoProcessingTaskHandler extends TaskHandler {
 
   @override
   Future<void> onDestroy(DateTime timestamp, bool isTimeout) async {
-    // Service destroyed
+    if (_isProcessing) {
+      await MediaAuditService.recordFailure(
+        event: 'video_processing_service_destroyed',
+        error: 'Foreground service was destroyed while processing video',
+        details: {
+          'isTimeout': isTimeout,
+          'timestampMs': timestamp.millisecondsSinceEpoch,
+        },
+      );
+    }
   }
 
   @override
@@ -151,13 +269,12 @@ class VideoProcessingTaskHandler extends TaskHandler {
     VideoProcessingJob? job;
     try {
       await _throwIfCancelRequested();
-      final jobJson = await FlutterForegroundTask.getData<String>(
-        key: pendingJobKey,
-      );
+      final videoQueue = await _loadVideoJobQueue();
+      job = _nextRunnableVideoJob(videoQueue);
       final imageJobJson = await FlutterForegroundTask.getData<String>(
         key: pendingImageJobKey,
       );
-      if (jobJson == null || jobJson.isEmpty) {
+      if (job == null) {
         if (_decodeImageJobQueue(imageJobJson).isNotEmpty) {
           _isProcessing = true;
           await _processPendingImageJob(imageJobJson!);
@@ -167,24 +284,17 @@ class VideoProcessingTaskHandler extends TaskHandler {
         return;
       }
 
-      job = VideoProcessingJob.fromJson(
-        Map<String, dynamic>.from(jsonDecode(jobJson) as Map),
-      );
       if (job.segments.isEmpty) {
-        await FlutterForegroundTask.removeData(key: pendingJobKey);
-        await FlutterForegroundTask.stopService();
-        return;
-      }
-      if (_lastFailedJobId == job.id) {
-        _send({
-          'type': 'error',
-          'error': 'Previous video processing attempt failed.',
-        });
-        await FlutterForegroundTask.stopService();
+        await _completeVideoJob(job);
         return;
       }
 
       _isProcessing = true;
+      job = job.copyWith(
+        lastAttemptAtMs: DateTime.now().millisecondsSinceEpoch,
+        lastError: null,
+      );
+      await _replaceVideoJob(job);
       await _progress(
         0.05,
         'Preparing video watermark... 5%',
@@ -334,7 +444,7 @@ class VideoProcessingTaskHandler extends TaskHandler {
         }
       }
 
-      await FlutterForegroundTask.removeData(key: pendingJobKey);
+      await _completeVideoJob(job);
       await FlutterForegroundTask.removeData(key: cancelRequestedKey);
       await _updateNotification(savedWithoutOverlay
           ? 'Video saved without overlay'
@@ -350,7 +460,9 @@ class VideoProcessingTaskHandler extends TaskHandler {
         _stopServiceIfIdle();
       }));
     } on _VideoProcessingCancelledException {
-      await FlutterForegroundTask.removeData(key: pendingJobKey);
+      if (job != null) {
+        await _completeVideoJob(job);
+      }
       await FlutterForegroundTask.removeData(key: cancelRequestedKey);
       _send({
         'type': 'cancelled',
@@ -362,8 +474,24 @@ class VideoProcessingTaskHandler extends TaskHandler {
       }));
     } catch (e, stackTrace) {
       debugPrint('Background video processing error: $e\n$stackTrace');
-      _lastFailedJobId = job?.id;
-      await FlutterForegroundTask.removeData(key: pendingJobKey);
+      if (job != null) {
+        final failedJob = job.copyWith(
+          attemptCount: job.attemptCount + 1,
+          lastAttemptAtMs: DateTime.now().millisecondsSinceEpoch,
+          lastError: e.toString(),
+        );
+        _failedJobIdsThisRun.add(failedJob.id);
+        await _moveFailedVideoJobToQueueEnd(failedJob);
+        await MediaAuditService.recordFailure(
+          event: 'video_processing_job_failed',
+          error: e,
+          details: {
+            'jobId': failedJob.id,
+            'attemptCount': failedJob.attemptCount,
+            'interruptionCount': failedJob.interruptionCount,
+          },
+        );
+      }
       await FlutterForegroundTask.saveData(
         key: lastFailureKey,
         value: e.toString(),
@@ -378,17 +506,16 @@ class VideoProcessingTaskHandler extends TaskHandler {
       }));
     } finally {
       _isProcessing = false;
-      if (await _hasAnyPendingJob()) {
+      if (await _hasRunnablePendingJob()) {
         unawaited(Future.microtask(() => _processPendingJob()));
       }
     }
   }
 
-  Future<bool> _hasAnyPendingJob() async {
-    final videoJobJson = await FlutterForegroundTask.getData<String>(
-      key: pendingJobKey,
-    );
-    if (videoJobJson != null && videoJobJson.isNotEmpty) return true;
+  Future<bool> _hasRunnablePendingJob() async {
+    if (_nextRunnableVideoJob(await _loadVideoJobQueue()) != null) {
+      return true;
+    }
 
     final imageJobJson = await FlutterForegroundTask.getData<String>(
       key: pendingImageJobKey,
@@ -397,7 +524,7 @@ class VideoProcessingTaskHandler extends TaskHandler {
   }
 
   Future<void> _stopServiceIfIdle() async {
-    if (!await _hasAnyPendingJob()) {
+    if (!await _hasRunnablePendingJob()) {
       await FlutterForegroundTask.stopService();
     }
   }
@@ -550,4 +677,16 @@ class VideoProcessingTaskHandler extends TaskHandler {
 
 class _VideoProcessingCancelledException implements Exception {
   const _VideoProcessingCancelledException();
+}
+
+class VideoProcessingRecoveryReport {
+  final int pendingVideoJobCount;
+  final int interruptedVideoJobCount;
+
+  const VideoProcessingRecoveryReport({
+    required this.pendingVideoJobCount,
+    required this.interruptedVideoJobCount,
+  });
+
+  bool get recoveredInterruptedVideo => interruptedVideoJobCount > 0;
 }

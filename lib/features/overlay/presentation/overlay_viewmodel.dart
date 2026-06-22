@@ -70,17 +70,20 @@ class OverlayViewModel extends StateNotifier<void> {
     bool showWatermark = true,
     CameraAspectRatio? aspectRatio,
     bool mirror = false,
+    OverlaySettings? settingsOverride,
   }) async {
     try {
+      final OverlaySettings settings =
+          settingsOverride ?? ref.read(overlaySettingsProvider);
+      final projectId = ref.read(projectProvider).activeProjectId;
+
       ref.read(lastImageProvider.notifier).state = original;
       ref.read(galleryFilesProvider.notifier).showFileImmediately(original);
       ref.read(galleryProcessingProvider.notifier).start(original);
       await ref
           .read(projectProvider.notifier)
-          .assignFileToActiveProject(original);
+          .assignFileToProject(original, projectId: projectId);
 
-      final settings = ref.read(overlaySettingsProvider);
-      final projectId = ref.read(projectProvider).activeProjectId;
       final now = DateTime.now();
       await VideoProcessingTaskHandler.enqueueImageJob(
         ImageProcessingJob(

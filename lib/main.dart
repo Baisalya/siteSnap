@@ -5,10 +5,9 @@ import 'package:flutter_foreground_task/flutter_foreground_task.dart';
 import 'package:intl/date_symbol_data_local.dart';
 import 'app.dart';
 
-
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
-  
+
   await initializeDateFormatting();
 
   // Initialize foreground task early to avoid engine attachment crashes
@@ -26,7 +25,8 @@ void main() async {
     ),
     foregroundTaskOptions: ForegroundTaskOptions(
       eventAction: ForegroundTaskEventAction.repeat(5000),
-      autoRunOnBoot: false,
+      autoRunOnBoot: true,
+      autoRunOnMyPackageReplaced: true,
       allowWakeLock: true,
       allowWifiLock: true,
     ),
@@ -35,7 +35,6 @@ void main() async {
   SystemChrome.setPreferredOrientations([
     DeviceOrientation.portraitUp,
   ]);
-
 
   runApp(
     const ProviderScope(

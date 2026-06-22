@@ -9,7 +9,9 @@ import 'package:surveycam/core/di/providers.dart';
 import 'package:surveycam/core/permissions/permission_service.dart';
 import 'package:surveycam/core/utils/device_orientation_provider.dart';
 import 'package:flutter_foreground_task/flutter_foreground_task.dart';
+import 'package:surveycam/core/services/app_exit_info_service.dart';
 import 'package:surveycam/core/services/background_video_task.dart';
+import 'package:surveycam/core/services/media_audit_service.dart';
 import 'package:surveycam/core/services/video_processing_job.dart';
 import 'package:surveycam/core/utils/gallery_saver.dart';
 import 'package:surveycam/features/camera/data/CameraState.dart';
@@ -23,6 +25,7 @@ import 'package:surveycam/features/overlay/domain/overlay_model.dart';
 import 'package:surveycam/features/overlay/domain/overlay_settings.dart';
 import 'package:surveycam/features/overlay/presentation/captured_overlay_provider.dart';
 import 'package:surveycam/features/overlay/presentation/overlay_preview_state.dart';
+import 'package:surveycam/features/overlay/presentation/overlay_viewmodel.dart';
 import 'package:surveycam/features/gallery/data/sitesnap_gallery_repository.dart';
 import 'package:surveycam/features/overlay/domain/video_overlay_sample.dart';
 import 'package:surveycam/features/projects/presentation/project_provider.dart';
@@ -69,7 +72,7 @@ class CameraViewModel extends StateNotifier<CameraState>
       overlaySettingsProvider,
       (_, __) => _recordCurrentVideoOverlaySample(),
     );
-    
+
     // Defer initialization work to avoid blocking the main thread during constructor execution (ANR prevention)
     Future.microtask(() {
       if (mounted) {
@@ -410,6 +413,7 @@ class CameraViewModel extends StateNotifier<CameraState>
       } else {
         await initialize();
       }
+      unawaited(_resumePendingVideoProcessing());
     }
   }
 
@@ -810,6 +814,70 @@ class CameraViewModel extends StateNotifier<CameraState>
     }
   }
 
+  Future<bool> capturePhotoDuringRecording() async {
+    final controller = state.controller;
+
+    if (!state.isRecording ||
+        !state.isReady ||
+        controller == null ||
+        !controller.value.isInitialized ||
+        controller.value.isTakingPicture ||
+        state.isCapturing ||
+        _captureInFlight ||
+        _stopRecordingInFlight) {
+      return false;
+    }
+
+    _captureInFlight = true;
+    unawaited(HapticFeedback.mediumImpact());
+
+    final overlayData = ref.read(overlayPreviewProvider);
+    ref.read(capturedOverlayProvider.notifier).state = overlayData;
+    final overlaySettings = ref.read(overlaySettingsProvider);
+    final deviceOrientation = ref.read(deviceOrientationProvider);
+    final captureLens = state.currentLens;
+    final aspectRatio = state.aspectRatio;
+
+    state = state.copyWith(
+      isCapturing: true,
+      captureOrientation: deviceOrientation,
+      captureLens: captureLens,
+    );
+
+    try {
+      final repo = ref.read(cameraRepositoryProvider);
+      final path = await repo.takePicture().timeout(_photoCaptureTimeout);
+      final originalFile = File(path);
+
+      await ref.read(overlayViewModelProvider.notifier).saveCapturedImage(
+            original: originalFile,
+            orientation: deviceOrientation,
+            overlayData: overlayData,
+            showOverlay: true,
+            showWatermark: true,
+            aspectRatio: aspectRatio,
+            mirror: captureLens == CameraLensType.front,
+            settingsOverride: overlaySettings,
+          );
+
+      unawaited(HapticFeedback.lightImpact());
+      return true;
+    } on TimeoutException catch (e) {
+      debugPrint('Recording photo capture timeout: $e');
+      return false;
+    } catch (e) {
+      debugPrint('Recording photo capture error: $e');
+      if (e.toString().contains('CameraException')) {
+        debugPrint(
+            "Recording photo capture hit a camera exception. Video recording was left untouched.");
+      }
+      return false;
+    } finally {
+      _captureInFlight = false;
+      state = state.copyWith(isCapturing: false);
+    }
+  }
+
   Future<void> _prepareSmartPhotoExposure(CameraController controller) async {
     try {
       if (!controller.value.isInitialized) return;
@@ -1021,6 +1089,7 @@ class CameraViewModel extends StateNotifier<CameraState>
     }
 
     _stopRecordingInFlight = true;
+    var jobQueuedForProcessing = false;
     try {
       final repo = ref.read(cameraRepositoryProvider);
       _videoHistoryTimer?.cancel();
@@ -1089,6 +1158,7 @@ class CameraViewModel extends StateNotifier<CameraState>
       );
 
       await VideoProcessingTaskHandler.enqueueJob(job);
+      jobQueuedForProcessing = true;
       await _startForegroundService();
 
       state = state.copyWith(
@@ -1105,14 +1175,18 @@ class CameraViewModel extends StateNotifier<CameraState>
         clearProcessingProgress: true,
         videoSegments: [],
         videoSequenceDir: null,
-        processingMessage: 'Video recording failed.',
+        processingMessage: jobQueuedForProcessing
+            ? 'Video queued for processing.'
+            : 'Video recording failed.',
         videoProcessingError: friendlyError,
       );
       _videoHistoryTimer?.cancel();
       _videoHistoryTimer = null;
       _videoDataHistory.clear();
       _recordingStartTime = null;
-      await FlutterForegroundTask.stopService();
+      if (!jobQueuedForProcessing) {
+        await FlutterForegroundTask.stopService();
+      }
       if (_isNativeCameraNullPointer(e)) {
         unawaited(refreshCamera());
       }
@@ -1135,18 +1209,30 @@ class CameraViewModel extends StateNotifier<CameraState>
     // 1. Core initialization is now in main.dart to ensure it's called early and once.
 
     final isRunning = await FlutterForegroundTask.isRunningService;
+    final ServiceRequestResult result;
     if (isRunning) {
-      await FlutterForegroundTask.updateService(
+      result = await FlutterForegroundTask.updateService(
         notificationTitle: 'SurveyCam - Media processing',
         notificationText: 'Preparing media...',
         callback: startCallback,
       );
     } else {
-      await FlutterForegroundTask.startService(
+      result = await FlutterForegroundTask.startService(
+        serviceTypes: const [ForegroundServiceTypes.mediaProcessing],
         notificationTitle: 'SurveyCam - Media processing',
         notificationText: 'Preparing media...',
         callback: startCallback,
       );
+    }
+
+    if (result is ServiceRequestFailure) {
+      await MediaAuditService.recordFailure(
+        event: 'video_processing_service_start_failed',
+        error: result.error,
+        details: {'wasRunning': isRunning},
+      );
+      throw Exception(
+          'Video processing service failed to start: ${result.error}');
     }
   }
 
@@ -1168,18 +1254,60 @@ class CameraViewModel extends StateNotifier<CameraState>
         debugPrint('Pending photo save failed: $previousImageFailure');
       }
 
-      if (await VideoProcessingTaskHandler.hasPendingJob()) {
+      final hasPendingVideo = await VideoProcessingTaskHandler.hasPendingJob();
+      final hasPendingImage =
+          await VideoProcessingTaskHandler.hasPendingImageJob();
+      if (!hasPendingVideo && !hasPendingImage) return;
+
+      final serviceWasRunning = await FlutterForegroundTask.isRunningService;
+      if (hasPendingVideo) {
+        final recoveryReport =
+            await VideoProcessingTaskHandler.preparePendingVideoJobsForRestart(
+          serviceWasRunning: serviceWasRunning,
+        );
+        if (!serviceWasRunning && recoveryReport.recoveredInterruptedVideo) {
+          final exitInfo = await AppExitInfoService.getLastExitInfo();
+          await MediaAuditService.recordFailure(
+            event: 'video_processing_recovery_started',
+            error: exitInfo?.wasUserRequestedStop == true
+                ? 'Previous processing was stopped by Android/user request'
+                : 'Previous processing ended before completion',
+            details: {
+              'pendingVideoJobCount': recoveryReport.pendingVideoJobCount,
+              'interruptedVideoJobCount':
+                  recoveryReport.interruptedVideoJobCount,
+              ...?exitInfo?.toDiagnostics(),
+            },
+          );
+        }
+
+        final message = recoveryReport.recoveredInterruptedVideo
+            ? 'Recovering interrupted video processing...'
+            : serviceWasRunning
+                ? 'Video processing continues in background...'
+                : 'Resuming video processing...';
         state = state.copyWith(
-          processingProgress: 0.05,
-          processingMessage: 'Resuming video processing...',
+          processingProgress: state.processingProgress ?? 0.05,
+          processingMessage: message,
           videoProcessingError: null,
         );
         await _startForegroundService();
-      } else if (await VideoProcessingTaskHandler.hasPendingImageJob()) {
+      } else if (hasPendingImage) {
         await _startForegroundService();
       }
     } catch (e) {
       debugPrint('Pending video resume skipped: $e');
+      await MediaAuditService.recordFailure(
+        event: 'video_processing_recovery_start_failed',
+        error: e,
+      );
+      if (!mounted) return;
+      state = state.copyWith(
+        clearProcessingProgress: true,
+        processingMessage:
+            'Video is queued and will retry when background processing starts.',
+        videoProcessingError: _friendlyVideoError(e),
+      );
     }
   }
 

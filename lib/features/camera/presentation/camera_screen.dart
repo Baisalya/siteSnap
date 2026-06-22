@@ -1103,7 +1103,9 @@ class _CameraScreenState extends ConsumerState<CameraScreen>
                               mainAxisSize: MainAxisSize.min,
                               children: [
                                 CaptureButton(
-                                  isRecording: cameraState.isRecording,
+                                  isRecording: cameraState.isRecording &&
+                                      cameraState.cameraMode ==
+                                          CameraMode.video,
                                   mode: cameraState.cameraMode,
                                   onCapture: () async {
                                     if (!cameraState.isReady) {
@@ -1148,6 +1150,34 @@ class _CameraScreenState extends ConsumerState<CameraScreen>
                                             "Recording could not start. Please wait a moment and try again.",
                                           );
                                         }
+                                      }
+                                      return;
+                                    }
+
+                                    if (cameraState.isRecording) {
+                                      _startPhotoCapture();
+                                      unawaited(SystemSound.play(
+                                          SystemSoundType.click));
+                                      unawaited(HapticFeedback.mediumImpact());
+
+                                      try {
+                                        final saved = await cameraVM
+                                            .capturePhotoDuringRecording();
+                                        if (saved) {
+                                          _showPhotoCapturedFeedback();
+                                          _showCameraSnack(
+                                            "Photo saved. Applying watermark...",
+                                          );
+                                        } else {
+                                          _finishPhotoCapture();
+                                          _showCameraSnack(
+                                            "Photo could not be captured while recording. Please try again.",
+                                          );
+                                        }
+                                      } catch (e) {
+                                        debugPrint(
+                                            "Recording photo capture error: $e");
+                                        _finishPhotoCapture();
                                       }
                                       return;
                                     }

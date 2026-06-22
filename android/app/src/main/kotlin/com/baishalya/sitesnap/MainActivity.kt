@@ -1,5 +1,6 @@
 package com.baishalya.surveycam
 
+import android.app.ActivityManager
 import android.content.Context
 import android.database.Cursor
 import android.hardware.Sensor
@@ -32,8 +33,51 @@ class MainActivity : FlutterActivity() {
                 "getSensorAvailability" -> result.success(getSensorAvailability())
                 "readEnvironment" -> readEnvironmentSensors(result)
                 "listSurveyCamMedia" -> result.success(listSurveyCamMedia())
+                "getLastAppExitInfo" -> result.success(getLastAppExitInfo())
                 else -> result.notImplemented()
             }
+        }
+    }
+
+    private fun getLastAppExitInfo(): Map<String, Any?>? {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.R) return null
+
+        return try {
+            val activityManager = getSystemService(Context.ACTIVITY_SERVICE) as ActivityManager
+            val exitInfo = activityManager
+                .getHistoricalProcessExitReasons(packageName, 0, 1)
+                .firstOrNull()
+                ?: return null
+
+            mapOf(
+                "reason" to exitInfo.reason,
+                "reasonName" to appExitReasonName(exitInfo.reason),
+                "timestampMs" to exitInfo.timestamp,
+                "importance" to exitInfo.importance,
+                "description" to (exitInfo.description ?: ""),
+            )
+        } catch (_: Exception) {
+            null
+        }
+    }
+
+    private fun appExitReasonName(reason: Int): String {
+        return when (reason) {
+            1 -> "exit_self"
+            2 -> "signaled"
+            3 -> "low_memory"
+            4 -> "crash"
+            5 -> "crash_native"
+            6 -> "anr"
+            7 -> "initialization_failure"
+            8 -> "permission_change"
+            9 -> "excessive_resource_usage"
+            10 -> "user_requested"
+            11 -> "user_stopped"
+            12 -> "dependency_died"
+            13 -> "other"
+            14 -> "freezer"
+            else -> "unknown"
         }
     }
 
