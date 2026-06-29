@@ -671,7 +671,11 @@ class VideoProcessingTaskHandler extends TaskHandler {
   }
 
   void _send(Map<String, dynamic> message) {
-    FlutterForegroundTask.sendDataToMain(message);
+    try {
+      FlutterForegroundTask.sendDataToMain(message);
+    } catch (e) {
+      debugPrint('Error sending data to main: $e');
+    }
   }
 }
 

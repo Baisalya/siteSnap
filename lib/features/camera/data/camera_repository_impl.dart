@@ -35,8 +35,8 @@ class CameraRepositoryImpl implements CameraRepository {
       } catch (e) {
         debugPrint("Cleanup of old controller failed: $e");
       }
-      // Reduced breathing room for the OS/Driver to release resources
-      await Future.delayed(const Duration(milliseconds: 100));
+      // Increased breathing room for the OS/Driver to release resources
+      await Future.delayed(const Duration(milliseconds: 300));
     }
 
     // 3. Initialize with Retry Logic
@@ -118,6 +118,7 @@ class CameraRepositoryImpl implements CameraRepository {
       ResolutionPreset.ultraHigh,
       ResolutionPreset.veryHigh,
       ResolutionPreset.high,
+      ResolutionPreset.medium,
     ];
 
     Object? lastError;
@@ -196,7 +197,12 @@ class CameraRepositoryImpl implements CameraRepository {
         controller.value.isRecordingVideo) {
       return;
     }
-    await controller.startVideoRecording();
+    try {
+      await controller.startVideoRecording();
+    } catch (e) {
+      debugPrint("Error starting video recording: $e");
+      rethrow;
+    }
   }
 
   @override
@@ -207,7 +213,12 @@ class CameraRepositoryImpl implements CameraRepository {
         !controller.value.isRecordingVideo) {
       throw Exception("No recording in progress");
     }
-    return await controller.stopVideoRecording();
+    try {
+      return await controller.stopVideoRecording();
+    } catch (e) {
+      debugPrint("Error stopping video recording: $e");
+      rethrow;
+    }
   }
 
   Future<void> switchLens(CameraLensType type) async {

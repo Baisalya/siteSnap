@@ -89,6 +89,9 @@ class LiveOverlayPainter extends CustomPainter {
 
     if (placeLine.isNotEmpty) {
       spans.add(TextSpan(text: "$placeLine\n", style: noteStyle));
+    } else if (extraNote.isNotEmpty) {
+      // Keep Line 1 space even if empty, so Line 2 doesn't shift up
+      spans.add(TextSpan(text: "\n", style: noteStyle));
     }
 
     if (settings.showDateTime && data.dateTime.isNotEmpty) {

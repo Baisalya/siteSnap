@@ -77,7 +77,6 @@ class CameraViewModel extends StateNotifier<CameraState>
     Future.microtask(() {
       if (mounted) {
         _initBackgroundService();
-        unawaited(_resumePendingVideoProcessing());
       }
     });
     // Removed automatic initialize() to allow manual/early trigger
@@ -89,6 +88,7 @@ class CameraViewModel extends StateNotifier<CameraState>
   }
 
   void _onReceiveTaskData(dynamic message) {
+    if (!mounted) return;
     if (message is Map<String, dynamic>) {
       if (message['type'] == 'progress') {
         state = state.copyWith(
@@ -179,6 +179,10 @@ class CameraViewModel extends StateNotifier<CameraState>
 
     try {
       await PermissionService.requestCameraAndMicrophone();
+
+      // Resume pending video processing ONLY when camera is initialized and UI is ready
+      // This avoids blocking the splash screen during app launch
+      unawaited(_resumePendingVideoProcessing());
 
       final repo = ref.read(cameraRepositoryProvider);
 
@@ -365,7 +369,8 @@ class CameraViewModel extends StateNotifier<CameraState>
                   appState == AppLifecycleState.hidden) &&
               this.state.isRecording) {
             await stopVideoRecordingInBackground();
-            return;
+            // Allow some time for stop to finalize before repository disposal
+            await Future.delayed(const Duration(milliseconds: 200));
           }
 
           // Soft quench flash immediately
@@ -373,21 +378,16 @@ class CameraViewModel extends StateNotifier<CameraState>
 
           if (appState == AppLifecycleState.paused ||
               appState == AppLifecycleState.hidden) {
-            // 🔥 INSTAGRAM-STYLE OPTIMIZATION:
-            // Instead of fully disposing, we only pause the preview.
-            // This keeps the hardware "warmed up" and the OS session alive
-            // so resuming is near-instant.
-            try {
-              await controller.pausePreview();
-              debugPrint("Camera preview paused for backgrounding.");
-            } catch (e) {
-              debugPrint("Error pausing preview: $e. Falling back to dispose.");
-              _isDisposing = true;
-              await ref.read(cameraRepositoryProvider).dispose();
-              this.state =
-                  this.state.copyWith(clearController: true, isReady: false);
-              _isDisposing = false;
-            }
+            // 🔥 SAFETY OVER OPTIMIZATION:
+            // Fully dispose the controller when backgrounding.
+            // Keeping the hardware "warmed up" can lead to AssertionError in CameraX
+            // if the session state gets desynced on resume.
+            _isDisposing = true;
+            await ref.read(cameraRepositoryProvider).dispose();
+            this.state =
+                this.state.copyWith(clearController: true, isReady: false);
+            _isDisposing = false;
+            debugPrint("Camera disposed for backgrounding.");
           }
         }
       } catch (e) {
@@ -396,24 +396,8 @@ class CameraViewModel extends StateNotifier<CameraState>
     }
 
     if (appState == AppLifecycleState.resumed) {
-      final controller = this.state.controller;
-      if (controller != null && controller.value.isInitialized) {
-        try {
-          await controller.resumePreview();
-          // Health check: verify hardware session is still valid after resume
-          await controller.getMinZoomLevel();
-          debugPrint("Camera preview resumed and verified.");
-          // 🔥 Nudge the UI to rebuild the texture surface
-          this.state = this.state.copyWith();
-        } catch (e) {
-          debugPrint(
-              "Instant resume or health check failed: $e. Re-initializing...");
-          await initialize();
-        }
-      } else {
-        await initialize();
-      }
-      unawaited(_resumePendingVideoProcessing());
+      // Re-initialize from scratch on resume to ensure fresh session
+      await initialize();
     }
   }
 
@@ -1085,6 +1069,13 @@ class CameraViewModel extends StateNotifier<CameraState>
         !controller.value.isInitialized ||
         !state.isRecording ||
         _stopRecordingInFlight) {
+      return;
+    }
+
+    // Prevent rapid stop after start (min 1 second recording)
+    if (_recordingStartTime != null &&
+        DateTime.now().difference(_recordingStartTime!).inMilliseconds < 1000) {
+      debugPrint("Preventing rapid stop: recording too short");
       return;
     }
 

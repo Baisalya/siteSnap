@@ -1,5 +1,7 @@
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_riverpod/legacy.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:surveycam/features/overlay/presentation/overlay_preview_state.dart';
 
 class CameraSettings {
   final bool autoFetchLocation;
@@ -22,7 +24,8 @@ class CameraSettings {
 }
 
 class CameraSettingsNotifier extends StateNotifier<CameraSettings> {
-  CameraSettingsNotifier() : super(CameraSettings()) {
+  final Ref ref;
+  CameraSettingsNotifier(this.ref) : super(CameraSettings()) {
     _loadSettings();
   }
 
@@ -40,6 +43,21 @@ class CameraSettingsNotifier extends StateNotifier<CameraSettings> {
     state = state.copyWith(autoFetchLocation: value);
     final prefs = await SharedPreferences.getInstance();
     await prefs.setBool('auto_fetch_location', value);
+
+    if (!value) {
+      // Clear location line from watermark
+      final overlay = ref.read(overlayPreviewProvider);
+      final currentNote = overlay.note;
+
+      // Extract only the extra note (Line 2)
+      final lines = currentNote.split(RegExp(r'\r?\n'));
+      final extraNote =
+          lines.length <= 1 ? '' : lines.skip(1).join('\n').trim();
+
+      // Set note to just the extra note (preserving the separate line status)
+      ref.read(overlayPreviewProvider.notifier).state = overlay.copyWith(
+          note: extraNote.isEmpty ? '' : "\n$extraNote");
+    }
   }
 
   Future<void> setMirrorFrontVideo(bool value) async {
@@ -51,5 +69,5 @@ class CameraSettingsNotifier extends StateNotifier<CameraSettings> {
 
 final cameraSettingsProvider =
     StateNotifierProvider<CameraSettingsNotifier, CameraSettings>((ref) {
-  return CameraSettingsNotifier();
+  return CameraSettingsNotifier(ref);
 });

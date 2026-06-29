@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:surveycam/core/services/location_service.dart';
+import 'package:surveycam/features/camera/presentation/camera_settings_provider.dart';
 import 'package:surveycam/features/overlay/domain/WatermarkPosition.dart';
 import 'package:surveycam/features/overlay/domain/overlay_settings.dart';
 import 'package:surveycam/features/overlay/presentation/overlay_preview_state.dart';
@@ -26,8 +27,10 @@ class _NoteInputSheetState extends ConsumerState<NoteInputSheet> {
     super.initState();
     // Initialize with current note if exists
     final currentNote = ref.read(overlayPreviewProvider).note;
+    final autoFetch = ref.read(cameraSettingsProvider).autoFetchLocation;
+
     locationController = TextEditingController(
-      text: _locationLineFromWatermark(currentNote),
+      text: autoFetch ? _locationLineFromWatermark(currentNote) : '',
     );
     extraNoteController = TextEditingController(
       text: _extraNoteFromWatermark(currentNote),
@@ -51,13 +54,13 @@ class _NoteInputSheetState extends ConsumerState<NoteInputSheet> {
   }
 
   String _locationLineFromWatermark(String value) {
-    final normalized = value.trim();
-    if (normalized.isEmpty) return '';
-    return normalized.split(RegExp(r'\r?\n')).first.trim();
+    if (value.isEmpty) return '';
+    final lines = value.split(RegExp(r'\r?\n'));
+    return lines.isEmpty ? '' : lines.first.trim();
   }
 
   String _extraNoteFromWatermark(String value) {
-    final lines = value.trim().split(RegExp(r'\r?\n'));
+    final lines = value.split(RegExp(r'\r?\n'));
     if (lines.length <= 1) return '';
     return lines.skip(1).join('\n').trim();
   }
@@ -76,8 +79,8 @@ class _NoteInputSheetState extends ConsumerState<NoteInputSheet> {
     final location = locationController.text.trim();
     final extraNote = extraNoteController.text.trim();
 
-    if (location.isEmpty) return extraNote;
     if (extraNote.isEmpty) return location;
+    // Always separate with a newline if Line 2 exists, even if Line 1 is empty
     return "$location\n$extraNote";
   }
 
@@ -88,6 +91,16 @@ class _NoteInputSheetState extends ConsumerState<NoteInputSheet> {
       overlayPreviewProvider.select((value) => value.position),
     );
     final overlaySettings = ref.watch(overlaySettingsProvider);
+
+    ref.listen(cameraSettingsProvider, (previous, next) {
+      if (previous?.autoFetchLocation == true &&
+          next.autoFetchLocation == false) {
+        locationController.clear();
+        final overlay = ref.read(overlayPreviewProvider);
+        ref.read(overlayPreviewProvider.notifier).state =
+            overlay.copyWith(note: _composeWatermarkText());
+      }
+    });
 
     final recent = notes.take(3).toList();
     final allNotes = notes;
@@ -257,6 +270,18 @@ class _NoteInputSheetState extends ConsumerState<NoteInputSheet> {
     );
   }
 
+  Future<void> _openOverlaySettingsAndScrollToLocation(
+      BuildContext context) async {
+    await Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) => const OverlayConfigurationScreen(
+          scrollToLocationToggle: true,
+        ),
+      ),
+    );
+  }
+
   Future<void> _openBrandSettings(
     BuildContext context, {
     int? initialSlot,
@@ -327,6 +352,9 @@ class _NoteInputSheetState extends ConsumerState<NoteInputSheet> {
   }
 
   Widget _buildSearchInput(BuildContext context) {
+    final cameraSettings = ref.watch(cameraSettingsProvider);
+    final autoFetchEnabled = cameraSettings.autoFetchLocation;
+
     return Container(
       padding: const EdgeInsets.all(14),
       decoration: BoxDecoration(
@@ -341,24 +369,31 @@ class _NoteInputSheetState extends ConsumerState<NoteInputSheet> {
           const SizedBox(height: 8),
           TextField(
             controller: locationController,
-            style: const TextStyle(color: Colors.white, fontSize: 15),
+            enabled: autoFetchEnabled,
+            style: TextStyle(
+              color: autoFetchEnabled ? Colors.white : Colors.white24,
+              fontSize: 15,
+            ),
             decoration: InputDecoration(
               hintText: 'Edit location text or tap button to auto-fill',
               hintStyle: const TextStyle(color: Colors.white24),
-              prefixIcon: const Icon(
+              prefixIcon: Icon(
                 Icons.place_outlined,
-                color: Colors.blueAccent,
+                color: autoFetchEnabled ? Colors.blueAccent : Colors.white12,
                 size: 22,
               ),
               suffixIcon: IconButton(
-                icon: const Icon(
+                icon: Icon(
                   Icons.my_location_rounded,
-                  color: Colors.blueAccent,
+                  color: autoFetchEnabled ? Colors.blueAccent : Colors.white12,
                 ),
                 style: IconButton.styleFrom(
-                  backgroundColor: Colors.blueAccent.withOpacity(0.1),
+                  backgroundColor: autoFetchEnabled
+                      ? Colors.blueAccent.withOpacity(0.1)
+                      : Colors.transparent,
                 ),
-                onPressed: () => _fetchLocation(context),
+                onPressed:
+                    autoFetchEnabled ? () => _fetchLocation(context) : null,
               ),
               filled: true,
               fillColor: Colors.black.withOpacity(0.18),
@@ -370,6 +405,10 @@ class _NoteInputSheetState extends ConsumerState<NoteInputSheet> {
                   const EdgeInsets.symmetric(horizontal: 12, vertical: 14),
             ),
           ),
+          if (!autoFetchEnabled) ...[
+            const SizedBox(height: 10),
+            _buildDisabledLocationInfo(context),
+          ],
           const SizedBox(height: 14),
           _buildInputCaption("LINE 2 - EXTRA NOTE"),
           const SizedBox(height: 8),
@@ -419,6 +458,43 @@ class _NoteInputSheetState extends ConsumerState<NoteInputSheet> {
             ),
           ),
         ],
+      ),
+    );
+  }
+
+  Widget _buildDisabledLocationInfo(BuildContext context) {
+    return InkWell(
+      onTap: () => _openOverlaySettingsAndScrollToLocation(context),
+      borderRadius: BorderRadius.circular(8),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(vertical: 4),
+        child: Row(
+          children: [
+            const Icon(Icons.info_outline, size: 14, color: Colors.amberAccent),
+            const SizedBox(width: 8),
+            const Expanded(
+              child: Text(
+                "Intelligent Location is disabled. Enable it in settings to edit this line.",
+                style: TextStyle(color: Colors.amberAccent, fontSize: 11),
+              ),
+            ),
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+              decoration: BoxDecoration(
+                color: Colors.blueAccent.withOpacity(0.1),
+                borderRadius: BorderRadius.circular(6),
+              ),
+              child: const Text(
+                "Go to Settings",
+                style: TextStyle(
+                  color: Colors.blueAccent,
+                  fontSize: 11,
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }

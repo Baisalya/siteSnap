@@ -17,10 +17,12 @@ class OverlayConfigurationScreen extends ConsumerStatefulWidget {
     super.key,
     this.focusBrandWatermark = false,
     this.initialWatermarkSlot,
+    this.scrollToLocationToggle = false,
   });
 
   final bool focusBrandWatermark;
   final int? initialWatermarkSlot;
+  final bool scrollToLocationToggle;
 
   @override
   ConsumerState<OverlayConfigurationScreen> createState() =>
@@ -36,6 +38,7 @@ class _OverlayConfigurationScreenState
   int? _pendingWatermarkTextSlot;
   String? _pendingWatermarkTextValue;
   final _brandWatermarkKey = GlobalKey();
+  final _intelligentLocationKey = GlobalKey();
 
   @override
   void initState() {
@@ -48,23 +51,40 @@ class _OverlayConfigurationScreenState
     _watermarkTextController = TextEditingController(
       text: _watermarkTextForSlot(initialSettings, initialSlot),
     );
-    if (widget.focusBrandWatermark) {
+    if (widget.focusBrandWatermark || widget.scrollToLocationToggle) {
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (!mounted) return;
-        final initialSlot = widget.initialWatermarkSlot;
-        if (initialSlot != null) {
-          ref
-              .read(overlaySettingsProvider.notifier)
-              .setWatermarkPresetIndex(initialSlot);
+        
+        if (widget.focusBrandWatermark) {
+          final initialSlot = widget.initialWatermarkSlot;
+          if (initialSlot != null) {
+            ref
+                .read(overlaySettingsProvider.notifier)
+                .setWatermarkPresetIndex(initialSlot);
+          }
+          final context = _brandWatermarkKey.currentContext;
+          if (context != null) {
+            Scrollable.ensureVisible(
+              context,
+              duration: const Duration(milliseconds: 320),
+              curve: Curves.easeOutCubic,
+              alignment: 0.08,
+            );
+            return; // Don't scroll twice
+          }
         }
-        final context = _brandWatermarkKey.currentContext;
-        if (context == null) return;
-        Scrollable.ensureVisible(
-          context,
-          duration: const Duration(milliseconds: 320),
-          curve: Curves.easeOutCubic,
-          alignment: 0.08,
-        );
+
+        if (widget.scrollToLocationToggle) {
+          final context = _intelligentLocationKey.currentContext;
+          if (context != null) {
+            Scrollable.ensureVisible(
+              context,
+              duration: const Duration(milliseconds: 320),
+              curve: Curves.easeOutCubic,
+              alignment: 0.5, // Center it more
+            );
+          }
+        }
       });
     }
   }
@@ -882,6 +902,7 @@ class _OverlayConfigurationScreenState
     final settings = ref.watch(cameraSettingsProvider);
 
     return _buildToggleRow(
+      key: _intelligentLocationKey,
       icon: Icons.auto_awesome_rounded,
       iconColor: Colors.blueAccent,
       title: "Intelligent Location",
@@ -907,6 +928,7 @@ class _OverlayConfigurationScreenState
   }
 
   Widget _buildToggleRow({
+    Key? key,
     required IconData icon,
     required Color iconColor,
     required String title,
@@ -916,6 +938,7 @@ class _OverlayConfigurationScreenState
     required ValueChanged<bool> onChanged,
   }) {
     return Container(
+      key: key,
       padding: const EdgeInsets.all(12),
       decoration: BoxDecoration(
         color: iconColor.withValues(alpha: 0.05),
