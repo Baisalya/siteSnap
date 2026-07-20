@@ -14,29 +14,51 @@ import android.os.Looper
 import android.provider.MediaStore
 import io.flutter.embedding.android.FlutterActivity
 import io.flutter.embedding.engine.FlutterEngine
-import io.flutter.plugins.GeneratedPluginRegistrant
 import io.flutter.plugin.common.MethodChannel
 
 class MainActivity : FlutterActivity() {
     private val localEnvironmentChannel = "surveycam/local_environment"
     private val sensorReadTimeoutMs = 1200L
+    private val sensorHandler = Handler(Looper.getMainLooper())
+    private val activeSensorListeners = mutableSetOf<SensorEventListener>()
+    private var engineGeneration = 0
+    private var engineAttached = false
+    private var methodChannel: MethodChannel? = null
 
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
-        GeneratedPluginRegistrant.registerWith(flutterEngine)
-
-        MethodChannel(
+        engineAttached = true
+        engineGeneration++
+        methodChannel = MethodChannel(
             flutterEngine.dartExecutor.binaryMessenger,
             localEnvironmentChannel
-        ).setMethodCallHandler { call, result ->
-            when (call.method) {
-                "getSensorAvailability" -> result.success(getSensorAvailability())
-                "readEnvironment" -> readEnvironmentSensors(result)
-                "listSurveyCamMedia" -> result.success(listSurveyCamMedia())
-                "getLastAppExitInfo" -> result.success(getLastAppExitInfo())
-                else -> result.notImplemented()
+        ).also { channel ->
+            channel.setMethodCallHandler { call, result ->
+                when (call.method) {
+                    "getSensorAvailability" -> result.success(getSensorAvailability())
+                    "readEnvironment" -> readEnvironmentSensors(result)
+                    "listSurveyCamMedia" -> result.success(listSurveyCamMedia())
+                    "getLastAppExitInfo" -> result.success(getLastAppExitInfo())
+                    else -> result.notImplemented()
+                }
             }
         }
+    }
+
+    override fun cleanUpFlutterEngine(flutterEngine: FlutterEngine) {
+        // Sensor reads complete asynchronously. Do not let their delayed result
+        // reply through a BinaryMessenger after FlutterJNI has detached.
+        engineAttached = false
+        engineGeneration++
+        sensorHandler.removeCallbacksAndMessages(null)
+
+        val sensorManager = getSystemService(Context.SENSOR_SERVICE) as SensorManager
+        activeSensorListeners.forEach(sensorManager::unregisterListener)
+        activeSensorListeners.clear()
+
+        methodChannel?.setMethodCallHandler(null)
+        methodChannel = null
+        super.cleanUpFlutterEngine(flutterEngine)
     }
 
     private fun getLastAppExitInfo(): Map<String, Any?>? {
@@ -170,14 +192,20 @@ class MainActivity : FlutterActivity() {
         val sensorManager = getSystemService(Context.SENSOR_SERVICE) as SensorManager
         val readings = mutableMapOf<String, Double>()
         val listeners = mutableMapOf<Sensor, SensorEventListener>()
+        val generation = engineGeneration
         var finished = false
 
         fun finish() {
             if (finished) return
             finished = true
-            listeners.values.forEach { sensorManager.unregisterListener(it) }
+            listeners.values.forEach {
+                sensorManager.unregisterListener(it)
+                activeSensorListeners.remove(it)
+            }
             listeners.clear()
-            result.success(readings)
+            if (engineAttached && generation == engineGeneration) {
+                result.success(readings)
+            }
         }
 
         val sensorRequests = listOf(
@@ -193,6 +221,7 @@ class MainActivity : FlutterActivity() {
                     if (finished || event.values.isEmpty()) return
                     readings[key] = event.values[0].toDouble()
                     sensorManager.unregisterListener(this)
+                    activeSensorListeners.remove(this)
                     listeners.remove(sensor)
                     if (listeners.isEmpty()) finish()
                 }
@@ -207,6 +236,7 @@ class MainActivity : FlutterActivity() {
                 )
             ) {
                 listeners[sensor] = listener
+                activeSensorListeners.add(listener)
             }
         }
 
@@ -215,6 +245,6 @@ class MainActivity : FlutterActivity() {
             return
         }
 
-        Handler(Looper.getMainLooper()).postDelayed({ finish() }, sensorReadTimeoutMs)
+        sensorHandler.postDelayed({ finish() }, sensorReadTimeoutMs)
     }
 }

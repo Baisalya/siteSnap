@@ -136,12 +136,28 @@ class DeveloperInfoDialog extends StatelessWidget {
 
             const SizedBox(height: 10),
 
-            /// UPI SUPPORT BUTTON
+            /// BUY ME A COFFEE (GLOBAL)
             SizedBox(
               width: double.infinity,
               child: ElevatedButton.icon(
                 icon: const Icon(Icons.coffee),
                 label: const Text("Buy me a Coffee"),
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: Colors.amber,
+                  foregroundColor: Colors.black,
+                ),
+                onPressed: () => _openLink("https://buymeacoffee.com/baisalya"),
+              ),
+            ),
+
+            const SizedBox(height: 10),
+
+            /// UPI SUPPORT BUTTON (INDIA/UPI REGIONS)
+            SizedBox(
+              width: double.infinity,
+              child: ElevatedButton.icon(
+                icon: const Icon(Icons.account_balance_wallet_rounded),
+                label: const Text("Support via UPI"),
                 style: ElevatedButton.styleFrom(
                   backgroundColor: Colors.green,
                   foregroundColor: Colors.white,

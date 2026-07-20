@@ -37,8 +37,7 @@ class CameraScreen extends ConsumerStatefulWidget {
   ConsumerState<CameraScreen> createState() => _CameraScreenState();
 }
 
-class _CameraScreenState extends ConsumerState<CameraScreen>
-    with WidgetsBindingObserver {
+class _CameraScreenState extends ConsumerState<CameraScreen> {
   bool _showExposure = false;
   Timer? _dateTimer;
   Timer? _focusTimer;
@@ -52,7 +51,6 @@ class _CameraScreenState extends ConsumerState<CameraScreen>
   bool _processingBubbleExpanded = false;
   bool _processingBubbleDimmed = false;
   Offset? _processingBubbleOffset;
-  int _resumeCounter = 0;
   Position? _lastWeatherFetchPosition;
   Position? _lastAddressFetchPosition;
   DateTime? _lastWeatherFetchAt;
@@ -67,7 +65,6 @@ class _CameraScreenState extends ConsumerState<CameraScreen>
   @override
   void initState() {
     super.initState();
-    WidgetsBinding.instance.addObserver(this);
 
     /// INITIALIZE CAMERA FIRST, THEN NON-CRITICAL PROMPTS
     WidgetsBinding.instance.addPostFrameCallback((_) async {
@@ -252,20 +249,7 @@ class _CameraScreenState extends ConsumerState<CameraScreen>
   }
 
   @override
-  void didChangeAppLifecycleState(AppLifecycleState state) {
-    if (state == AppLifecycleState.resumed) {
-      // Force a rebuild and increment counter to reset the CameraPreview texture
-      if (mounted) {
-        setState(() {
-          _resumeCounter++;
-        });
-      }
-    }
-  }
-
-  @override
   void dispose() {
-    WidgetsBinding.instance.removeObserver(this);
     _dateTimer?.cancel();
     _focusTimer?.cancel();
     _recordingTimer?.cancel();
@@ -286,6 +270,13 @@ class _CameraScreenState extends ConsumerState<CameraScreen>
     final focusPoint = ref.watch(focusPointProvider);
 
     final CameraController? controller = cameraState.controller;
+    final controllerPreviewSize = controller?.value.previewSize;
+    final previewTextureSize = controllerPreviewSize ?? const Size(1, 1);
+    final canShowCameraPreview = cameraState.isReady &&
+        controller != null &&
+        controller.value.isInitialized &&
+        !controller.value.isPreviewPaused &&
+        controllerPreviewSize != null;
     final isSelfieFlashActive =
         cameraState.currentLens == CameraLensType.front &&
             cameraState.flashMode == FlashMode.always;
@@ -569,10 +560,7 @@ class _CameraScreenState extends ConsumerState<CameraScreen>
                             },
                             child: Stack(
                               children: [
-                                if (controller != null &&
-                                    controller.value.isInitialized &&
-                                    !controller.value.isPreviewPaused &&
-                                    cameraState.isReady)
+                                if (canShowCameraPreview)
                                   SizedBox.expand(
                                       child: Center(
                                     child: AnimatedPadding(
@@ -598,14 +586,15 @@ class _CameraScreenState extends ConsumerState<CameraScreen>
                                                 FittedBox(
                                                   fit: BoxFit.cover,
                                                   child: SizedBox(
-                                                    width: controller.value
-                                                        .previewSize!.height,
-                                                    height: controller.value
-                                                        .previewSize!.width,
+                                                    width: previewTextureSize
+                                                        .height,
+                                                    height: previewTextureSize
+                                                        .width,
                                                     child: CameraPreview(
                                                       controller,
                                                       key: ValueKey(
-                                                          "${controller.hashCode}_${cameraState.cameraMode}_$_resumeCounter"),
+                                                        "${controller.hashCode}_${cameraState.cameraMode}_${previewTextureSize.width}x${previewTextureSize.height}",
+                                                      ),
                                                     ),
                                                   ),
                                                 ),

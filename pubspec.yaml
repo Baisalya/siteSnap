@@ -2,7 +2,7 @@ name: surveycam
 description: "A camera app for capturing photos with location and geo-tagging features."
 publish_to: 'none'
 
-version: 2.0.8+28
+version: 2.0.11+31
 
 environment:
   sdk: '>=3.2.5 <4.0.0'
@@ -15,7 +15,9 @@ dependencies:
 
   # Camera & Media
   camera: ^0.12.0+1
-  camera_android_camerax: ^0.7.2
+  # 0.7.2 moved Android video capture to CameraX 1.6.0, the version in
+  # production crash 2.0.10. Pin the prior CameraX 1.5.3-backed implementation.
+  camera_android_camerax: 0.7.1+2
   image: ^4.1.7
   path_provider: ^2.1.2
   pdf: ^3.11.3
@@ -64,7 +66,6 @@ dependencies:
 
   lottie: ^3.1.2
   google_fonts: ^8.1.0
-  camera_platform_interface: ^2.13.0
 
 dev_dependencies:
   flutter_test:

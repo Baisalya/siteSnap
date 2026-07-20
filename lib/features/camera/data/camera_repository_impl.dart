@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:camera/camera.dart' hide CameraLensType;
 import 'package:flutter/foundation.dart';
 import 'package:surveycam/features/camera/domain/camera_lens_type.dart';
@@ -10,8 +12,38 @@ class CameraRepositoryImpl implements CameraRepository {
 
   CameraLensType _currentLens = CameraLensType.normal;
 
+  /// Serializes every CameraX/native operation. The Android camera plugin is
+  /// sensitive to overlapping initialize/dispose/flash/focus/capture calls and
+  /// can crash in native Pigeon/FlutterJNI code when calls race with lifecycle
+  /// teardown. ViewModels can also use this for direct controller commands.
+  Future<void> _cameraOperationQueue = Future<void>.value();
+
+  Future<T> runExclusive<T>(Future<T> Function() action) {
+    final previous = _cameraOperationQueue.catchError((Object error) {
+      debugPrint('Previous camera operation failed before queue continued: $error');
+    });
+    final completer = Completer<T>();
+
+    _cameraOperationQueue = previous.then((_) async {
+      try {
+        final value = await action();
+        if (!completer.isCompleted) completer.complete(value);
+      } catch (error, stackTrace) {
+        if (!completer.isCompleted) {
+          completer.completeError(error, stackTrace);
+        }
+      }
+    });
+
+    return completer.future;
+  }
+
   @override
-  Future<void> initialize(CameraLensType lens) async {
+  Future<void> initialize(CameraLensType lens) {
+    return runExclusive(() => _initializeInternal(lens));
+  }
+
+  Future<void> _initializeInternal(CameraLensType lens) async {
     // 1. If we are already initialized with the correct lens, perform a health check
     if (_controller != null &&
         _controller!.value.isInitialized &&
@@ -28,29 +60,28 @@ class CameraRepositoryImpl implements CameraRepository {
       }
     }
 
-    // 2. Aggressive Cleanup
+    // 2. Aggressive cleanup, but inside the same queue to avoid dispose/init races.
     if (_controller != null) {
       try {
-        await dispose();
+        await _disposeInternal();
       } catch (e) {
         debugPrint("Cleanup of old controller failed: $e");
       }
-      // Increased breathing room for the OS/Driver to release resources
-      await Future.delayed(const Duration(milliseconds: 300));
+      // Breathing room for CameraX/driver to release native resources.
+      await Future.delayed(const Duration(milliseconds: 350));
     }
 
-    // 3. Initialize with Retry Logic
+    // 3. Initialize with bounded retry logic.
     int retryCount = 0;
-    const maxRetries = 2; // Reduced retries for faster failure/recovery
+    const maxRetries = 2;
 
     while (retryCount < maxRetries) {
       try {
-        // Proactive Discovery within the retry loop - use cache if available
         final cameras = _cachedCameras ?? await availableCameras();
         _cachedCameras = cameras;
 
         if (cameras.isEmpty) {
-          _cachedCameras = null; // Clear cache on failure to force refresh
+          _cachedCameras = null;
           throw Exception('No cameras detected on this device');
         }
 
@@ -66,7 +97,6 @@ class CameraRepositoryImpl implements CameraRepository {
           throw Exception('No usable camera lenses found');
         }
 
-        // Re-map available lenses based on latest hardware discovery
         final Map<CameraLensType, CameraDescription> newMap = {};
 
         if (backCameras.isNotEmpty) {
@@ -88,11 +118,11 @@ class CameraRepositoryImpl implements CameraRepository {
 
         final cameraDesc = _cameraMap[lens];
         if (cameraDesc == null) {
-          // If requested lens is gone (e.g. hardware error), fallback to normal back camera
           if (lens != CameraLensType.normal &&
               _cameraMap.containsKey(CameraLensType.normal)) {
             debugPrint(
                 "Requested lens $lens not available, falling back to normal");
+            _currentLens = CameraLensType.normal;
             await _initController(_cameraMap[CameraLensType.normal]!);
           } else {
             throw Exception('Lens $lens not found and no fallback available');
@@ -101,21 +131,22 @@ class CameraRepositoryImpl implements CameraRepository {
           await _initController(cameraDesc);
         }
 
-        return; // Success!
+        return;
       } catch (e) {
         retryCount++;
         debugPrint("Camera init attempt $retryCount failed: $e");
 
         if (retryCount >= maxRetries) rethrow;
 
-        await Future.delayed(Duration(milliseconds: 300 * retryCount));
+        await Future.delayed(Duration(milliseconds: 350 * retryCount));
       }
     }
   }
 
   Future<void> _initController(CameraDescription camera) async {
+    // Fewer resolution attempts reduce native churn on devices with fragile
+    // CameraX sessions while still keeping high quality for release users.
     final resolutions = [
-      ResolutionPreset.ultraHigh,
       ResolutionPreset.veryHigh,
       ResolutionPreset.high,
       ResolutionPreset.medium,
@@ -136,7 +167,6 @@ class CameraRepositoryImpl implements CameraRepository {
       try {
         await controller.initialize();
 
-        // Initial quality settings - only if supported
         if (controller.value.isInitialized) {
           try {
             await controller.setFocusMode(FocusMode.auto);
@@ -151,21 +181,22 @@ class CameraRepositoryImpl implements CameraRepository {
           }
 
           debugPrint("Camera initialized successfully with $resolution");
-          return; // Success!
+          return;
         }
       } catch (e) {
         lastError = e;
         debugPrint("Camera initialization failed with $resolution: $e");
-        await controller.dispose();
-        _controller = null;
-
-        // If it's not a resolution-related error, we might want to rethrow immediately,
-        // but often the error message doesn't explicitly say it's resolution.
-        // Continuing the loop to try lower resolution.
+        try {
+          await controller.dispose();
+        } catch (disposeError) {
+          debugPrint("Controller dispose after failed init skipped: $disposeError");
+        }
+        if (_controller == controller) {
+          _controller = null;
+        }
       }
     }
 
-    // If we reach here, all resolutions failed
     if (lastError != null) {
       throw lastError;
     }
@@ -173,73 +204,87 @@ class CameraRepositoryImpl implements CameraRepository {
   }
 
   @override
-  Future<String> takePicture() async {
-    final controller = _controller;
-    if (controller == null ||
-        !controller.value.isInitialized ||
-        controller.value.isTakingPicture) {
-      throw Exception("Camera not ready");
-    }
+  Future<String> takePicture() {
+    return runExclusive(() async {
+      final controller = _controller;
+      if (controller == null ||
+          !controller.value.isInitialized ||
+          controller.value.isTakingPicture) {
+        throw Exception("Camera not ready");
+      }
 
-    if (controller.value.isPreviewPaused) {
-      await controller.resumePreview();
-    }
+      if (controller.value.isPreviewPaused) {
+        await controller.resumePreview();
+      }
 
-    final file = await controller.takePicture();
-    return file.path;
+      final file = await controller.takePicture();
+      return file.path;
+    });
   }
 
   @override
-  Future<void> startVideoRecording() async {
-    final controller = _controller;
-    if (controller == null ||
-        !controller.value.isInitialized ||
-        controller.value.isRecordingVideo) {
-      return;
-    }
-    try {
-      await controller.startVideoRecording();
-    } catch (e) {
-      debugPrint("Error starting video recording: $e");
-      rethrow;
-    }
-  }
-
-  @override
-  Future<XFile> stopVideoRecording() async {
-    final controller = _controller;
-    if (controller == null ||
-        !controller.value.isInitialized ||
-        !controller.value.isRecordingVideo) {
-      throw Exception("No recording in progress");
-    }
-    try {
-      return await controller.stopVideoRecording();
-    } catch (e) {
-      debugPrint("Error stopping video recording: $e");
-      rethrow;
-    }
-  }
-
-  Future<void> switchLens(CameraLensType type) async {
-    if (type == _currentLens) return;
-    if (!_cameraMap.containsKey(type)) return;
-
-    await dispose();
-
-    _currentLens = type;
-    await _initController(_cameraMap[type]!);
-  }
-
-  @override
-  Future<void> dispose() async {
-    if (_controller != null) {
+  Future<void> startVideoRecording() {
+    return runExclusive(() async {
+      final controller = _controller;
+      if (controller == null ||
+          !controller.value.isInitialized ||
+          controller.value.isRecordingVideo) {
+        return;
+      }
       try {
-        await _controller!.dispose();
+        await controller.startVideoRecording();
+      } catch (e) {
+        debugPrint("Error starting video recording: $e");
+        rethrow;
+      }
+    });
+  }
+
+  @override
+  Future<XFile> stopVideoRecording() {
+    return runExclusive(() async {
+      final controller = _controller;
+      if (controller == null ||
+          !controller.value.isInitialized ||
+          !controller.value.isRecordingVideo) {
+        throw Exception("No recording in progress");
+      }
+      try {
+        return await controller.stopVideoRecording();
+      } catch (e) {
+        debugPrint("Error stopping video recording: $e");
+        rethrow;
+      }
+    });
+  }
+
+  Future<void> switchLens(CameraLensType type) {
+    return runExclusive(() async {
+      if (type == _currentLens) return;
+      if (!_cameraMap.containsKey(type)) return;
+
+      await _disposeInternal();
+      await Future.delayed(const Duration(milliseconds: 250));
+
+      _currentLens = type;
+      await _initController(_cameraMap[type]!);
+    });
+  }
+
+  @override
+  Future<void> dispose() {
+    return runExclusive(_disposeInternal);
+  }
+
+  Future<void> _disposeInternal() async {
+    final controller = _controller;
+    _controller = null;
+    if (controller != null) {
+      try {
+        await controller.dispose();
       } catch (e) {
         debugPrint("Error disposing camera controller: $e");
       }
-      _controller = null;
     }
   }
 
