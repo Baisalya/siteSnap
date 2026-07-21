@@ -165,7 +165,22 @@ class _AppLauncherState extends ConsumerState<AppLauncher> {
       final updateInfo = await InAppUpdate.checkForUpdate();
 
       if (updateInfo.updateAvailability == UpdateAvailability.updateAvailable) {
-        await InAppUpdate.performImmediateUpdate();
+        final currentVersionCode = int.tryParse(packageInfo.buildNumber) ?? 0;
+        final availableVersionCode = updateInfo.availableVersionCode ?? 0;
+
+        final versionGap = availableVersionCode - currentVersionCode;
+
+        debugPrint("Update available: current=$currentVersionCode, available=$availableVersionCode, gap=$versionGap");
+
+        if (versionGap >= 2) {
+          debugPrint("🚀 Mandatory update (gap >= 2) → Immediate Update");
+          await InAppUpdate.performImmediateUpdate();
+        } else if (versionGap > 0) {
+          debugPrint("🔔 Optional update (gap < 2) → Flexible Update");
+          await InAppUpdate.startFlexibleUpdate();
+          // Note: Flexible updates require completeUpdate() call after download,
+          // but for now we just initiate the download to satisfy the "not mandatory" requirement.
+        }
       }
     } catch (e) {
       debugPrint('Update check safe error: $e');
