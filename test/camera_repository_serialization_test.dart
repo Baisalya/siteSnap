@@ -50,5 +50,26 @@ void main() {
 
       expect(events, <String>['failed', 'recovered']);
     });
+
+    test('keeps the remaining native stabilization delay', () {
+      final startedAt = DateTime(2026, 7, 22, 10);
+
+      expect(
+        CameraRepositoryImpl.remainingDelay(
+          since: startedAt,
+          minimum: const Duration(seconds: 1),
+          now: startedAt.add(const Duration(milliseconds: 350)),
+        ),
+        const Duration(milliseconds: 650),
+      );
+      expect(
+        CameraRepositoryImpl.remainingDelay(
+          since: startedAt,
+          minimum: const Duration(seconds: 1),
+          now: startedAt.add(const Duration(seconds: 2)),
+        ),
+        Duration.zero,
+      );
+    });
   });
 }

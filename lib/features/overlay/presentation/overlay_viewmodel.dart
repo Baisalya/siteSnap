@@ -272,12 +272,13 @@ class OverlayViewModel extends StateNotifier<void> {
       await FlutterForegroundTask.updateService(
         notificationTitle: 'SurveyCam - Photo saving',
         notificationText: 'Preparing photo save...',
-        callback: startCallback,
+        notificationInitialRoute: '/',
       );
     } else {
       await FlutterForegroundTask.startService(
         notificationTitle: 'SurveyCam - Photo saving',
         notificationText: 'Preparing photo save...',
+        notificationInitialRoute: '/',
         callback: startCallback,
       );
     }

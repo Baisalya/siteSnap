@@ -12,9 +12,11 @@ import android.os.Build
 import android.os.Handler
 import android.os.Looper
 import android.provider.MediaStore
+import android.util.Log
 import io.flutter.embedding.android.FlutterActivity
 import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.plugin.common.MethodChannel
+import io.flutter.view.TextureRegistry
 
 class MainActivity : FlutterActivity() {
     private val localEnvironmentChannel = "surveycam/local_environment"
@@ -46,6 +48,12 @@ class MainActivity : FlutterActivity() {
     }
 
     override fun cleanUpFlutterEngine(flutterEngine: FlutterEngine) {
+        // Flutter engine issue #188300: ImageReader-backed SurfaceProducers can
+        // deliver one final frame after FlutterEngine.destroy() detaches JNI.
+        // Release them while JNI is still attached so their queued callbacks
+        // observe released=true and close the image without scheduling a frame.
+        releaseFlutterSurfaceProducers(flutterEngine)
+
         // Sensor reads complete asynchronously. Do not let their delayed result
         // reply through a BinaryMessenger after FlutterJNI has detached.
         engineAttached = false
@@ -59,6 +67,45 @@ class MainActivity : FlutterActivity() {
         methodChannel?.setMethodCallHandler(null)
         methodChannel = null
         super.cleanUpFlutterEngine(flutterEngine)
+    }
+
+    private fun releaseFlutterSurfaceProducers(flutterEngine: FlutterEngine) {
+        try {
+            val renderer = flutterEngine.renderer
+            val producersField = renderer.javaClass.getDeclaredField("imageReaderProducers")
+            producersField.isAccessible = true
+            val producers = (producersField.get(renderer) as? Collection<*>)
+                ?.filterIsInstance<TextureRegistry.SurfaceProducer>()
+                ?.toList()
+                .orEmpty()
+
+            producers.forEach { producer ->
+                try {
+                    producer.release()
+                } catch (error: RuntimeException) {
+                    Log.w(
+                        "SurveyCam",
+                        "Unable to release a Flutter surface producer during teardown",
+                        error,
+                    )
+                }
+            }
+
+            if (producers.isNotEmpty()) {
+                Log.i(
+                    "SurveyCam",
+                    "Released ${producers.size} Flutter surface producer(s) before engine teardown",
+                )
+            }
+        } catch (error: ReflectiveOperationException) {
+            // Keep teardown safe if a future Flutter version changes the private
+            // renderer field. Remove this workaround once the engine fix ships.
+            Log.w(
+                "SurveyCam",
+                "Flutter surface producer teardown workaround was unavailable",
+                error,
+            )
+        }
     }
 
     private fun getLastAppExitInfo(): Map<String, Any?>? {

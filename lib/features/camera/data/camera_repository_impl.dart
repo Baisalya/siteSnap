@@ -6,9 +6,14 @@ import 'package:surveycam/features/camera/domain/camera_lens_type.dart';
 import 'package:surveycam/features/camera/domain/camera_repository.dart';
 
 class CameraRepositoryImpl implements CameraRepository {
+  static const Duration _nativeReleaseDelay = Duration(milliseconds: 500);
+  static const Duration _recorderStabilizationDelay = Duration(seconds: 1);
+
   CameraController? _controller;
   late Map<CameraLensType, CameraDescription> _cameraMap;
   List<CameraDescription>? _cachedCameras;
+  DateTime? _lastControllerDisposedAt;
+  DateTime? _lastVideoRecordingStartedAt;
 
   CameraLensType _currentLens = CameraLensType.normal;
 
@@ -20,7 +25,8 @@ class CameraRepositoryImpl implements CameraRepository {
 
   Future<T> runExclusive<T>(Future<T> Function() action) {
     final previous = _cameraOperationQueue.catchError((Object error) {
-      debugPrint('Previous camera operation failed before queue continued: $error');
+      debugPrint(
+          'Previous camera operation failed before queue continued: $error');
     });
     final completer = Completer<T>();
 
@@ -36,6 +42,50 @@ class CameraRepositoryImpl implements CameraRepository {
     });
 
     return completer.future;
+  }
+
+  @visibleForTesting
+  static Duration remainingDelay({
+    required DateTime? since,
+    required Duration minimum,
+    DateTime? now,
+  }) {
+    if (since == null) return Duration.zero;
+    final elapsed = (now ?? DateTime.now()).difference(since);
+    if (elapsed >= minimum) return Duration.zero;
+    return minimum - elapsed;
+  }
+
+  Future<void> _waitAfterControllerDisposal() async {
+    final delay = remainingDelay(
+      since: _lastControllerDisposedAt,
+      minimum: _nativeReleaseDelay,
+    );
+    if (delay > Duration.zero) {
+      await Future<void>.delayed(delay);
+    }
+  }
+
+  Future<void> _waitForRecorderToStabilize() async {
+    final delay = remainingDelay(
+      since: _lastVideoRecordingStartedAt,
+      minimum: _recorderStabilizationDelay,
+    );
+    if (delay > Duration.zero) {
+      debugPrint(
+        'Waiting ${delay.inMilliseconds}ms for CameraX recorder to stabilize',
+      );
+      await Future<void>.delayed(delay);
+    }
+  }
+
+  Future<void> _disposeController(CameraController controller) async {
+    try {
+      await controller.dispose();
+    } finally {
+      _lastControllerDisposedAt = DateTime.now();
+      _lastVideoRecordingStartedAt = null;
+    }
   }
 
   @override
@@ -67,8 +117,6 @@ class CameraRepositoryImpl implements CameraRepository {
       } catch (e) {
         debugPrint("Cleanup of old controller failed: $e");
       }
-      // Breathing room for CameraX/driver to release native resources.
-      await Future.delayed(const Duration(milliseconds: 350));
     }
 
     // 3. Initialize with bounded retry logic.
@@ -155,6 +203,10 @@ class CameraRepositoryImpl implements CameraRepository {
     Object? lastError;
 
     for (final resolution in resolutions) {
+      // A late CameraX onConfigured callback from the previous controller can
+      // otherwise arrive after a new recorder has already been created.
+      await _waitAfterControllerDisposal();
+
       final controller = CameraController(
         camera,
         resolution,
@@ -187,9 +239,10 @@ class CameraRepositoryImpl implements CameraRepository {
         lastError = e;
         debugPrint("Camera initialization failed with $resolution: $e");
         try {
-          await controller.dispose();
+          await _disposeController(controller);
         } catch (disposeError) {
-          debugPrint("Controller dispose after failed init skipped: $disposeError");
+          debugPrint(
+              "Controller dispose after failed init skipped: $disposeError");
         }
         if (_controller == controller) {
           _controller = null;
@@ -233,6 +286,7 @@ class CameraRepositoryImpl implements CameraRepository {
       }
       try {
         await controller.startVideoRecording();
+        _lastVideoRecordingStartedAt = DateTime.now();
       } catch (e) {
         debugPrint("Error starting video recording: $e");
         rethrow;
@@ -250,7 +304,10 @@ class CameraRepositoryImpl implements CameraRepository {
         throw Exception("No recording in progress");
       }
       try {
-        return await controller.stopVideoRecording();
+        await _waitForRecorderToStabilize();
+        final file = await controller.stopVideoRecording();
+        _lastVideoRecordingStartedAt = null;
+        return file;
       } catch (e) {
         debugPrint("Error stopping video recording: $e");
         rethrow;
@@ -264,7 +321,7 @@ class CameraRepositoryImpl implements CameraRepository {
       if (!_cameraMap.containsKey(type)) return;
 
       await _disposeInternal();
-      await Future.delayed(const Duration(milliseconds: 250));
+      await _waitAfterControllerDisposal();
 
       _currentLens = type;
       await _initController(_cameraMap[type]!);
@@ -280,8 +337,21 @@ class CameraRepositoryImpl implements CameraRepository {
     final controller = _controller;
     _controller = null;
     if (controller != null) {
+      if (controller.value.isInitialized && controller.value.isRecordingVideo) {
+        try {
+          // Never release a controller while CameraX is still configuring or
+          // finalizing its Recorder. This also covers lifecycle events that
+          // arrive while startVideoRecording() is still in flight.
+          await _waitForRecorderToStabilize();
+          await controller.stopVideoRecording();
+        } catch (e) {
+          debugPrint("Error finalizing video before camera disposal: $e");
+        } finally {
+          _lastVideoRecordingStartedAt = null;
+        }
+      }
       try {
-        await controller.dispose();
+        await _disposeController(controller);
       } catch (e) {
         debugPrint("Error disposing camera controller: $e");
       }

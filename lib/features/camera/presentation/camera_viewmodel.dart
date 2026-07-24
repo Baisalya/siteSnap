@@ -49,7 +49,7 @@ class CameraViewModel extends StateNotifier<CameraState>
   bool _isCameraStable = false;
   bool _isInitializing = false;
   bool _isDisposing = false;
-  final bool _isRestarting = false;
+  bool _isRestarting = false;
   bool _captureInFlight = false;
   bool _startRecordingInFlight = false;
   bool _stopRecordingInFlight = false;
@@ -90,7 +90,6 @@ class CameraViewModel extends StateNotifier<CameraState>
   }
 
   void _initBackgroundService() {
-    FlutterForegroundTask.initCommunicationPort();
     FlutterForegroundTask.addTaskDataCallback(_onReceiveTaskData);
   }
 
@@ -745,101 +744,111 @@ class CameraViewModel extends StateNotifier<CameraState>
   // ================= CAMERA SWITCH =================
 
   Future<void> switchCamera() async {
-    if (_isInitializing || _isRestarting) return;
-
-    final wasRecording = state.isRecording;
-    if (wasRecording) {
-      try {
-        final repo = ref.read(cameraRepositoryProvider);
-        final segmentFile = await repo.stopVideoRecording();
-        final segment = VideoSegment(
-          path: segmentFile.path,
-          lens: state.currentLens,
-          mirror: _shouldMirrorSegment(state.currentLens),
-        );
-        state = state.copyWith(
-          videoSegments: [...state.videoSegments, segment],
-        );
-        // Note: We don't set isRecording to false here to avoid UI flicker
-        // and we don't stop the _videoHistoryTimer yet
-      } catch (e) {
-        debugPrint("Error saving segment during switch: $e");
-      }
+    if (_isInitializing ||
+        _isRestarting ||
+        _startRecordingInFlight ||
+        _stopRecordingInFlight) {
+      return;
     }
 
-    final nextLens = state.currentLens == CameraLensType.front
-        ? CameraLensType.normal
-        : CameraLensType.front;
-
-    state = state.copyWith(
-        currentLens: nextLens, isReady: false, clearController: true);
-
+    _isRestarting = true;
     try {
-      final repo = ref.read(cameraRepositoryProvider);
-      await repo.initialize(nextLens);
-
-      final controller = repo.controller;
-      if (controller != null && controller.value.isInitialized) {
+      final wasRecording = state.isRecording;
+      if (wasRecording) {
         try {
-          final minExposure = await _safeCameraQuery<double>(
-            controller,
-            'switch min exposure',
-            controller.getMinExposureOffset,
-          );
-          final maxExposure = await _safeCameraQuery<double>(
-            controller,
-            'switch max exposure',
-            controller.getMaxExposureOffset,
-          );
-          final minZoom = await _safeCameraQuery<double>(
-            controller,
-            'switch min zoom',
-            controller.getMinZoomLevel,
-          );
-          final maxZoom = await _safeCameraQuery<double>(
-            controller,
-            'switch max zoom',
-            controller.getMaxZoomLevel,
-          );
-          _minExposure = minExposure ?? _minExposure;
-          _maxExposure = maxExposure ?? _maxExposure;
-
-          state = state.copyWith(
-            isReady: true,
-            controller: controller,
-            exposure: 0.0,
-            minExposure: _minExposure,
-            maxExposure: _maxExposure,
-            zoom: 1.0,
-            minZoom: minZoom ?? state.minZoom,
-            maxZoom: maxZoom ?? state.maxZoom,
-            error: null,
-          );
-        } catch (e) {
-          debugPrint("Error getting camera capabilities during switch: $e");
-          state = state.copyWith(
-              isReady: true, controller: controller, error: null);
-        }
-
-        if (wasRecording) {
-          // Restart recording segment without clearing history/sequence
           final repo = ref.read(cameraRepositoryProvider);
-          if (state.flashMode == FlashMode.always &&
-              state.currentLens != CameraLensType.front) {
-            await _safeCameraCommand(
-              controller,
-              'switch recording torch',
-              () => controller.setFlashMode(FlashMode.torch),
-            );
-          }
-          await repo.startVideoRecording();
+          final segmentFile = await repo.stopVideoRecording();
+          final segment = VideoSegment(
+            path: segmentFile.path,
+            lens: state.currentLens,
+            mirror: _shouldMirrorSegment(state.currentLens),
+          );
+          state = state.copyWith(
+            videoSegments: [...state.videoSegments, segment],
+          );
+          // Note: We don't set isRecording to false here to avoid UI flicker
+          // and we don't stop the _videoHistoryTimer yet
+        } catch (e) {
+          debugPrint("Error saving segment during switch: $e");
         }
       }
-    } catch (e) {
-      debugPrint("Switch camera error: $e");
+
+      final nextLens = state.currentLens == CameraLensType.front
+          ? CameraLensType.normal
+          : CameraLensType.front;
+
       state = state.copyWith(
-          isReady: false, error: e.toString(), isRecording: false);
-      _videoHistoryTimer?.cancel();
+          currentLens: nextLens, isReady: false, clearController: true);
+
+      try {
+        final repo = ref.read(cameraRepositoryProvider);
+        await repo.initialize(nextLens);
+
+        final controller = repo.controller;
+        if (controller != null && controller.value.isInitialized) {
+          try {
+            final minExposure = await _safeCameraQuery<double>(
+              controller,
+              'switch min exposure',
+              controller.getMinExposureOffset,
+            );
+            final maxExposure = await _safeCameraQuery<double>(
+              controller,
+              'switch max exposure',
+              controller.getMaxExposureOffset,
+            );
+            final minZoom = await _safeCameraQuery<double>(
+              controller,
+              'switch min zoom',
+              controller.getMinZoomLevel,
+            );
+            final maxZoom = await _safeCameraQuery<double>(
+              controller,
+              'switch max zoom',
+              controller.getMaxZoomLevel,
+            );
+            _minExposure = minExposure ?? _minExposure;
+            _maxExposure = maxExposure ?? _maxExposure;
+
+            state = state.copyWith(
+              isReady: true,
+              controller: controller,
+              exposure: 0.0,
+              minExposure: _minExposure,
+              maxExposure: _maxExposure,
+              zoom: 1.0,
+              minZoom: minZoom ?? state.minZoom,
+              maxZoom: maxZoom ?? state.maxZoom,
+              error: null,
+            );
+          } catch (e) {
+            debugPrint("Error getting camera capabilities during switch: $e");
+            state = state.copyWith(
+                isReady: true, controller: controller, error: null);
+          }
+
+          if (wasRecording) {
+            // Restart recording segment without clearing history/sequence
+            final repo = ref.read(cameraRepositoryProvider);
+            if (state.flashMode == FlashMode.always &&
+                state.currentLens != CameraLensType.front) {
+              await _safeCameraCommand(
+                controller,
+                'switch recording torch',
+                () => controller.setFlashMode(FlashMode.torch),
+              );
+            }
+            await repo.startVideoRecording();
+          }
+        }
+      } catch (e) {
+        debugPrint("Switch camera error: $e");
+        state = state.copyWith(
+            isReady: false, error: e.toString(), isRecording: false);
+        _videoHistoryTimer?.cancel();
+      }
+    } finally {
+      _isRestarting = false;
     }
   }
 
@@ -1221,6 +1230,17 @@ class CameraViewModel extends StateNotifier<CameraState>
 
       await repo.startVideoRecording();
 
+      // The app can be backgrounded while CameraX is asynchronously creating
+      // the recorder. Do not publish a recording state for a controller that
+      // the lifecycle handler has already hidden or queued for disposal.
+      if (!mounted ||
+          _isDisposing ||
+          _latestLifecycleState != AppLifecycleState.resumed ||
+          !_isActiveController(controller)) {
+        debugPrint('Recording start completed after camera became inactive');
+        return false;
+      }
+
       // Start history tracking
       _videoHistoryTimer?.cancel();
       if (clearSegments || state.videoSegments.isEmpty) {
@@ -1295,13 +1315,8 @@ class CameraViewModel extends StateNotifier<CameraState>
       return;
     }
 
-    // Prevent rapid stop after start (min 1 second recording)
-    if (_recordingStartTime != null &&
-        DateTime.now().difference(_recordingStartTime!).inMilliseconds < 1000) {
-      debugPrint("Preventing rapid stop: recording too short");
-      return;
-    }
-
+    // Claim the stop before awaiting CameraX's recorder stabilization delay so
+    // a second tap or lifecycle callback cannot enter another stop operation.
     _stopRecordingInFlight = true;
     var jobQueuedForProcessing = false;
     try {
@@ -1428,13 +1443,14 @@ class CameraViewModel extends StateNotifier<CameraState>
       result = await FlutterForegroundTask.updateService(
         notificationTitle: 'SurveyCam - Media processing',
         notificationText: 'Preparing media...',
-        callback: startCallback,
+        notificationInitialRoute: '/',
       );
     } else {
       result = await FlutterForegroundTask.startService(
         serviceTypes: const [ForegroundServiceTypes.mediaProcessing],
         notificationTitle: 'SurveyCam - Media processing',
         notificationText: 'Preparing media...',
+        notificationInitialRoute: '/',
         callback: startCallback,
       );
     }

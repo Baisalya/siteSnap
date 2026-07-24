@@ -1,7 +1,6 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
-import 'dart:ui';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_foreground_task/flutter_foreground_task.dart';
 import 'package:surveycam/core/services/media_audit_service.dart';
@@ -16,7 +15,9 @@ import 'package:surveycam/features/projects/data/project_storage.dart';
 
 @pragma('vm:entry-point')
 void startCallback() {
-  DartPluginRegistrant.ensureInitialized();
+  // setTaskHandler initializes the background binding and plugin registrant.
+  // Keep this callback limited to installing the handler, as required by the
+  // flutter_foreground_task lifecycle contract.
   FlutterForegroundTask.setTaskHandler(VideoProcessingTaskHandler());
 }
 
@@ -31,6 +32,11 @@ class VideoProcessingTaskHandler extends TaskHandler {
 
   static bool _isProcessing = false;
   static final Set<String> _failedJobIdsThisRun = <String>{};
+
+  bool _destroyed = false;
+  bool _serviceStopRequested = false;
+  Timer? _idleStopTimer;
+  Future<void> _notificationQueue = Future<void>.value();
 
   static Future<bool> hasPendingJob() async {
     return (await _loadVideoJobQueue()).isNotEmpty;
@@ -137,9 +143,9 @@ class VideoProcessingTaskHandler extends TaskHandler {
       notificationTitle: 'SurveyCam - Media processing',
       notificationText: 'Processing cancelled',
     );
-    unawaited(Future.delayed(const Duration(seconds: 1), () {
-      FlutterForegroundTask.stopService();
-    }));
+    // The TaskHandler owns service shutdown. Stopping it here as well creates
+    // two competing engine-destroy requests when cancellation is observed in
+    // the background isolate.
   }
 
   static Future<String?> takeLastFailure() async {
@@ -235,17 +241,26 @@ class VideoProcessingTaskHandler extends TaskHandler {
 
   @override
   Future<void> onStart(DateTime timestamp, TaskStarter starter) async {
+    _destroyed = false;
+    _serviceStopRequested = false;
+    _idleStopTimer?.cancel();
+    _idleStopTimer = null;
     _failedJobIdsThisRun.clear();
     unawaited(_processPendingJob());
   }
 
   @override
   void onRepeatEvent(DateTime timestamp) {
+    if (_destroyed || _serviceStopRequested) return;
     unawaited(_processPendingJob());
   }
 
   @override
   Future<void> onDestroy(DateTime timestamp, bool isTimeout) async {
+    _destroyed = true;
+    _serviceStopRequested = true;
+    _idleStopTimer?.cancel();
+    _idleStopTimer = null;
     if (_isProcessing) {
       await MediaAuditService.recordFailure(
         event: 'video_processing_service_destroyed',
@@ -259,14 +274,13 @@ class VideoProcessingTaskHandler extends TaskHandler {
   }
 
   @override
-  void onNotificationPressed() {
-    FlutterForegroundTask.launchApp();
-  }
+  void onNotificationPressed() {}
 
   Future<void> _processPendingJob() async {
-    if (_isProcessing) return;
+    if (_destroyed || _serviceStopRequested || _isProcessing) return;
 
     VideoProcessingJob? job;
+    var serviceStopRequested = false;
     try {
       await _throwIfCancelRequested();
       final videoQueue = await _loadVideoJobQueue();
@@ -280,9 +294,16 @@ class VideoProcessingTaskHandler extends TaskHandler {
           await _processPendingImageJob(imageJobJson!);
           return;
         }
+        _idleStopTimer?.cancel();
+        _idleStopTimer = null;
+        _serviceStopRequested = true;
+        serviceStopRequested = true;
         await FlutterForegroundTask.stopService();
         return;
       }
+
+      _idleStopTimer?.cancel();
+      _idleStopTimer = null;
 
       if (job.segments.isEmpty) {
         await _completeVideoJob(job);
@@ -456,9 +477,7 @@ class VideoProcessingTaskHandler extends TaskHandler {
         'warning': savedWithoutOverlay ? 'Saved without overlay' : null,
       });
 
-      unawaited(Future.delayed(const Duration(seconds: 2), () {
-        _stopServiceIfIdle();
-      }));
+      _scheduleStopIfIdle(const Duration(seconds: 2));
     } on _VideoProcessingCancelledException {
       if (job != null) {
         await _completeVideoJob(job);
@@ -469,9 +488,7 @@ class VideoProcessingTaskHandler extends TaskHandler {
         'message': 'Video processing cancelled.',
       });
       await _updateNotification('Video processing cancelled');
-      unawaited(Future.delayed(const Duration(seconds: 1), () {
-        _stopServiceIfIdle();
-      }));
+      _scheduleStopIfIdle(const Duration(seconds: 1));
     } catch (e, stackTrace) {
       debugPrint('Background video processing error: $e\n$stackTrace');
       if (job != null) {
@@ -501,12 +518,13 @@ class VideoProcessingTaskHandler extends TaskHandler {
         'error': e.toString(),
       });
       await _updateNotification('Video processing failed. Tap to reopen.');
-      unawaited(Future.delayed(const Duration(seconds: 8), () {
-        _stopServiceIfIdle();
-      }));
+      _scheduleStopIfIdle(const Duration(seconds: 8));
     } finally {
       _isProcessing = false;
-      if (await _hasRunnablePendingJob()) {
+      if (!serviceStopRequested &&
+          !_destroyed &&
+          !_serviceStopRequested &&
+          await _hasRunnablePendingJob()) {
         unawaited(Future.microtask(() => _processPendingJob()));
       }
     }
@@ -524,9 +542,22 @@ class VideoProcessingTaskHandler extends TaskHandler {
   }
 
   Future<void> _stopServiceIfIdle() async {
-    if (!await _hasRunnablePendingJob()) {
+    if (_destroyed || _serviceStopRequested) return;
+    final hasPendingJob = await _hasRunnablePendingJob();
+    if (!_destroyed && !_serviceStopRequested && !hasPendingJob) {
+      _serviceStopRequested = true;
       await FlutterForegroundTask.stopService();
     }
+  }
+
+  void _scheduleStopIfIdle(Duration delay) {
+    if (_destroyed || _serviceStopRequested) return;
+    _idleStopTimer?.cancel();
+    _idleStopTimer = Timer(delay, () {
+      _idleStopTimer = null;
+      if (_destroyed || _serviceStopRequested) return;
+      unawaited(_stopServiceIfIdle());
+    });
   }
 
   Future<void> _processPendingImageJob(
@@ -590,9 +621,7 @@ class VideoProcessingTaskHandler extends TaskHandler {
         'path': savedFile.path,
       });
 
-      unawaited(Future.delayed(const Duration(seconds: 2), () {
-        _stopServiceIfIdle();
-      }));
+      _scheduleStopIfIdle(const Duration(seconds: 2));
     } catch (e, stackTrace) {
       debugPrint('Background image processing error: $e\n$stackTrace');
       if (imageJob != null) {
@@ -610,9 +639,7 @@ class VideoProcessingTaskHandler extends TaskHandler {
         'originalPath': imageJob?.originalPath,
         'error': e.toString(),
       });
-      unawaited(Future.delayed(const Duration(seconds: 8), () {
-        _stopServiceIfIdle();
-      }));
+      _scheduleStopIfIdle(const Duration(seconds: 8));
     }
   }
 
@@ -634,10 +661,24 @@ class VideoProcessingTaskHandler extends TaskHandler {
   }
 
   Future<void> _updateNotification(String text) {
-    return FlutterForegroundTask.updateService(
-      notificationTitle: 'SurveyCam - Media processing',
-      notificationText: text,
-    );
+    if (_destroyed || _serviceStopRequested) return Future<void>.value();
+
+    final update = _notificationQueue.catchError((Object error) {
+      debugPrint('Previous notification update failed: $error');
+    }).then((_) async {
+      if (_destroyed || _serviceStopRequested) return;
+      final result = await FlutterForegroundTask.updateService(
+        notificationTitle: 'SurveyCam - Media processing',
+        notificationText: text,
+      );
+      if (result is ServiceRequestFailure &&
+          !_destroyed &&
+          !_serviceStopRequested) {
+        debugPrint('Foreground notification update failed: ${result.error}');
+      }
+    });
+    _notificationQueue = update;
+    return update;
   }
 
   Future<void> _imageProgress(String message) {
@@ -671,6 +712,7 @@ class VideoProcessingTaskHandler extends TaskHandler {
   }
 
   void _send(Map<String, dynamic> message) {
+    if (_destroyed || _serviceStopRequested) return;
     try {
       FlutterForegroundTask.sendDataToMain(message);
     } catch (e) {
