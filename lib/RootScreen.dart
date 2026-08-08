@@ -170,7 +170,8 @@ class _AppLauncherState extends ConsumerState<AppLauncher> {
 
         final versionGap = availableVersionCode - currentVersionCode;
 
-        debugPrint("Update available: current=$currentVersionCode, available=$availableVersionCode, gap=$versionGap");
+        debugPrint(
+            "Update available: current=$currentVersionCode, available=$availableVersionCode, gap=$versionGap");
 
         if (versionGap >= 2) {
           debugPrint("🚀 Mandatory update (gap >= 2) → Immediate Update");

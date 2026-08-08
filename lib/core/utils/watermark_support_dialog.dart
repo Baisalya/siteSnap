@@ -137,7 +137,8 @@ class WatermarkSupportDialog extends StatelessWidget {
                   onPressed: () => Navigator.pop(context),
                   child: const Text(
                     "Maybe Later",
-                    style: TextStyle(color: Colors.grey, fontWeight: FontWeight.w600),
+                    style: TextStyle(
+                        color: Colors.grey, fontWeight: FontWeight.w600),
                   ),
                 ),
               ],

@@ -18,6 +18,8 @@ class NoteInputSheet extends ConsumerStatefulWidget {
 }
 
 class _NoteInputSheetState extends ConsumerState<NoteInputSheet> {
+  static const int _maxLocationCharacters = 120;
+  static const int _maxExtraNoteCharacters = 240;
   late TextEditingController locationController;
   late TextEditingController extraNoteController;
   bool _extraNoteHasText = false;
@@ -76,12 +78,24 @@ class _NoteInputSheetState extends ConsumerState<NoteInputSheet> {
   }
 
   String _composeWatermarkText() {
-    final location = locationController.text.trim();
-    final extraNote = extraNoteController.text.trim();
+    final location = _truncate(
+      locationController.text.trim(),
+      _maxLocationCharacters,
+    );
+    final extraNote = _truncate(
+      extraNoteController.text.trim(),
+      _maxExtraNoteCharacters,
+    );
 
     if (extraNote.isEmpty) return location;
     // Always separate with a newline if Line 2 exists, even if Line 1 is empty
     return "$location\n$extraNote";
+  }
+
+  String _truncate(String value, int maxCharacters) {
+    final runes = value.runes.toList(growable: false);
+    if (runes.length <= maxCharacters) return value;
+    return String.fromCharCodes(runes.take(maxCharacters));
   }
 
   @override
@@ -370,6 +384,7 @@ class _NoteInputSheetState extends ConsumerState<NoteInputSheet> {
           TextField(
             controller: locationController,
             enabled: autoFetchEnabled,
+            maxLength: _maxLocationCharacters,
             style: TextStyle(
               color: autoFetchEnabled ? Colors.white : Colors.white24,
               fontSize: 15,
@@ -414,6 +429,7 @@ class _NoteInputSheetState extends ConsumerState<NoteInputSheet> {
           const SizedBox(height: 8),
           TextField(
             controller: extraNoteController,
+            maxLength: _maxExtraNoteCharacters,
             minLines: 2,
             maxLines: 4,
             style: const TextStyle(color: Colors.white, fontSize: 15),
@@ -851,7 +867,7 @@ class _NoteInputSheetState extends ConsumerState<NoteInputSheet> {
     if (context.mounted) {
       Navigator.pop(context);
       if (name != null) {
-        locationController.text = name;
+        locationController.text = _truncate(name, _maxLocationCharacters);
       }
     }
   }

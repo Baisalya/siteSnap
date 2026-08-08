@@ -9,15 +9,12 @@ class NoteStorage {
     final prefs = await SharedPreferences.getInstance();
     final raw = prefs.getStringList(_key) ?? [];
 
-    return raw
-        .map((e) => SavedNote.fromJson(jsonDecode(e)))
-        .toList();
+    return raw.map((e) => SavedNote.fromJson(jsonDecode(e))).toList();
   }
 
   Future<void> saveNotes(List<SavedNote> notes) async {
     final prefs = await SharedPreferences.getInstance();
-    final encoded =
-    notes.map((e) => jsonEncode(e.toJson())).toList();
+    final encoded = notes.map((e) => jsonEncode(e.toJson())).toList();
     await prefs.setStringList(_key, encoded);
   }
 }

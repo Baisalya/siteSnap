@@ -2,6 +2,7 @@ import 'dart:convert';
 import 'dart:io';
 
 import 'package:crypto/crypto.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 import 'package:image/image.dart' as img;
 import 'package:intl/intl.dart';
@@ -17,8 +18,23 @@ enum ProofReportTemplate {
   compact,
 }
 
+typedef ProofVideoThumbnailGenerator = Future<String?> Function(
+  String videoPath, {
+  required int maxWidth,
+  required int quality,
+});
+
 class PdfProofReportService {
-  const PdfProofReportService();
+  const PdfProofReportService({
+    ProofVideoThumbnailGenerator? videoThumbnailGenerator,
+  }) : _videoThumbnailGenerator = videoThumbnailGenerator;
+
+  final ProofVideoThumbnailGenerator? _videoThumbnailGenerator;
+
+  static const int maxReportItems = 50;
+  static const int maxReportTitleCharacters = 100;
+  static const int maxProjectNameCharacters = 80;
+  static const int maxDescriptionCharacters = 500;
 
   Future<File> createReport({
     required List<File> files,
@@ -29,27 +45,45 @@ class PdfProofReportService {
     DateTime? generatedAt,
     Directory? outputDirectory,
   }) async {
-    final existingFiles =
-        files.where((file) => file.existsSync()).toList(growable: false);
+    if (files.length > maxReportItems) {
+      throw ArgumentError(
+        'A PDF report can contain at most $maxReportItems captures.',
+      );
+    }
+    final uniqueFiles = <String, File>{};
+    for (final file in files) {
+      if (file.existsSync()) {
+        uniqueFiles[p.normalize(file.absolute.path)] = file;
+      }
+    }
+    final existingFiles = uniqueFiles.values.toList(growable: false);
     if (existingFiles.isEmpty) {
       throw ArgumentError('No existing files were provided for PDF export.');
     }
 
     final generated = generatedAt ?? DateTime.now();
+    final title = _cleanReportTitle(reportTitle);
+    final cleanedProjectName = _cleanProjectName(projectName);
     final entries = <_ProofReportEntry>[];
     for (final file in existingFiles) {
       final isVideo = _isVideoFile(file.path);
       entries.add(
         await _buildEntry(
           file,
-          description: photoDescriptions[file.path]?.trim() ?? '',
+          description: _cleanDescription(photoDescriptions[file.path]),
           isVideo: isVideo,
         ),
       );
     }
-    final title = _cleanReportTitle(reportTitle);
-
-    final proofId = _createProofId(entries, generated);
+    final evidenceId = _createEvidenceId(entries);
+    final proofId = _createProofId(
+      entries,
+      generatedAt: generated,
+      reportTitle: title,
+      projectName: cleanedProjectName,
+      template: template,
+      evidenceId: evidenceId,
+    );
     final theme = await _loadTheme();
     final document = pw.Document(
       title: title,
@@ -63,13 +97,14 @@ class PdfProofReportService {
       pw.MultiPage(
         pageFormat: PdfPageFormat.a4,
         margin: const pw.EdgeInsets.all(28),
-        footer: (context) => _footer(context, proofId),
+        footer: (context) => _footer(context, proofId, evidenceId),
         build: (context) => [
           _header(
             reportTitle: title,
-            projectName: projectName,
+            projectName: cleanedProjectName,
             generatedAt: generated,
             proofId: proofId,
+            evidenceId: evidenceId,
             itemCount: entries.length,
             template: template,
           ),
@@ -85,8 +120,14 @@ class PdfProofReportService {
     );
 
     final directory = outputDirectory ?? await getTemporaryDirectory();
-    final stamp = DateFormat('yyyyMMdd_HHmmss').format(generated.toLocal());
-    final output = File(p.join(directory.path, 'SurveyCam_Proof_$stamp.pdf'));
+    if (!await directory.exists()) {
+      await directory.create(recursive: true);
+    }
+    final stamp = DateFormat('yyyyMMdd_HHmmss_SSS').format(generated.toLocal());
+    final output = File(
+      p.join(directory.path,
+          'SurveyCam_Proof_${stamp}_${proofId.substring(0, 8)}.pdf'),
+    );
     await output.writeAsBytes(await document.save(), flush: true);
     return output;
   }
@@ -134,7 +175,24 @@ class PdfProofReportService {
     if (cleaned == null || cleaned.isEmpty) {
       return 'SurveyCam Proof Report';
     }
-    return cleaned;
+    return _truncate(cleaned, maxReportTitleCharacters);
+  }
+
+  String? _cleanProjectName(String? projectName) {
+    final cleaned = projectName?.trim();
+    if (cleaned == null || cleaned.isEmpty) return null;
+    return _truncate(cleaned, maxProjectNameCharacters);
+  }
+
+  String _cleanDescription(String? description) {
+    final cleaned = description?.trim() ?? '';
+    return _truncate(cleaned, maxDescriptionCharacters);
+  }
+
+  String _truncate(String value, int maxCharacters) {
+    final runes = value.runes.toList(growable: false);
+    if (runes.length <= maxCharacters) return value;
+    return '${String.fromCharCodes(runes.take(maxCharacters - 1))}…';
   }
 
   pw.Widget _reportPurposeNote() {
@@ -173,7 +231,6 @@ class PdfProofReportService {
     final sha = await _sha256(file);
     return _ProofReportEntry(
       fileName: p.basename(file.path),
-      path: file.path,
       sizeBytes: stat.size,
       modifiedAt: stat.modified,
       sha256: sha,
@@ -188,23 +245,25 @@ class PdfProofReportService {
       Uint8List bytes;
       if (isVideo) {
         // Use high resolution for PDF reports
-        final thumbPath = await ThumbnailUtils.generateVideoThumbnail(
-          file.path,
-          maxWidth: 1280,
-          quality: 90,
-        );
+        final generator = _videoThumbnailGenerator;
+        final thumbPath = generator == null
+            ? await ThumbnailUtils.generateVideoThumbnail(
+                file.path,
+                maxWidth: 1280,
+                quality: 90,
+              )
+            : await generator(
+                file.path,
+                maxWidth: 1280,
+                quality: 90,
+              );
         if (thumbPath == null) return null;
         bytes = await File(thumbPath).readAsBytes();
       } else {
         bytes = await file.readAsBytes();
       }
 
-      final decoded = img.decodeImage(bytes);
-      if (decoded == null) return null;
-
-      final resized =
-          decoded.width > 1400 ? img.copyResize(decoded, width: 1400) : decoded;
-      return Uint8List.fromList(img.encodeJpg(resized, quality: 82));
+      return await compute(_compressProofPreview, bytes);
     } catch (_) {
       return null;
     }
@@ -215,18 +274,44 @@ class PdfProofReportService {
     return digest.toString();
   }
 
-  String _createProofId(List<_ProofReportEntry> entries, DateTime generatedAt) {
+  String _createEvidenceId(List<_ProofReportEntry> entries) {
+    final evidence = entries
+        .map((entry) => '${entry.sha256}:${entry.sizeBytes}')
+        .toList()
+      ..sort();
+    return sha256
+        .convert(utf8.encode(jsonEncode(evidence)))
+        .toString()
+        .substring(0, 24);
+  }
+
+  String _createProofId(
+    List<_ProofReportEntry> entries, {
+    required DateTime generatedAt,
+    required String reportTitle,
+    required String? projectName,
+    required ProofReportTemplate template,
+    required String evidenceId,
+  }) {
     final seed = jsonEncode({
+      'version': 2,
       'generatedAt': generatedAt.toUtc().toIso8601String(),
+      'reportTitle': reportTitle,
+      'projectName': projectName,
+      'template': template.name,
+      'evidenceId': evidenceId,
       'files': entries
           .map((entry) => {
                 'name': entry.fileName,
                 'size': entry.sizeBytes,
                 'sha256': entry.sha256,
+                'modifiedAt': entry.modifiedAt.toUtc().toIso8601String(),
+                'description': entry.description,
+                'isVideo': entry.isVideo,
               })
           .toList(),
     });
-    return sha256.convert(utf8.encode(seed)).toString().substring(0, 16);
+    return sha256.convert(utf8.encode(seed)).toString().substring(0, 24);
   }
 
   pw.Widget _header({
@@ -234,6 +319,7 @@ class PdfProofReportService {
     required String? projectName,
     required DateTime generatedAt,
     required String proofId,
+    required String evidenceId,
     required int itemCount,
     required ProofReportTemplate template,
   }) {
@@ -272,6 +358,11 @@ class PdfProofReportService {
           pw.SizedBox(height: 4),
           pw.Text(
             'Proof ID: ${proofId.toUpperCase()}',
+            style: const pw.TextStyle(color: PdfColors.grey300, fontSize: 10),
+          ),
+          pw.SizedBox(height: 4),
+          pw.Text(
+            'Evidence set ID: ${evidenceId.toUpperCase()}',
             style: const pw.TextStyle(color: PdfColors.grey300, fontSize: 10),
           ),
           pw.SizedBox(height: 4),
@@ -485,7 +576,6 @@ class PdfProofReportService {
         _detailRow('Modified', modified),
         _detailRow('Size', _formatBytes(entry.sizeBytes)),
         _detailRow('SHA-256', entry.sha256),
-        _detailRow('Path', entry.path),
       ],
     );
   }
@@ -508,12 +598,16 @@ class PdfProofReportService {
     );
   }
 
-  pw.Widget _footer(pw.Context context, String proofId) {
+  pw.Widget _footer(
+    pw.Context context,
+    String proofId,
+    String evidenceId,
+  ) {
     return pw.Row(
       mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
       children: [
         pw.Text(
-          'SurveyCam proof ID ${proofId.toUpperCase()}',
+          'Proof ${proofId.toUpperCase()} · Evidence ${evidenceId.toUpperCase()}',
           style: const pw.TextStyle(fontSize: 8, color: PdfColors.grey600),
         ),
         pw.Text(
@@ -532,10 +626,24 @@ class PdfProofReportService {
   }
 }
 
+Uint8List? _compressProofPreview(Uint8List bytes) {
+  final decoded = img.decodeImage(bytes);
+  if (decoded == null) return null;
+
+  const maxDimension = 1100;
+  final longestSide =
+      decoded.width > decoded.height ? decoded.width : decoded.height;
+  final resized = longestSide <= maxDimension
+      ? decoded
+      : decoded.width >= decoded.height
+          ? img.copyResize(decoded, width: maxDimension)
+          : img.copyResize(decoded, height: maxDimension);
+  return Uint8List.fromList(img.encodeJpg(resized, quality: 78));
+}
+
 class _ProofReportEntry {
   const _ProofReportEntry({
     required this.fileName,
-    required this.path,
     required this.sizeBytes,
     required this.modifiedAt,
     required this.sha256,
@@ -545,7 +653,6 @@ class _ProofReportEntry {
   });
 
   final String fileName;
-  final String path;
   final int sizeBytes;
   final DateTime modifiedAt;
   final String sha256;

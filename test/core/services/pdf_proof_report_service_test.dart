@@ -51,29 +51,119 @@ void main() {
   });
 
   test('createReport handles video files by generating thumbnails', () async {
-    final directory = await Directory.systemTemp.createTemp('surveycam_pdf_video_');
+    final directory =
+        await Directory.systemTemp.createTemp('surveycam_pdf_video_');
     addTearDown(() async {
       if (directory.existsSync()) {
         await directory.delete(recursive: true);
       }
     });
 
-    // Mock a video file
     final video = File('${directory.path}/capture.mp4');
     await video.writeAsString('fake video content');
+    final thumbnail = File('${directory.path}/video-thumbnail.jpg');
+    final image = img.Image(width: 80, height: 60);
+    img.fill(image, color: img.ColorRgb8(120, 40, 180));
+    await thumbnail.writeAsBytes(img.encodeJpg(image));
+    var thumbnailRequested = false;
 
-    // Note: In a real test environment, ThumbnailUtils.generateVideoThumbnail 
-    // might fail or need a mock because it depends on path_provider and a plugin.
-    // However, we want to ensure the logic flows correctly.
-    
-    final report = await const PdfProofReportService().createReport(
+    final report = await PdfProofReportService(
+      videoThumbnailGenerator: (
+        path, {
+        required maxWidth,
+        required quality,
+      }) async {
+        thumbnailRequested = true;
+        expect(path, video.path);
+        expect(maxWidth, 1280);
+        expect(quality, 90);
+        return thumbnail.path;
+      },
+    ).createReport(
       files: [video],
       reportTitle: 'Video Report',
       outputDirectory: directory,
     );
 
+    expect(thumbnailRequested, isTrue);
     expect(report.existsSync(), isTrue);
     final header = await report.openRead(0, 4).first;
     expect(String.fromCharCodes(header), '%PDF');
+  });
+
+  test('createReport rejects unbounded capture selections before processing',
+      () async {
+    final files = List<File>.generate(
+      PdfProofReportService.maxReportItems + 1,
+      (index) => File('missing-$index.jpg'),
+    );
+
+    await expectLater(
+      const PdfProofReportService().createReport(files: files),
+      throwsA(
+        isA<ArgumentError>().having(
+          (error) => error.message,
+          'message',
+          contains('at most'),
+        ),
+      ),
+    );
+  });
+
+  test('createReport bounds long user text and creates a missing output folder',
+      () async {
+    final directory =
+        await Directory.systemTemp.createTemp('surveycam_pdf_bounds_');
+    addTearDown(() async {
+      if (directory.existsSync()) {
+        await directory.delete(recursive: true);
+      }
+    });
+    final output = Directory('${directory.path}/nested/report');
+    final photo = File('${directory.path}/capture.jpg');
+    final image = img.Image(width: 80, height: 60);
+    img.fill(image, color: img.ColorRgb8(20, 80, 160));
+    await photo.writeAsBytes(img.encodeJpg(image));
+
+    final report = await const PdfProofReportService().createReport(
+      files: [photo],
+      reportTitle: List.filled(1000, 'T').join(),
+      projectName: List.filled(1000, 'P').join(),
+      photoDescriptions: {
+        photo.path: List.filled(1000, 'Description ').join(),
+      },
+      generatedAt: DateTime.utc(2026, 2, 3, 4, 5, 6),
+      outputDirectory: output,
+    );
+
+    expect(output.existsSync(), isTrue);
+    expect(report.existsSync(), isTrue);
+    expect(await report.length(), greaterThan(1000));
+  });
+
+  test('proof identity changes when report descriptions change', () async {
+    final directory =
+        await Directory.systemTemp.createTemp('surveycam_pdf_id_');
+    addTearDown(() => directory.delete(recursive: true));
+    final photo = File('${directory.path}/capture.jpg');
+    final image = img.Image(width: 40, height: 40);
+    await photo.writeAsBytes(img.encodeJpg(image));
+    final generatedAt = DateTime.utc(2026, 3, 4, 5, 6, 7);
+    const service = PdfProofReportService();
+
+    final first = await service.createReport(
+      files: [photo],
+      photoDescriptions: {photo.path: 'Before repair'},
+      generatedAt: generatedAt,
+      outputDirectory: directory,
+    );
+    final second = await service.createReport(
+      files: [photo],
+      photoDescriptions: {photo.path: 'After repair'},
+      generatedAt: generatedAt,
+      outputDirectory: directory,
+    );
+
+    expect(first.path, isNot(second.path));
   });
 }

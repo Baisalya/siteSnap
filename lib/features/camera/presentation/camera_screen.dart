@@ -75,20 +75,29 @@ class _CameraScreenState extends ConsumerState<CameraScreen> {
     });
 
     /// DATE TIME UPDATE TIMER
-    _dateTimer = Timer.periodic(
-      const Duration(seconds: 1),
-      (_) {
-        final current = ref.read(overlayPreviewProvider);
-        final settings = ref.read(overlaySettingsProvider);
+    // Riverpod forbids provider writes while the first widget tree is being
+    // built. Start the clock immediately after that first frame instead.
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      _updateOverlayDateTime();
+      _dateTimer = Timer.periodic(
+        const Duration(seconds: 1),
+        (_) {
+          if (mounted) _updateOverlayDateTime();
+        },
+      );
+    });
+  }
 
-        ref.read(overlayPreviewProvider.notifier).state = current.copyWith(
-          dateTime: OverlayUtils.formatDateTime(
-            DateTime.now(),
-            settings.language,
-            settings.use24HourTime,
-          ),
-        );
-      },
+  void _updateOverlayDateTime() {
+    final current = ref.read(overlayPreviewProvider);
+    final settings = ref.read(overlaySettingsProvider);
+    ref.read(overlayPreviewProvider.notifier).state = current.copyWith(
+      dateTime: OverlayUtils.formatDateTime(
+        DateTime.now(),
+        settings.language,
+        settings.use24HourTime,
+      ),
     );
   }
 
@@ -263,8 +272,7 @@ class _CameraScreenState extends ConsumerState<CameraScreen> {
     final privacyAccepted = ref.watch(privacyProvider);
     final cameraState = ref.watch(cameraViewModelProvider);
     final cameraVM = ref.read(cameraViewModelProvider.notifier);
-    final activeProject =
-        ref.watch(projectProvider.select((value) => value.activeProject));
+    final activeProject = ref.watch(effectiveActiveProjectProvider);
 
     final lastImage = ref.watch(lastImageProvider);
     final focusPoint = ref.watch(focusPointProvider);
@@ -336,6 +344,10 @@ class _CameraScreenState extends ConsumerState<CameraScreen> {
               longitude: 0,
               altitude: 0,
               locationWarning: "GPS turned off",
+              clearWeather: true,
+              clearHumidity: true,
+              clearAir: true,
+              clearPressure: true,
             );
             return;
           }
@@ -347,6 +359,10 @@ class _CameraScreenState extends ConsumerState<CameraScreen> {
               longitude: 0,
               altitude: 0,
               locationWarning: "Give location permission",
+              clearWeather: true,
+              clearHumidity: true,
+              clearAir: true,
+              clearPressure: true,
             );
             return;
           }
@@ -357,6 +373,10 @@ class _CameraScreenState extends ConsumerState<CameraScreen> {
               longitude: 0,
               altitude: 0,
               locationWarning: "Fetching location...",
+              clearWeather: true,
+              clearHumidity: true,
+              clearAir: true,
+              clearPressure: true,
             );
             return;
           }
@@ -390,17 +410,31 @@ class _CameraScreenState extends ConsumerState<CameraScreen> {
               position.latitude,
               position.longitude,
             );
-            if (weatherData != null &&
-                mounted &&
-                fetchSerial == _locationFetchSerial) {
+            if (mounted && fetchSerial == _locationFetchSerial) {
               ref.read(overlayPreviewProvider.notifier).state =
                   ref.read(overlayPreviewProvider.notifier).state.copyWith(
-                        weather: weatherData.temp,
-                        humidity: weatherData.humidity,
-                        air: weatherData.airQuality,
-                        pressure: weatherData.pressure,
+                        weather: weatherData?.temp,
+                        clearWeather: weatherData?.temp == null,
+                        humidity: weatherData?.humidity,
+                        clearHumidity: weatherData?.humidity == null,
+                        air: weatherData?.airQuality,
+                        clearAir: weatherData?.airQuality == null,
+                        pressure: weatherData?.pressure,
+                        clearPressure: weatherData?.pressure == null,
                       );
             }
+          } else if (!wantsWeatherData &&
+              (current.weather != null ||
+                  current.humidity != null ||
+                  current.air != null ||
+                  current.pressure != null)) {
+            ref.read(overlayPreviewProvider.notifier).state =
+                ref.read(overlayPreviewProvider).copyWith(
+                      clearWeather: true,
+                      clearHumidity: true,
+                      clearAir: true,
+                      clearPressure: true,
+                    );
           }
 
           final settings = ref.read(cameraSettingsProvider);
@@ -609,7 +643,7 @@ class _CameraScreenState extends ConsumerState<CameraScreen> {
                                                       final orientation = ref.watch(
                                                           deviceOrientationProvider);
                                                       final settings = ref.watch(
-                                                          overlaySettingsProvider);
+                                                          effectiveOverlaySettingsProvider);
                                                       return CustomPaint(
                                                         painter:
                                                             LiveOverlayPainter(
@@ -1179,18 +1213,25 @@ class _CameraScreenState extends ConsumerState<CameraScreen> {
                                     try {
                                       final path = await cameraVM.capture();
 
-                                      _showPhotoCapturedFeedback();
-
                                       if (path != null && context.mounted) {
+                                        _showPhotoCapturedFeedback();
                                         unawaited(
                                           Future<void>(() async {
-                                            await Future.delayed(
-                                              const Duration(milliseconds: 180),
-                                            );
+                                            // Let the shutter feedback paint,
+                                            // then show the captured image on
+                                            // the next frame without a fixed
+                                            // artificial delay.
+                                            await WidgetsBinding
+                                                .instance.endOfFrame;
                                             if (!context.mounted) return;
                                             await cameraVM.handlePostCapture(
                                                 path, context);
                                           }),
+                                        );
+                                      } else {
+                                        _finishPhotoCapture();
+                                        _showCameraSnack(
+                                          "Photo could not be captured. Please try again.",
                                         );
                                       }
                                     } catch (e) {

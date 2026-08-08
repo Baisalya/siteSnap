@@ -1,7 +1,18 @@
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:shared_preferences/shared_preferences.dart';
+import 'package:surveycam/core/monetization/premium_policy.dart';
+import 'package:surveycam/features/overlay/domain/overlay_model.dart';
 import 'package:surveycam/features/overlay/domain/overlay_settings.dart';
+import 'package:surveycam/features/overlay/presentation/overlay_settings_provider.dart';
 
 void main() {
+  TestWidgetsFlutterBinding.ensureInitialized();
+
+  setUp(() {
+    SharedPreferences.setMockInitialValues({});
+  });
+
   test('persists brand watermark settings through json', () {
     const settings = OverlaySettings(
       watermarkPresetIndex: 2,
@@ -50,5 +61,71 @@ void main() {
     expect(settings.activeWatermarkText, 'Client A');
     expect(settings.activeWatermarkLogoPath, '/tmp/client-a.png');
     expect(settings.activeWatermarkShowLogo, isFalse);
+  });
+
+  test('environment values can be explicitly cleared after a failed reading',
+      () {
+    const data = OverlayData(
+      dateTime: '',
+      latitude: 0,
+      longitude: 0,
+      altitude: 0,
+      heading: 0,
+      direction: 'N',
+      note: '',
+      weather: '25°C',
+      humidity: '70%',
+      air: 'Good',
+      pressure: '1000 hPa',
+    );
+
+    final cleared = data.copyWith(
+      clearWeather: true,
+      clearHumidity: true,
+      clearAir: true,
+      clearPressure: true,
+    );
+
+    expect(cleared.weather, isNull);
+    expect(cleared.humidity, isNull);
+    expect(cleared.air, isNull);
+    expect(cleared.pressure, isNull);
+  });
+
+  test('effective settings enforce the centralized custom-branding gate',
+      () async {
+    final container = ProviderContainer(
+      overrides: [
+        premiumPolicyProvider.overrideWithValue(
+          const PremiumPolicy(freeLaunchMode: false),
+        ),
+      ],
+    );
+    addTearDown(container.dispose);
+    final notifier = container.read(overlaySettingsProvider.notifier);
+    await notifier.ready;
+    await notifier.setWatermarkPresetIndex(1);
+
+    expect(container.read(overlaySettingsProvider).watermarkPresetIndex, 1);
+    expect(
+      container.read(effectiveOverlaySettingsProvider).watermarkPresetIndex,
+      0,
+    );
+  });
+
+  test('an immediate setting update waits for persisted settings to load',
+      () async {
+    SharedPreferences.setMockInitialValues({
+      'overlay_show_datetime': false,
+      'overlay_watermark_text': 'Persisted brand',
+    });
+    final notifier = OverlaySettingsNotifier();
+    addTearDown(notifier.dispose);
+
+    await notifier.setShowAltitude(false);
+
+    expect(notifier.state.showDateTime, isFalse);
+    expect(notifier.state.showAltitude, isFalse);
+    expect(notifier.state.watermarkText, 'Persisted brand');
   });
 }

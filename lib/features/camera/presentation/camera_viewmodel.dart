@@ -54,6 +54,7 @@ class CameraViewModel extends StateNotifier<CameraState>
   bool _startRecordingInFlight = false;
   bool _stopRecordingInFlight = false;
   Timer? _videoHistoryTimer;
+  late final Future<void> _captureDependenciesReady;
 
   // App lifecycle events can arrive as inactive -> paused -> resumed in quick
   // succession. Keep them serialized so CameraPreview never receives a
@@ -65,18 +66,22 @@ class CameraViewModel extends StateNotifier<CameraState>
   // Optimized overlay history storage
   final List<VideoOverlaySample> _videoDataHistory = [];
   DateTime? _recordingStartTime;
+  String? _recordingProjectId;
 
   bool get isCameraStable => _isCameraStable;
   double get exposureValue => _currentExposure;
 
   CameraViewModel(this.ref) : super(const CameraState(isReady: false)) {
     WidgetsBinding.instance.addObserver(this);
+    // Start plugin/preferences initialization while CameraX is opening so the
+    // first shutter press does not pay these one-time costs.
+    _captureDependenciesReady = _warmCaptureDependencies();
     ref.listen<OverlayData>(
       overlayPreviewProvider,
       (_, __) => _recordCurrentVideoOverlaySample(),
     );
     ref.listen<OverlaySettings>(
-      overlaySettingsProvider,
+      effectiveOverlaySettingsProvider,
       (_, __) => _recordCurrentVideoOverlaySample(),
     );
 
@@ -91,6 +96,20 @@ class CameraViewModel extends StateNotifier<CameraState>
 
   void _initBackgroundService() {
     FlutterForegroundTask.addTaskDataCallback(_onReceiveTaskData);
+  }
+
+  Future<void> _warmCaptureDependencies() async {
+    try {
+      await Future.wait<void>([
+        ref.read(overlaySettingsProvider.notifier).ready,
+        ref.read(projectProvider.notifier).ready,
+        GallerySaver.warmUp(),
+      ]);
+    } catch (e) {
+      // Capture can still continue with provider defaults. Individual save
+      // paths retain their own error handling and persistence fallbacks.
+      debugPrint('Photo dependency warm-up skipped: $e');
+    }
   }
 
   void _onReceiveTaskData(dynamic message) {
@@ -110,28 +129,9 @@ class CameraViewModel extends StateNotifier<CameraState>
           processingMessage: warning ?? 'Video saved successfully.',
           videoProcessingError: null,
         );
-        unawaited(ref.read(galleryFilesProvider.notifier).refresh());
+        unawaited(_syncCompletedVideo(message));
       } else if (message['type'] == 'image_complete') {
-        final originalPath = message['originalPath'] as String?;
-        final savedPath = message['path'] as String?;
-        if (savedPath != null && savedPath.isNotEmpty) {
-          final savedFile = File(savedPath);
-          ref.read(lastImageProvider.notifier).state = savedFile;
-          if (originalPath != null && originalPath.isNotEmpty) {
-            ref
-                .read(galleryProcessingProvider.notifier)
-                .complete(File(originalPath), savedFile);
-            ref
-                .read(galleryFilesProvider.notifier)
-                .showFileImmediately(savedFile, replace: File(originalPath));
-          } else {
-            ref.read(galleryFilesProvider.notifier).showFileImmediately(
-                  savedFile,
-                );
-          }
-        } else {
-          unawaited(ref.read(galleryFilesProvider.notifier).refresh());
-        }
+        unawaited(_syncCompletedImage(message));
       } else if (message['type'] == 'image_error') {
         final originalPath = message['originalPath'] as String?;
         if (originalPath != null && originalPath.isNotEmpty) {
@@ -151,6 +151,64 @@ class CameraViewModel extends StateNotifier<CameraState>
           videoProcessingError: null,
         );
       }
+    }
+  }
+
+  Future<void> _syncCompletedVideo(Map<String, dynamic> message) async {
+    final projectId = message['projectId'] as String?;
+    final rawPaths = message['paths'];
+    final paths = rawPaths is List
+        ? rawPaths.whereType<String>().where((path) => path.isNotEmpty).toList()
+        : <String>[];
+
+    if (paths.isEmpty) {
+      final singlePath = message['path'] as String?;
+      if (singlePath != null && singlePath.isNotEmpty) {
+        paths.add(singlePath);
+      }
+    }
+
+    for (final path in paths) {
+      await ref.read(projectProvider.notifier).assignFileToProject(
+            File(path),
+            projectId: projectId,
+          );
+    }
+    if (paths.isEmpty) {
+      await ref.read(projectProvider.notifier).refreshAssignments();
+    }
+    await ref.read(galleryFilesProvider.notifier).refresh();
+  }
+
+  Future<void> _syncCompletedImage(Map<String, dynamic> message) async {
+    final originalPath = message['originalPath'] as String?;
+    final savedPath = message['path'] as String?;
+    final projectId = message['projectId'] as String?;
+    if (savedPath == null || savedPath.isEmpty) {
+      await ref.read(projectProvider.notifier).refreshAssignments();
+      await ref.read(galleryFilesProvider.notifier).refresh();
+      return;
+    }
+
+    final savedFile = File(savedPath);
+    final originalFile = originalPath == null || originalPath.isEmpty
+        ? null
+        : File(originalPath);
+    await ref.read(projectProvider.notifier).assignFileToProject(
+          savedFile,
+          projectId: projectId,
+          replace: originalFile,
+        );
+    ref.read(lastImageProvider.notifier).state = savedFile;
+    if (originalFile != null) {
+      ref
+          .read(galleryProcessingProvider.notifier)
+          .complete(originalFile, savedFile);
+      ref
+          .read(galleryFilesProvider.notifier)
+          .showFileImmediately(savedFile, replace: originalFile);
+    } else {
+      ref.read(galleryFilesProvider.notifier).showFileImmediately(savedFile);
     }
   }
 
@@ -282,7 +340,7 @@ class CameraViewModel extends StateNotifier<CameraState>
         _isCameraStable = true;
 
         state = state.copyWith(
-          isReady: true,
+          isReady: false,
           controller: controller,
           exposure: _currentExposure,
           minExposure: _minExposure,
@@ -295,6 +353,7 @@ class CameraViewModel extends StateNotifier<CameraState>
 
         await _configureCameraAfterReady(controller);
         if (!mounted || !_isActiveController(controller)) return;
+        state = state.copyWith(isReady: true);
         unawaited(_warmUpAfterCameraReady());
         unawaited(_resumePendingVideoProcessing());
       } else {
@@ -332,26 +391,9 @@ class CameraViewModel extends StateNotifier<CameraState>
         'initial flash off',
         () => controller.setFlashMode(FlashMode.off),
       );
-      await _safeCameraCommand(
-        controller,
-        'initial focus auto',
-        () => controller.setFocusMode(FocusMode.auto),
-      );
-      await _safeCameraCommand(
-        controller,
-        'initial exposure auto',
-        () => controller.setExposureMode(ExposureMode.auto),
-      );
-      await _safeCameraCommand(
-        controller,
-        'initial focus point',
-        () => controller.setFocusPoint(const Offset(0.5, 0.5)),
-      );
-      await _safeCameraCommand(
-        controller,
-        'initial exposure point',
-        () => controller.setExposurePoint(const Offset(0.5, 0.5)),
-      );
+      // The repository already establishes automatic focus and exposure while
+      // initializing the controller. Repeating those commands (and resetting
+      // center points) delayed the first photo on CameraX devices.
 
       final minExposure = await _safeCameraQuery<double>(
         controller,
@@ -380,14 +422,6 @@ class CameraViewModel extends StateNotifier<CameraState>
       _maxExposure = maxExposure ?? _maxExposure;
       _currentExposure = 0.0.clamp(_minExposure, _maxExposure);
 
-      await _safeCameraCommand(
-        controller,
-        'initial exposure offset',
-        () => controller.setExposureOffset(_currentExposure),
-      );
-
-      if (!_isActiveController(controller)) return;
-
       state = state.copyWith(
         exposure: _currentExposure,
         minExposure: _minExposure,
@@ -402,15 +436,6 @@ class CameraViewModel extends StateNotifier<CameraState>
 
   Future<void> _warmUpAfterCameraReady() async {
     try {
-      final controller = state.controller;
-      if (controller != null && controller.value.isInitialized) {
-        await _safeCameraCommand(
-          controller,
-          'video pre-warm',
-          controller.prepareForVideoRecording,
-        );
-      }
-      await GallerySaver.warmUp();
       await Future.delayed(const Duration(milliseconds: 600));
       if (!mounted) return;
       await PermissionService.requestLocationIfNeeded();
@@ -442,7 +467,7 @@ class CameraViewModel extends StateNotifier<CameraState>
         .clamp(0, 1 << 31)
         .toInt();
     final data = ref.read(overlayPreviewProvider);
-    final settings = ref.read(overlaySettingsProvider);
+    final settings = ref.read(effectiveOverlaySettingsProvider);
     final orientation = state.orientation;
 
     if (!force && _videoDataHistory.isNotEmpty) {
@@ -856,6 +881,19 @@ class CameraViewModel extends StateNotifier<CameraState>
 
   void setCameraMode(CameraMode mode) {
     state = state.copyWith(cameraMode: mode);
+    if (mode == CameraMode.video) {
+      unawaited(_prepareVideoForCurrentController());
+    }
+  }
+
+  Future<void> _prepareVideoForCurrentController() async {
+    final controller = state.controller;
+    if (controller == null || !controller.value.isInitialized) return;
+    await _safeCameraCommand(
+      controller,
+      'video pre-warm',
+      controller.prepareForVideoRecording,
+    );
   }
 
   bool _shouldMirrorSegment(CameraLensType lens) {
@@ -937,10 +975,7 @@ class CameraViewModel extends StateNotifier<CameraState>
     _captureInFlight = true;
     unawaited(HapticFeedback.mediumImpact());
 
-    final overlayData = ref.read(overlayPreviewProvider);
-    ref.read(capturedOverlayProvider.notifier).state = overlayData;
     final deviceOrientation = ref.read(deviceOrientationProvider);
-
     state = state.copyWith(
       isCapturing: true,
       captureOrientation: deviceOrientation,
@@ -948,6 +983,12 @@ class CameraViewModel extends StateNotifier<CameraState>
     );
 
     try {
+      await _captureDependenciesReady;
+      if (!_isActiveController(controller)) return null;
+
+      final overlayData = ref.read(overlayPreviewProvider);
+      ref.read(capturedOverlayProvider.notifier).state = overlayData;
+
       final repo = ref.read(cameraRepositoryProvider);
 
       // 🔥 SPEED OPTIMIZATION: Skip redundant exposure preparation if we are already in
@@ -1016,7 +1057,7 @@ class CameraViewModel extends StateNotifier<CameraState>
 
     final overlayData = ref.read(overlayPreviewProvider);
     ref.read(capturedOverlayProvider.notifier).state = overlayData;
-    final overlaySettings = ref.read(overlaySettingsProvider);
+    final overlaySettings = ref.read(effectiveOverlaySettingsProvider);
     final deviceOrientation = ref.read(deviceOrientationProvider);
     final captureLens = state.currentLens;
     final aspectRatio = state.aspectRatio;
@@ -1106,11 +1147,14 @@ class CameraViewModel extends StateNotifier<CameraState>
     try {
       if (controller == null || !_isActiveController(controller)) return;
 
-      await _safeCameraCommand(
-        controller,
-        'restore flash off',
-        () => controller.setFlashMode(FlashMode.off),
-      );
+      if (state.flashMode == FlashMode.always &&
+          state.currentLens != CameraLensType.front) {
+        await _safeCameraCommand(
+          controller,
+          'restore flash off',
+          () => controller.setFlashMode(FlashMode.off),
+        );
+      }
 
       if (state.isManualFocus) {
         await _safeCameraCommand(
@@ -1245,6 +1289,9 @@ class CameraViewModel extends StateNotifier<CameraState>
       _videoHistoryTimer?.cancel();
       if (clearSegments || state.videoSegments.isEmpty) {
         _videoDataHistory.clear();
+        await ref.read(projectProvider.notifier).ready;
+        await ref.read(overlaySettingsProvider.notifier).ready;
+        _recordingProjectId = ref.read(effectiveActiveProjectIdProvider);
       }
       _recordingStartTime = DateTime.now();
 
@@ -1342,7 +1389,7 @@ class CameraViewModel extends StateNotifier<CameraState>
         history.add(VideoOverlaySample(
           data: ref.read(overlayPreviewProvider),
           orientation: state.orientation,
-          settings: ref.read(overlaySettingsProvider),
+          settings: ref.read(effectiveOverlaySettingsProvider),
           timestampMs: 0,
         ));
       }
@@ -1383,7 +1430,7 @@ class CameraViewModel extends StateNotifier<CameraState>
         history: history,
         durationMs: totalDurationMs,
         createdAtMs: now.millisecondsSinceEpoch,
-        projectId: ref.read(projectProvider).activeProjectId,
+        projectId: _recordingProjectId,
       );
 
       await VideoProcessingTaskHandler.enqueueJob(job);
@@ -1396,6 +1443,7 @@ class CameraViewModel extends StateNotifier<CameraState>
       );
       _videoDataHistory.clear();
       _recordingStartTime = null;
+      _recordingProjectId = null;
     } catch (e) {
       debugPrint("Stop recording error: $e");
       final friendlyError = _friendlyStopRecordingError(e);
@@ -1413,6 +1461,7 @@ class CameraViewModel extends StateNotifier<CameraState>
       _videoHistoryTimer = null;
       _videoDataHistory.clear();
       _recordingStartTime = null;
+      _recordingProjectId = null;
       if (!jobQueuedForProcessing) {
         await FlutterForegroundTask.stopService();
       }

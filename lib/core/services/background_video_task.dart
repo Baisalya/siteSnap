@@ -474,6 +474,7 @@ class VideoProcessingTaskHandler extends TaskHandler {
         'type': 'complete',
         'path': savedPaths.isEmpty ? null : savedPaths.first,
         'paths': savedPaths,
+        'projectId': job.projectId,
         'warning': savedWithoutOverlay ? 'Saved without overlay' : null,
       });
 
@@ -619,6 +620,7 @@ class VideoProcessingTaskHandler extends TaskHandler {
         'type': 'image_complete',
         'originalPath': imageJob.originalPath,
         'path': savedFile.path,
+        'projectId': imageJob.projectId,
       });
 
       _scheduleStopIfIdle(const Duration(seconds: 2));

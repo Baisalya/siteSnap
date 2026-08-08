@@ -87,6 +87,7 @@ class _ImagePreviewScreenState extends ConsumerState<ImagePreviewScreen> {
       // 800px is enough for a sharp-looking thumbnail while the high-res loads.
       final fastCodec = await ui.instantiateImageCodec(bytes, targetWidth: 800);
       final fastFrame = await fastCodec.getNextFrame();
+      fastCodec.dispose();
 
       if (!mounted) {
         fastFrame.image.dispose();
@@ -104,6 +105,7 @@ class _ImagePreviewScreenState extends ConsumerState<ImagePreviewScreen> {
         allowUpscaling: false,
       );
       final frame = await codec.getNextFrame();
+      codec.dispose();
 
       if (!mounted) {
         frame.image.dispose();
@@ -124,7 +126,10 @@ class _ImagePreviewScreenState extends ConsumerState<ImagePreviewScreen> {
   void _loadSvg() async {
     final pic = await PreviewOverlayPainter.loadSvg();
 
-    if (!mounted) return;
+    if (!mounted) {
+      pic.picture.dispose();
+      return;
+    }
 
     setState(() {
       _svgPicture = pic;
@@ -147,6 +152,7 @@ class _ImagePreviewScreenState extends ConsumerState<ImagePreviewScreen> {
       final bytes = await file.readAsBytes();
       final codec = await ui.instantiateImageCodec(bytes);
       final frame = await codec.getNextFrame();
+      codec.dispose();
 
       if (!mounted || _loadedCustomLogoPath != path) {
         frame.image.dispose();
@@ -267,6 +273,7 @@ class _ImagePreviewScreenState extends ConsumerState<ImagePreviewScreen> {
     _transformationController.dispose();
     _previewImage?.dispose();
     _customLogoImage?.dispose();
+    _svgPicture?.picture.dispose();
     super.dispose();
   }
 
@@ -284,7 +291,7 @@ class _ImagePreviewScreenState extends ConsumerState<ImagePreviewScreen> {
     final cameraState = ref.read(cameraViewModelProvider);
     final captured = ref.read(capturedOverlayProvider);
     final live = ref.read(overlayPreviewProvider);
-    final settings = ref.read(overlaySettingsProvider);
+    final settings = ref.read(effectiveOverlaySettingsProvider);
 
     final overlayData = (captured ?? live).copyWith(
       note: live.note,
@@ -460,7 +467,7 @@ class _ImagePreviewScreenState extends ConsumerState<ImagePreviewScreen> {
     final captured = ref.watch(capturedOverlayProvider);
     final live = ref.watch(overlayPreviewProvider);
     final cameraState = ref.watch(cameraViewModelProvider);
-    final settings = ref.watch(overlaySettingsProvider);
+    final settings = ref.watch(effectiveOverlaySettingsProvider);
     if (_loadedCustomLogoPath != settings.activeWatermarkLogoPath) {
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (mounted) _loadCustomLogo(settings.activeWatermarkLogoPath);
@@ -1193,7 +1200,8 @@ class _CapturedPhotoPreviewPainter extends CustomPainter {
 
     final brandText = settings.activeWatermarkText.trim();
     final hasText = brandText.isNotEmpty;
-    final hasLogo = settings.activeWatermarkShowLogo;
+    final hasLogo = settings.activeWatermarkShowLogo &&
+        (settings.watermarkPresetIndex == 0 || customLogo != null);
     final textPainter = TextPainter(
       text: TextSpan(
         text: brandText,

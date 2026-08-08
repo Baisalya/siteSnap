@@ -5,11 +5,8 @@ import 'package:surveycam/core/di/providers.dart';
 /// =======================================================
 /// SINGLE LOCATION FETCH
 /// =======================================================
-final locationViewModelProvider =
-FutureProvider<Position>((ref) async {
-
-  final serviceEnabled =
-  await Geolocator.isLocationServiceEnabled();
+final locationViewModelProvider = FutureProvider<Position>((ref) async {
+  final serviceEnabled = await Geolocator.isLocationServiceEnabled();
 
   if (!serviceEnabled) {
     throw Exception("Location services disabled");
@@ -25,18 +22,14 @@ FutureProvider<Position>((ref) async {
   return ref.read(locationRepositoryProvider).getLocation();
 });
 
-
 /// =======================================================
 /// LIVE LOCATION STREAM (STABLE VERSION)
 /// =======================================================
 final locationStreamProvider =
-StreamProvider.autoDispose<Position?>((ref) async* {
-
+    StreamProvider.autoDispose<Position?>((ref) async* {
   while (true) {
-
     /// CHECK LOCATION SERVICE
-    final serviceEnabled =
-    await Geolocator.isLocationServiceEnabled();
+    final serviceEnabled = await Geolocator.isLocationServiceEnabled();
 
     if (!serviceEnabled) {
       yield null;
@@ -45,8 +38,7 @@ StreamProvider.autoDispose<Position?>((ref) async* {
     }
 
     /// CHECK PERMISSION
-    final permission =
-    await Geolocator.checkPermission();
+    final permission = await Geolocator.checkPermission();
 
     if (permission == LocationPermission.denied ||
         permission == LocationPermission.deniedForever) {
@@ -63,9 +55,7 @@ StreamProvider.autoDispose<Position?>((ref) async* {
         distanceFilter: 5,
       ),
     ).map((position) {
-
-      if (position.latitude == 0 ||
-          position.longitude == 0) {
+      if (position.latitude == 0 || position.longitude == 0) {
         return null;
       }
 
@@ -73,7 +63,3 @@ StreamProvider.autoDispose<Position?>((ref) async* {
     });
   }
 });
-
-
-
-

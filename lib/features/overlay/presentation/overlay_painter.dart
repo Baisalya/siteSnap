@@ -82,6 +82,7 @@ class WatermarkProcessor {
     final codec = await ui.instantiateImageCodec(bytes);
     final frame = await codec.getNextFrame();
     uiImage = frame.image;
+    codec.dispose();
 
     _cachedSvgString ??= await rootBundle.loadString(assetName);
     final PictureInfo pictureInfo = await svg.vg.loadPicture(
@@ -194,7 +195,8 @@ class WatermarkProcessor {
 
       final brandText = settings.activeWatermarkText.trim();
       final hasText = brandText.isNotEmpty;
-      final hasLogo = settings.activeWatermarkShowLogo;
+      final hasLogo = settings.activeWatermarkShowLogo &&
+          (settings.watermarkPresetIndex == 0 || customLogo != null);
       final textPainter = _brandTextPainter(brandText, baseSize);
       final double logoSize =
           hasLogo ? (hasText ? textPainter.height : baseSize * 0.06) : 0;
@@ -244,6 +246,7 @@ class WatermarkProcessor {
     uiImage.dispose();
     finalImage.dispose();
     customLogo?.dispose();
+    pictureInfo.picture.dispose();
 
     if (byteData == null) return Uint8List(0);
 
@@ -264,6 +267,7 @@ class WatermarkProcessor {
       final bytes = await file.readAsBytes();
       final codec = await ui.instantiateImageCodec(bytes);
       final frame = await codec.getNextFrame();
+      codec.dispose();
       return frame.image;
     } catch (_) {
       return null;
@@ -339,7 +343,8 @@ class WatermarkProcessor {
       img.encodeJpg(
         processedImage,
         quality: 95, // 🔥 95 is standard high quality and much faster than 100
-        chroma: img.JpegChroma.yuv420, // 🔥 yuv420 is significantly faster than yuv444
+        chroma: img
+            .JpegChroma.yuv420, // 🔥 yuv420 is significantly faster than yuv444
       ),
     );
   }

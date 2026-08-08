@@ -55,8 +55,8 @@ class CameraSettingsNotifier extends StateNotifier<CameraSettings> {
           lines.length <= 1 ? '' : lines.skip(1).join('\n').trim();
 
       // Set note to just the extra note (preserving the separate line status)
-      ref.read(overlayPreviewProvider.notifier).state = overlay.copyWith(
-          note: extraNote.isEmpty ? '' : "\n$extraNote");
+      ref.read(overlayPreviewProvider.notifier).state =
+          overlay.copyWith(note: extraNote.isEmpty ? '' : "\n$extraNote");
     }
   }
 

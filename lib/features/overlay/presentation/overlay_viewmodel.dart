@@ -41,8 +41,11 @@ class OverlayViewModel extends StateNotifier<void> {
     OverlaySettings? settingsOverride,
   }) async {
     try {
+      if (settingsOverride == null) {
+        await ref.read(overlaySettingsProvider.notifier).ready;
+      }
       final OverlaySettings settings =
-          settingsOverride ?? ref.read(overlaySettingsProvider);
+          settingsOverride ?? ref.read(effectiveOverlaySettingsProvider);
 
       final bytes = await WatermarkProcessor.drawOverlay(
         original,
@@ -73,9 +76,13 @@ class OverlayViewModel extends StateNotifier<void> {
     OverlaySettings? settingsOverride,
   }) async {
     try {
+      await ref.read(projectProvider.notifier).ready;
+      if (settingsOverride == null) {
+        await ref.read(overlaySettingsProvider.notifier).ready;
+      }
       final OverlaySettings settings =
-          settingsOverride ?? ref.read(overlaySettingsProvider);
-      final projectId = ref.read(projectProvider).activeProjectId;
+          settingsOverride ?? ref.read(effectiveOverlaySettingsProvider);
+      final projectId = ref.read(effectiveActiveProjectIdProvider);
 
       ref.read(lastImageProvider.notifier).state = original;
       ref.read(galleryFilesProvider.notifier).showFileImmediately(original);
@@ -125,6 +132,8 @@ class OverlayViewModel extends StateNotifier<void> {
     bool mirror = false,
   }) async {
     try {
+      await ref.read(projectProvider.notifier).ready;
+      final projectId = ref.read(effectiveActiveProjectIdProvider);
       final bytes = await processImage(
         original,
         orientation,
@@ -136,10 +145,12 @@ class OverlayViewModel extends StateNotifier<void> {
       );
 
       final savedFile = await GallerySaver.saveImageBytes(bytes);
-      final settings = ref.read(overlaySettingsProvider);
-      await ref
-          .read(projectProvider.notifier)
-          .assignFileToActiveProject(savedFile, replace: original);
+      final settings = ref.read(effectiveOverlaySettingsProvider);
+      await ref.read(projectProvider.notifier).assignFileToProject(
+            savedFile,
+            projectId: projectId,
+            replace: original,
+          );
       await MediaAuditService.recordImageSave(
         originalFile: original,
         outputFile: savedFile,
@@ -183,6 +194,8 @@ class OverlayViewModel extends StateNotifier<void> {
     bool showRawPlaceholder = true,
   }) async {
     try {
+      await ref.read(projectProvider.notifier).ready;
+      final projectId = ref.read(effectiveActiveProjectIdProvider);
       var rawPlaceholderShown = false;
 
       // 🔥 OPTIMIZATION: Try to wait for the prepared bytes for a very short window (150ms).
@@ -192,9 +205,11 @@ class OverlayViewModel extends StateNotifier<void> {
         if (bytes.isEmpty) throw Exception('Prepared image was empty');
 
         final savedFile = await GallerySaver.saveImageBytes(bytes);
-        await ref
-            .read(projectProvider.notifier)
-            .assignFileToActiveProject(savedFile, replace: original);
+        await ref.read(projectProvider.notifier).assignFileToProject(
+              savedFile,
+              projectId: projectId,
+              replace: original,
+            );
         await MediaAuditService.recordImageSave(
           originalFile: original,
           outputFile: savedFile,
@@ -240,7 +255,7 @@ class OverlayViewModel extends StateNotifier<void> {
       rawPlaceholderShown = true;
       await ref
           .read(projectProvider.notifier)
-          .assignFileToActiveProject(original);
+          .assignFileToProject(original, projectId: projectId);
 
       final finalBytes = await preparedBytes;
       if (finalBytes.isEmpty) {

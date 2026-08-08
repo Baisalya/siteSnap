@@ -125,9 +125,7 @@ class PreviewOverlayPainter extends CustomPainter {
     // ===============================
     final isRightSide = data.position != WatermarkPosition.bottomLeft;
 
-    final dx = isRightSide
-        ? drawWidth - totalWidth - padding
-        : padding;
+    final dx = isRightSide ? drawWidth - totalWidth - padding : padding;
 
     final dy = padding;
 

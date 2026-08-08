@@ -1,16 +1,25 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_riverpod/legacy.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:surveycam/core/monetization/premium_feature.dart';
+import 'package:surveycam/core/monetization/premium_policy.dart';
 import 'package:surveycam/features/overlay/domain/overlay_settings.dart';
 
 class OverlaySettingsNotifier extends StateNotifier<OverlaySettings> {
   OverlaySettingsNotifier() : super(const OverlaySettings()) {
-    _loadSettings();
+    _loadFuture = _loadSettings().catchError((Object error, StackTrace stack) {
+      debugPrint('Overlay settings load failed: $error\n$stack');
+    }).whenComplete(() => _loadComplete = true);
   }
 
   Timer? _persistTimer;
+  late final Future<void> _loadFuture;
+  bool _loadComplete = false;
+
+  Future<void> get ready => _loadFuture;
 
   Future<void> _loadSettings() async {
     final prefs = await SharedPreferences.getInstance();
@@ -44,10 +53,10 @@ class OverlaySettingsNotifier extends StateNotifier<OverlaySettings> {
     final languageIndex = prefs.getInt('overlay_language') ?? 0;
     final use24HourTime = prefs.getBool('overlay_24hour') ?? true;
 
-    state = OverlaySettings(
+    final loaded = OverlaySettings(
       backgroundColor: Color(colorValue),
       textColor: Color(textColorValue),
-      backgroundOpacity: opacity,
+      backgroundOpacity: opacity.clamp(0.0, 1.0).toDouble(),
       showDateTime: showDateTime,
       showCoordinates: showCoordinates,
       showAltitude: showAltitude,
@@ -57,7 +66,7 @@ class OverlaySettingsNotifier extends StateNotifier<OverlaySettings> {
       showHumidity: showHumidity,
       showAir: showAir,
       showPressure: showPressure,
-      watermarkPresetIndex: watermarkPresetIndex,
+      watermarkPresetIndex: watermarkPresetIndex.clamp(0, 2),
       watermarkText: watermarkText,
       watermarkLogoPath: watermarkLogoPath,
       watermarkShowLogo: watermarkShowLogo,
@@ -70,12 +79,17 @@ class OverlaySettingsNotifier extends StateNotifier<OverlaySettings> {
           .values[languageIndex.clamp(0, AppLanguage.values.length - 1)],
       use24HourTime: use24HourTime,
     );
+    if (mounted) {
+      state = loaded;
+    }
   }
 
   Future<void> updateSettings(
     OverlaySettings settings, {
     bool persistImmediately = false,
   }) async {
+    await ready;
+    if (!mounted) return;
     state = settings;
     _persistTimer?.cancel();
     if (persistImmediately) {
@@ -128,71 +142,92 @@ class OverlaySettingsNotifier extends StateNotifier<OverlaySettings> {
     await prefs.setBool('overlay_24hour', settings.use24HourTime);
   }
 
-  void setBackgroundColor(Color color) =>
-      updateSettings(state.copyWith(backgroundColor: color));
-  void setTextColor(Color color) =>
-      updateSettings(state.copyWith(textColor: color));
-  void setBackgroundOpacity(double opacity) =>
-      updateSettings(state.copyWith(backgroundOpacity: opacity));
-  void setShowDateTime(bool value) =>
-      updateSettings(state.copyWith(showDateTime: value));
-  void setShowCoordinates(bool value) =>
-      updateSettings(state.copyWith(showCoordinates: value));
-  void setShowAltitude(bool value) =>
-      updateSettings(state.copyWith(showAltitude: value));
-  void setShowDirection(bool value) =>
-      updateSettings(state.copyWith(showDirection: value));
-  void setShowNote(bool value) =>
-      updateSettings(state.copyWith(showNote: value));
-  void setShowWeather(bool value) =>
-      updateSettings(state.copyWith(showWeather: value));
-  void setShowHumidity(bool value) =>
-      updateSettings(state.copyWith(showHumidity: value));
-  void setShowAir(bool value) => updateSettings(state.copyWith(showAir: value));
-  void setShowPressure(bool value) =>
-      updateSettings(state.copyWith(showPressure: value));
-  void setWatermarkPresetIndex(int value) =>
-      updateSettings(state.copyWith(watermarkPresetIndex: value));
-  void setWatermarkTextForSlot(int slot, String value) {
-    if (slot == 2) {
-      updateSettings(state.copyWith(watermarkText2: value));
-    } else {
-      updateSettings(state.copyWith(watermarkText: value));
-    }
+  Future<void> _apply(
+    OverlaySettings Function(OverlaySettings current) transform, {
+    bool persistImmediately = false,
+  }) async {
+    await ready;
+    await updateSettings(
+      transform(state),
+      persistImmediately: persistImmediately,
+    );
   }
 
-  void setWatermarkLogoPathForSlot(int slot, String value) {
-    if (slot == 2) {
-      updateSettings(
-          state.copyWith(watermarkLogoPath2: value, watermarkShowLogo2: true));
-    } else {
-      updateSettings(
-          state.copyWith(watermarkLogoPath: value, watermarkShowLogo: true));
-    }
+  Future<void> setBackgroundColor(Color color) =>
+      _apply((current) => current.copyWith(backgroundColor: color));
+  Future<void> setTextColor(Color color) =>
+      _apply((current) => current.copyWith(textColor: color));
+  Future<void> setBackgroundOpacity(double opacity) => _apply(
+        (current) => current.copyWith(
+          backgroundOpacity: opacity.clamp(0.0, 1.0).toDouble(),
+        ),
+      );
+  Future<void> setShowDateTime(bool value) =>
+      _apply((current) => current.copyWith(showDateTime: value));
+  Future<void> setShowCoordinates(bool value) =>
+      _apply((current) => current.copyWith(showCoordinates: value));
+  Future<void> setShowAltitude(bool value) =>
+      _apply((current) => current.copyWith(showAltitude: value));
+  Future<void> setShowDirection(bool value) =>
+      _apply((current) => current.copyWith(showDirection: value));
+  Future<void> setShowNote(bool value) =>
+      _apply((current) => current.copyWith(showNote: value));
+  Future<void> setShowWeather(bool value) =>
+      _apply((current) => current.copyWith(showWeather: value));
+  Future<void> setShowHumidity(bool value) =>
+      _apply((current) => current.copyWith(showHumidity: value));
+  Future<void> setShowAir(bool value) =>
+      _apply((current) => current.copyWith(showAir: value));
+  Future<void> setShowPressure(bool value) =>
+      _apply((current) => current.copyWith(showPressure: value));
+  Future<void> setWatermarkPresetIndex(int value) =>
+      _apply((current) => current.copyWith(watermarkPresetIndex: value));
+  Future<void> setWatermarkTextForSlot(int slot, String value) {
+    return _apply(
+      (current) => slot == 2
+          ? current.copyWith(watermarkText2: value)
+          : current.copyWith(watermarkText: value),
+    );
   }
 
-  void clearWatermarkLogoPathForSlot(int slot) {
-    if (slot == 2) {
-      updateSettings(state.copyWith(clearWatermarkLogoPath2: true));
-    } else {
-      updateSettings(state.copyWith(clearWatermarkLogoPath: true));
-    }
+  Future<void> setWatermarkLogoPathForSlot(int slot, String value) {
+    return _apply(
+      (current) => slot == 2
+          ? current.copyWith(
+              watermarkLogoPath2: value,
+              watermarkShowLogo2: true,
+            )
+          : current.copyWith(
+              watermarkLogoPath: value,
+              watermarkShowLogo: true,
+            ),
+      persistImmediately: true,
+    );
   }
 
-  void setWatermarkShowLogoForSlot(int slot, bool value) {
-    if (slot == 2) {
-      updateSettings(state.copyWith(watermarkShowLogo2: value));
-    } else {
-      updateSettings(state.copyWith(watermarkShowLogo: value));
-    }
+  Future<void> clearWatermarkLogoPathForSlot(int slot) {
+    return _apply(
+      (current) => slot == 2
+          ? current.copyWith(clearWatermarkLogoPath2: true)
+          : current.copyWith(clearWatermarkLogoPath: true),
+      persistImmediately: true,
+    );
   }
 
-  void setCoordinateFormat(CoordinateFormat format) =>
-      updateSettings(state.copyWith(coordinateFormat: format));
-  void setLanguage(AppLanguage lang) =>
-      updateSettings(state.copyWith(language: lang));
-  void setUse24HourTime(bool value) =>
-      updateSettings(state.copyWith(use24HourTime: value));
+  Future<void> setWatermarkShowLogoForSlot(int slot, bool value) {
+    return _apply(
+      (current) => slot == 2
+          ? current.copyWith(watermarkShowLogo2: value)
+          : current.copyWith(watermarkShowLogo: value),
+    );
+  }
+
+  Future<void> setCoordinateFormat(CoordinateFormat format) =>
+      _apply((current) => current.copyWith(coordinateFormat: format));
+  Future<void> setLanguage(AppLanguage lang) =>
+      _apply((current) => current.copyWith(language: lang));
+  Future<void> setUse24HourTime(bool value) =>
+      _apply((current) => current.copyWith(use24HourTime: value));
 
   Future<void> resetToDefaults() async {
     await updateSettings(const OverlaySettings(), persistImmediately: true);
@@ -201,7 +236,9 @@ class OverlaySettingsNotifier extends StateNotifier<OverlaySettings> {
   @override
   void dispose() {
     _persistTimer?.cancel();
-    _persistSettings(state);
+    if (_loadComplete) {
+      unawaited(_persistSettings(state));
+    }
     super.dispose();
   }
 }
@@ -209,4 +246,14 @@ class OverlaySettingsNotifier extends StateNotifier<OverlaySettings> {
 final overlaySettingsProvider =
     StateNotifierProvider<OverlaySettingsNotifier, OverlaySettings>((ref) {
   return OverlaySettingsNotifier();
+});
+
+final effectiveOverlaySettingsProvider = Provider<OverlaySettings>((ref) {
+  final settings = ref.watch(overlaySettingsProvider);
+  final canUseCustomBranding =
+      ref.watch(premiumPolicyProvider).canUse(PremiumFeature.customBranding);
+  if (canUseCustomBranding || settings.watermarkPresetIndex == 0) {
+    return settings;
+  }
+  return settings.copyWith(watermarkPresetIndex: 0);
 });

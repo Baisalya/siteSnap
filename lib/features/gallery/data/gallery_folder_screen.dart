@@ -60,6 +60,12 @@ class _GalleryFolderScreenState extends ConsumerState<GalleryFolderScreen>
       _showSnack('Select images to share.');
       return;
     }
+    if (selectedImages.length > PdfProofReportService.maxReportItems) {
+      _showSnack(
+        'Select no more than ${PdfProofReportService.maxReportItems} captures per PDF report.',
+      );
+      return;
+    }
 
     SharePlus.instance.share(
       ShareParams(
@@ -92,7 +98,7 @@ class _GalleryFolderScreenState extends ConsumerState<GalleryFolderScreen>
 
     final selectedFiles = selectedImages.toList()
       ..sort((a, b) => a.path.compareTo(b.path));
-    final activeProject = ref.read(projectProvider).activeProject;
+    final activeProject = ref.read(effectiveActiveProjectProvider);
 
     final details = await showModalBottomSheet<_PdfReportDetails>(
       context: context,
@@ -158,13 +164,25 @@ class _GalleryFolderScreenState extends ConsumerState<GalleryFolderScreen>
     ref.read(gallerySelectionProvider.notifier).state = {};
   }
 
+  Future<void> _assignSelectedToProject() async {
+    final selected = ref.read(gallerySelectionProvider).toList(growable: false);
+    if (selected.isEmpty) return;
+    final updated = await showProjectAssignmentSheet(
+      context,
+      files: selected,
+    );
+    if (updated && mounted) {
+      _clearSelection();
+      _showSnack('Project assignments updated.');
+    }
+  }
+
   /// ================= BUILD =================
   @override
   Widget build(BuildContext context) {
     final galleryAsync = ref.watch(galleryFilesProvider);
     final filteredImages = ref.watch(filteredGalleryFilesProvider);
-    final projectState = ref.watch(projectProvider);
-    final activeProject = projectState.activeProject;
+    final activeProject = ref.watch(effectiveActiveProjectProvider);
     final selectedImages = ref.watch(gallerySelectionProvider);
     final selectionMode = selectedImages.isNotEmpty;
 
@@ -200,6 +218,14 @@ class _GalleryFolderScreenState extends ConsumerState<GalleryFolderScreen>
             IconButton(
               icon: const Icon(Icons.select_all, color: Colors.white),
               onPressed: () => _selectAll(filteredImages),
+            ),
+            IconButton(
+              tooltip: 'Assign to project',
+              icon: const Icon(
+                Icons.drive_file_move_rounded,
+                color: Colors.amberAccent,
+              ),
+              onPressed: _assignSelectedToProject,
             ),
             if (_isExportingPdf)
               const Padding(
@@ -673,6 +699,8 @@ class _PdfReportDetailsSheetState extends State<_PdfReportDetailsSheet> {
                             label: 'Report title',
                             icon: Icons.title_rounded,
                             textInputAction: TextInputAction.next,
+                            maxLength:
+                                PdfProofReportService.maxReportTitleCharacters,
                           ),
                         );
                       }
@@ -684,6 +712,8 @@ class _PdfReportDetailsSheetState extends State<_PdfReportDetailsSheet> {
                             label: 'Project name',
                             icon: Icons.business_center_rounded,
                             textInputAction: TextInputAction.next,
+                            maxLength:
+                                PdfProofReportService.maxProjectNameCharacters,
                           ),
                         );
                       }
@@ -842,18 +872,21 @@ class _ReportTextField extends StatelessWidget {
   final String label;
   final IconData icon;
   final TextInputAction textInputAction;
+  final int maxLength;
 
   const _ReportTextField({
     required this.controller,
     required this.label,
     required this.icon,
     required this.textInputAction,
+    required this.maxLength,
   });
 
   @override
   Widget build(BuildContext context) {
     return TextField(
       controller: controller,
+      maxLength: maxLength,
       textInputAction: textInputAction,
       style: const TextStyle(color: Colors.white),
       decoration: InputDecoration(
@@ -920,6 +953,7 @@ class _PhotoDescriptionField extends StatelessWidget {
             const SizedBox(height: 10),
             TextField(
               controller: controller,
+              maxLength: PdfProofReportService.maxDescriptionCharacters,
               minLines: 2,
               maxLines: 4,
               textInputAction: TextInputAction.newline,

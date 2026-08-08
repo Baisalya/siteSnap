@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:io';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_riverpod/legacy.dart';
@@ -13,21 +14,31 @@ final galleryRepositoryProvider =
 final galleryFilesProvider =
     StateNotifierProvider<GalleryFilesNotifier, AsyncValue<List<File>>>((ref) {
   final repo = ref.watch(galleryRepositoryProvider);
-  final notifier = GalleryFilesNotifier(repo);
+  final projectController = ref.watch(projectProvider.notifier);
+  final notifier = GalleryFilesNotifier(
+    repo,
+    onFilesLoaded: projectController.reconcileAssignmentsWithFiles,
+  );
   notifier.ensureLoaded();
   return notifier;
 });
 
 final filteredGalleryFilesProvider = Provider<List<File>>((ref) {
   final galleryAsync = ref.watch(galleryFilesProvider);
-  final projectController = ref.watch(projectProvider.notifier);
+  final projectState = ref.watch(projectProvider);
+  final effectiveProjectId = ref.watch(effectiveActiveProjectIdProvider);
+
+  List<File> filter(List<File> files) {
+    if (effectiveProjectId == null) return files;
+    return projectState.filterFilesForActiveProject(files);
+  }
 
   return galleryAsync.maybeWhen(
-    data: (images) => projectController.filterFilesForActiveProject(images),
+    data: filter,
     loading: () {
       final cached =
           ref.read(galleryRepositoryProvider).cachedFiles ?? const <File>[];
-      return projectController.filterFilesForActiveProject(cached);
+      return filter(cached);
     },
     orElse: () => const <File>[],
   );
@@ -98,12 +109,16 @@ class GalleryProcessingNotifier
 }
 
 class GalleryFilesNotifier extends StateNotifier<AsyncValue<List<File>>> {
-  GalleryFilesNotifier(this._repo)
-      : super(_repo.cachedFiles == null
+  GalleryFilesNotifier(
+    this._repo, {
+    Future<void> Function(List<File>)? onFilesLoaded,
+  })  : _onFilesLoaded = onFilesLoaded,
+        super(_repo.cachedFiles == null
             ? const AsyncValue.loading()
             : AsyncValue.data(_repo.cachedFiles!));
 
   final SurveyCamGalleryRepository _repo;
+  final Future<void> Function(List<File>)? _onFilesLoaded;
   Future<void>? _loadFuture;
 
   Future<void> ensureLoaded({bool forceRefresh = false}) {
@@ -140,6 +155,10 @@ class GalleryFilesNotifier extends StateNotifier<AsyncValue<List<File>>> {
     _loadFuture = _repo.loadImages(forceRefresh: forceRefresh).then((files) {
       if (!mounted) return;
       state = AsyncValue.data(files);
+      final onFilesLoaded = _onFilesLoaded;
+      if (onFilesLoaded != null) {
+        unawaited(onFilesLoaded(files));
+      }
     }).catchError((Object error, StackTrace stackTrace) {
       if (!mounted) return;
       final cached = _repo.cachedFiles;

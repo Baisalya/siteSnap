@@ -82,9 +82,13 @@ class OverlayData {
     String? locationWarning,
     bool clearLocationWarning = false,
     String? weather,
+    bool clearWeather = false,
     String? humidity,
+    bool clearHumidity = false,
     String? air,
+    bool clearAir = false,
     String? pressure,
+    bool clearPressure = false,
     WatermarkPosition? position,
   }) {
     return OverlayData(
@@ -98,10 +102,10 @@ class OverlayData {
       locationWarning: clearLocationWarning
           ? null
           : (locationWarning ?? this.locationWarning),
-      weather: weather ?? this.weather,
-      humidity: humidity ?? this.humidity,
-      air: air ?? this.air,
-      pressure: pressure ?? this.pressure,
+      weather: clearWeather ? null : (weather ?? this.weather),
+      humidity: clearHumidity ? null : (humidity ?? this.humidity),
+      air: clearAir ? null : (air ?? this.air),
+      pressure: clearPressure ? null : (pressure ?? this.pressure),
       position: position ?? this.position,
     );
   }

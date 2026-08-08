@@ -4,7 +4,6 @@ import '../domain/WatermarkPosition.dart';
 import 'note_controller.dart';
 import 'overlay_preview_state.dart';
 
-
 class NoteEditSheet extends ConsumerWidget {
   const NoteEditSheet({super.key});
 
@@ -45,9 +44,7 @@ class NoteEditSheet extends ConsumerWidget {
                   TextPosition(offset: note.length),
                 ),
               onChanged: (value) {
-                ref
-                    .read(noteControllerProvider.notifier)
-                    .update(value);
+                ref.read(noteControllerProvider.notifier).update(value);
               },
             ),
 
@@ -57,20 +54,17 @@ class NoteEditSheet extends ConsumerWidget {
             // POSITION SWITCH
             // ===========================
             Row(
-              mainAxisAlignment:
-              MainAxisAlignment.spaceBetween,
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
                 const Text(
                   "Left Overlay Position",
                   style: TextStyle(fontSize: 16),
                 ),
                 Switch(
-                  value: overlay.position ==
-                      WatermarkPosition.bottomLeft,
+                  value: overlay.position == WatermarkPosition.bottomLeft,
                   onChanged: (value) {
-                    ref
-                        .read(overlayPreviewProvider.notifier)
-                        .state = overlay.copyWith(
+                    ref.read(overlayPreviewProvider.notifier).state =
+                        overlay.copyWith(
                       position: value
                           ? WatermarkPosition.bottomLeft
                           : WatermarkPosition.bottomRight,

@@ -27,7 +27,7 @@ void main() {
     // but we can at least ensure it builds and executes without error.
     // The fix is verified by the logic change itself and manual inspection if possible.
     // However, we can try to verify the spans logic if we expose it or use a test-only subclass.
-    
+
     expect(painter, isNotNull);
   });
 }

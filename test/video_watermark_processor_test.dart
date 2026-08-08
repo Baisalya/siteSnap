@@ -1,5 +1,6 @@
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:flutter_svg/flutter_svg.dart' as svg;
 import 'package:surveycam/core/services/video_processing_job.dart';
 import 'package:surveycam/features/camera/domain/camera_lens_type.dart';
 import 'package:surveycam/features/overlay/domain/WatermarkPosition.dart';
@@ -7,6 +8,7 @@ import 'package:surveycam/features/overlay/domain/overlay_model.dart';
 import 'package:surveycam/features/overlay/domain/overlay_settings.dart';
 import 'package:surveycam/features/overlay/domain/video_overlay_sample.dart';
 import 'package:surveycam/features/overlay/presentation/video_watermark_processor.dart';
+import 'package:vector_graphics/vector_graphics.dart';
 
 const _overlayData = OverlayData(
   dateTime: '',
@@ -28,6 +30,78 @@ VideoOverlaySample _sample(DeviceOrientation orientation, int timestampMs) {
 }
 
 void main() {
+  TestWidgetsFlutterBinding.ensureInitialized();
+
+  test('video overlays honor field toggles and hide location warnings',
+      () async {
+    final svgString = await rootBundle.loadString('Assets/app_logo.svg');
+    final PictureInfo pictureInfo = await svg.vg.loadPicture(
+      svg.SvgStringLoader(svgString),
+      null,
+    );
+    addTearDown(pictureInfo.picture.dispose);
+    const hiddenSettings = OverlaySettings(
+      showDateTime: false,
+      showCoordinates: false,
+      showAltitude: false,
+      showDirection: false,
+      showNote: false,
+      showWeather: false,
+      showHumidity: false,
+      showAir: false,
+      showPressure: false,
+    );
+    const warningData = OverlayData(
+      dateTime: '',
+      latitude: 12.34,
+      longitude: 56.78,
+      altitude: 123.4,
+      heading: 45,
+      direction: 'NE',
+      note: '',
+      locationWarning: 'GPS turned off',
+      weather: '25°C',
+    );
+
+    final hiddenWithWarning =
+        await VideoWatermarkProcessor.generateSingleFrameBytes(
+      data: warningData,
+      orientation: DeviceOrientation.portraitUp,
+      width: 320,
+      height: 240,
+      pictureInfo: pictureInfo,
+      showWatermark: false,
+      settings: hiddenSettings,
+    );
+    final hiddenWithoutWarning =
+        await VideoWatermarkProcessor.generateSingleFrameBytes(
+      data: warningData.copyWith(clearLocationWarning: true),
+      orientation: DeviceOrientation.portraitUp,
+      width: 320,
+      height: 240,
+      pictureInfo: pictureInfo,
+      showWatermark: false,
+      settings: hiddenSettings,
+    );
+    final visibleEnvironment =
+        await VideoWatermarkProcessor.generateSingleFrameBytes(
+      data: warningData.copyWith(clearLocationWarning: true),
+      orientation: DeviceOrientation.portraitUp,
+      width: 320,
+      height: 240,
+      pictureInfo: pictureInfo,
+      showWatermark: false,
+      settings: hiddenSettings.copyWith(
+        showAltitude: true,
+        showDirection: true,
+        showWeather: true,
+      ),
+    );
+
+    expect(hiddenWithWarning, hiddenWithoutWarning);
+    expect(visibleEnvironment, isNot(hiddenWithoutWarning));
+  });
+
   test('video processing keeps the recording start orientation', () {
     final samples = [
       _sample(DeviceOrientation.portraitUp, 0),

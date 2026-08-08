@@ -3,7 +3,7 @@ import 'package:flutter_riverpod/legacy.dart';
 import 'overlay_preview_state.dart';
 
 final noteControllerProvider =
-StateNotifierProvider<NoteController, String>((ref) {
+    StateNotifierProvider<NoteController, String>((ref) {
   return NoteController(ref);
 });
 

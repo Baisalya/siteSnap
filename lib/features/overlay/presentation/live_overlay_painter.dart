@@ -98,21 +98,23 @@ class LiveOverlayPainter extends CustomPainter {
       spans.add(TextSpan(text: "${data.dateTime}\n", style: textStyle));
     }
 
-    if (data.locationWarning != null) {
-      spans.add(
-          TextSpan(text: "${data.locationWarning}\n", style: warningStyle));
-    } else if (settings.showCoordinates) {
-      final latLabel = OverlayUtils.getLabel('latitude', settings.language);
-      final lonLabel = OverlayUtils.getLabel('longitude', settings.language);
-      final latVal = OverlayUtils.formatCoordinate(
-          data.latitude, true, settings.coordinateFormat);
-      final lonVal = OverlayUtils.formatCoordinate(
-          data.longitude, false, settings.coordinateFormat);
+    if (settings.showCoordinates) {
+      if (data.locationWarning != null) {
+        spans.add(
+            TextSpan(text: "${data.locationWarning}\n", style: warningStyle));
+      } else {
+        final latLabel = OverlayUtils.getLabel('latitude', settings.language);
+        final lonLabel = OverlayUtils.getLabel('longitude', settings.language);
+        final latVal = OverlayUtils.formatCoordinate(
+            data.latitude, true, settings.coordinateFormat);
+        final lonVal = OverlayUtils.formatCoordinate(
+            data.longitude, false, settings.coordinateFormat);
 
-      spans.add(TextSpan(
-        text: "$latLabel: $latVal\n$lonLabel: $lonVal\n",
-        style: textStyle,
-      ));
+        spans.add(TextSpan(
+          text: "$latLabel: $latVal\n$lonLabel: $lonVal\n",
+          style: textStyle,
+        ));
+      }
     }
 
     String altDirText = "";
@@ -153,10 +155,15 @@ class LiveOverlayPainter extends CustomPainter {
       spans.add(TextSpan(text: extraNote, style: noteStyle));
     }
 
+    if (spans.isEmpty) {
+      canvas.restore();
+      return;
+    }
+
     final textPainter = TextPainter(
       text: TextSpan(children: spans),
       textDirection: TextDirection.ltr,
-      maxLines: 8,
+      maxLines: 14,
       ellipsis: '...',
     );
 

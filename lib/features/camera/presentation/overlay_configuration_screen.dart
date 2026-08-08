@@ -6,6 +6,8 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:path/path.dart' as p;
 import 'package:path_provider/path_provider.dart';
+import 'package:surveycam/core/monetization/premium_feature.dart';
+import 'package:surveycam/core/monetization/premium_policy.dart';
 import 'package:surveycam/core/services/weather_service.dart';
 import 'package:surveycam/features/overlay/domain/overlay_settings.dart';
 import 'package:surveycam/features/overlay/presentation/overlay_settings_provider.dart';
@@ -54,7 +56,7 @@ class _OverlayConfigurationScreenState
     if (widget.focusBrandWatermark || widget.scrollToLocationToggle) {
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (!mounted) return;
-        
+
         if (widget.focusBrandWatermark) {
           final initialSlot = widget.initialWatermarkSlot;
           if (initialSlot != null) {
@@ -96,11 +98,13 @@ class _OverlayConfigurationScreenState
     super.dispose();
   }
 
-  void _clearUnsupportedSensorToggles(
+  Future<void> _clearUnsupportedSensorToggles(
     EnvironmentSensorAvailability availability,
-  ) {
+  ) async {
     if (!mounted) return;
 
+    await ref.read(overlaySettingsProvider.notifier).ready;
+    if (!mounted) return;
     final settings = ref.read(overlaySettingsProvider);
     final updated = settings.copyWith(
       showWeather: availability.temperature ? settings.showWeather : false,
@@ -121,6 +125,8 @@ class _OverlayConfigurationScreenState
   Widget build(BuildContext context) {
     final settings = ref.watch(overlaySettingsProvider);
     final notifier = ref.read(overlaySettingsProvider.notifier);
+    final canUseCustomBranding =
+        ref.watch(premiumPolicyProvider).canUse(PremiumFeature.customBranding);
 
     return Scaffold(
       backgroundColor: const Color(0xFF121212),
@@ -160,7 +166,11 @@ class _OverlayConfigurationScreenState
               children: [
                 _buildSectionLabel("BRAND WATERMARK"),
                 const SizedBox(height: 12),
-                _buildBrandWatermarkCard(settings, notifier),
+                _buildBrandWatermarkCard(
+                  settings,
+                  notifier,
+                  canUseCustomBranding: canUseCustomBranding,
+                ),
               ],
             ),
           ),
@@ -308,8 +318,9 @@ class _OverlayConfigurationScreenState
 
   Widget _buildBrandWatermarkCard(
     OverlaySettings settings,
-    OverlaySettingsNotifier notifier,
-  ) {
+    OverlaySettingsNotifier notifier, {
+    required bool canUseCustomBranding,
+  }) {
     final selectedSlot = settings.watermarkPresetIndex.clamp(0, 2).toInt();
     final isDefaultSlot = selectedSlot == 0;
 
@@ -341,9 +352,27 @@ class _OverlayConfigurationScreenState
           spacing: 8,
           runSpacing: 8,
           children: [
-            _buildWatermarkPresetChip("Default", 0, settings, notifier),
-            _buildWatermarkPresetChip("Custom 1", 1, settings, notifier),
-            _buildWatermarkPresetChip("Custom 2", 2, settings, notifier),
+            _buildWatermarkPresetChip(
+              "Default",
+              0,
+              settings,
+              notifier,
+              enabled: true,
+            ),
+            _buildWatermarkPresetChip(
+              "Custom 1",
+              1,
+              settings,
+              notifier,
+              enabled: canUseCustomBranding,
+            ),
+            _buildWatermarkPresetChip(
+              "Custom 2",
+              2,
+              settings,
+              notifier,
+              enabled: canUseCustomBranding,
+            ),
           ],
         ),
         const SizedBox(height: 14),
@@ -385,6 +414,8 @@ class _OverlayConfigurationScreenState
           const SizedBox(height: 14),
           TextField(
             controller: _watermarkTextController,
+            enabled: canUseCustomBranding,
+            maxLength: 80,
             style: const TextStyle(color: Colors.white, fontSize: 15),
             decoration: InputDecoration(
               labelText: "Watermark Text",
@@ -411,8 +442,12 @@ class _OverlayConfigurationScreenState
             Switch(
               value: showLogo,
               activeThumbColor: Colors.blueAccent,
-              onChanged: (value) =>
-                  notifier.setWatermarkShowLogoForSlot(selectedSlot, value),
+              onChanged: canUseCustomBranding
+                  ? (value) => notifier.setWatermarkShowLogoForSlot(
+                        selectedSlot,
+                        value,
+                      )
+                  : null,
             ),
           ),
           const Divider(color: Colors.white10),
@@ -420,7 +455,9 @@ class _OverlayConfigurationScreenState
             children: [
               Expanded(
                 child: OutlinedButton.icon(
-                  onPressed: () => _pickCustomLogo(selectedSlot),
+                  onPressed: canUseCustomBranding
+                      ? () => _pickCustomLogo(selectedSlot)
+                      : null,
                   icon: const Icon(Icons.image_outlined),
                   label: const Text("Choose Logo"),
                   style: OutlinedButton.styleFrom(
@@ -433,8 +470,8 @@ class _OverlayConfigurationScreenState
               ),
               const SizedBox(width: 10),
               IconButton(
-                onPressed: hasCustomLogo
-                    ? () => notifier.clearWatermarkLogoPathForSlot(selectedSlot)
+                onPressed: canUseCustomBranding && hasCustomLogo
+                    ? () => _removeCustomLogo(selectedSlot, logoPath)
                     : null,
                 icon: const Icon(Icons.delete_outline_rounded),
                 tooltip: "Remove custom logo",
@@ -451,7 +488,9 @@ class _OverlayConfigurationScreenState
         Align(
           alignment: Alignment.centerLeft,
           child: Text(
-            "This section is ready to be gated later for custom branding.",
+            canUseCustomBranding
+                ? "Custom branding is available during the free launch."
+                : "Custom branding requires SurveyCam Pro.",
             style: TextStyle(
               color: Colors.amberAccent.withValues(alpha: 0.78),
               fontSize: 11,
@@ -463,21 +502,20 @@ class _OverlayConfigurationScreenState
     );
   }
 
-  Widget _buildWatermarkPresetChip(
-    String label,
-    int slot,
-    OverlaySettings settings,
-    OverlaySettingsNotifier notifier,
-  ) {
+  Widget _buildWatermarkPresetChip(String label, int slot,
+      OverlaySettings settings, OverlaySettingsNotifier notifier,
+      {required bool enabled}) {
     final selected = settings.watermarkPresetIndex == slot;
 
     return ChoiceChip(
       label: Text(label),
       selected: selected,
-      onSelected: (_) {
-        _flushWatermarkTextUpdate();
-        notifier.setWatermarkPresetIndex(slot);
-      },
+      onSelected: enabled
+          ? (_) {
+              _flushWatermarkTextUpdate();
+              notifier.setWatermarkPresetIndex(slot);
+            }
+          : null,
       showCheckmark: false,
       backgroundColor: Colors.white,
       selectedColor: Colors.blueAccent,
@@ -541,28 +579,76 @@ class _OverlayConfigurationScreenState
 
   Future<void> _pickCustomLogo(int slot) async {
     _flushWatermarkTextUpdate();
-    final picked = await ImagePicker().pickImage(source: ImageSource.gallery);
-    if (picked == null) return;
+    File? destination;
+    try {
+      final currentSettings = ref.read(overlaySettingsProvider);
+      final previousPath = _watermarkLogoPathForSlot(currentSettings, slot);
+      final picked = await ImagePicker().pickImage(
+        source: ImageSource.gallery,
+        maxWidth: 1024,
+        maxHeight: 1024,
+        imageQuality: 90,
+      );
+      if (picked == null) return;
 
-    final appDir = await getApplicationDocumentsDirectory();
-    final brandDir = Directory(p.join(appDir.path, 'brand_watermark'));
-    if (!await brandDir.exists()) {
-      await brandDir.create(recursive: true);
+      final appDir = await getApplicationDocumentsDirectory();
+      final brandDir = Directory(p.join(appDir.path, 'brand_watermark'));
+      if (!await brandDir.exists()) {
+        await brandDir.create(recursive: true);
+      }
+
+      final extension =
+          p.extension(picked.path).isEmpty ? '.png' : p.extension(picked.path);
+      destination = File(
+        p.join(
+          brandDir.path,
+          'custom_logo_${slot}_${DateTime.now().millisecondsSinceEpoch}$extension',
+        ),
+      );
+      await File(picked.path).copy(destination.path);
+
+      await ref
+          .read(overlaySettingsProvider.notifier)
+          .setWatermarkLogoPathForSlot(slot, destination.path);
+      if (previousPath != null && previousPath != destination.path) {
+        await _deleteLogoFile(previousPath);
+      }
+    } catch (_) {
+      if (destination != null) await _deleteLogoFile(destination.path);
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Could not save that logo.')),
+        );
+      }
     }
+  }
 
-    final extension =
-        p.extension(picked.path).isEmpty ? '.png' : p.extension(picked.path);
-    final destination = File(
-      p.join(
-        brandDir.path,
-        'custom_logo_${slot}_${DateTime.now().millisecondsSinceEpoch}$extension',
-      ),
-    );
-    await File(picked.path).copy(destination.path);
+  Future<void> _removeCustomLogo(int slot, String? logoPath) async {
+    try {
+      await ref
+          .read(overlaySettingsProvider.notifier)
+          .clearWatermarkLogoPathForSlot(slot);
+      if (logoPath != null) {
+        await _deleteLogoFile(logoPath);
+      }
+    } catch (_) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Could not remove that logo.')),
+        );
+      }
+    }
+  }
 
-    ref
-        .read(overlaySettingsProvider.notifier)
-        .setWatermarkLogoPathForSlot(slot, destination.path);
+  Future<void> _deleteLogoFile(String path) async {
+    try {
+      final file = File(path);
+      if (await file.exists()) {
+        await file.delete();
+      }
+    } catch (_) {
+      // The preference is already cleared; an orphan cleanup failure is safe.
+    }
   }
 
   void _scheduleWatermarkTextUpdate(int slot, String value) {

@@ -4,7 +4,8 @@ import 'package:surveycam/features/overlay/domain/overlay_settings.dart';
 import 'package:surveycam/core/utils/overlay_utils.dart';
 
 class LocationService {
-  static Future<String?> getLocationName(double lat, double lng, {AppLanguage? language}) async {
+  static Future<String?> getLocationName(double lat, double lng,
+      {AppLanguage? language}) async {
     try {
       if (language != null) {
         final resolved = OverlayUtils.resolveLanguage(language);
@@ -12,7 +13,7 @@ class LocationService {
       }
 
       List<Placemark> placemarks = await placemarkFromCoordinates(
-        lat, 
+        lat,
         lng,
       );
       if (placemarks.isNotEmpty) {
@@ -32,11 +33,11 @@ class LocationService {
 
         // 2. Street Address
         addIfNotEmpty(place.subThoroughfare); // House/Building number
-        addIfNotEmpty(place.thoroughfare);    // Street name
+        addIfNotEmpty(place.thoroughfare); // Street name
 
         // 3. Neighborhood/District
-        addIfNotEmpty(place.subLocality);     // Neighborhood
-        addIfNotEmpty(place.locality);        // City
+        addIfNotEmpty(place.subLocality); // Neighborhood
+        addIfNotEmpty(place.locality); // City
 
         // 4. District/County
         addIfNotEmpty(place.subAdministrativeArea); // County/District

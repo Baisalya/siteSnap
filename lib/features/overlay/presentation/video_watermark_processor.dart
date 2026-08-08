@@ -13,6 +13,7 @@ import 'package:ffmpeg_kit_flutter_new_https_gpl/ffmpeg_kit_config.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:path/path.dart' as p;
 
+import 'package:surveycam/core/utils/overlay_utils.dart';
 import 'package:surveycam/features/camera/domain/camera_lens_type.dart';
 import 'package:surveycam/features/overlay/domain/overlay_model.dart';
 import 'package:surveycam/features/overlay/domain/overlay_settings.dart';
@@ -460,59 +461,81 @@ class VideoWatermarkProcessor {
         durationMs: durationMs,
         sampleFps: sampleFps,
       );
-
-      const int batchSize = 4;
-      for (int i = 0; i < frameSamples.length; i += batchSize) {
-        if (await (shouldCancel?.call() ?? Future.value(false))) {
-          return null;
+      final customLogos = <String, ui.Image?>{};
+      final logoPaths = frameSamples
+          .map((sample) => sample.settings.activeWatermarkLogoPath)
+          .whereType<String>()
+          .where((path) => path.isNotEmpty)
+          .toSet();
+      try {
+        for (final path in logoPaths) {
+          customLogos[path] = await _loadCustomLogo(path);
         }
 
-        final List<Future<void>> batchTasks = [];
+        const int batchSize = 4;
+        for (int i = 0; i < frameSamples.length; i += batchSize) {
+          if (await (shouldCancel?.call() ?? Future.value(false))) {
+            try {
+              await sequenceDir.delete(recursive: true);
+            } catch (_) {}
+            return null;
+          }
 
-        for (int j = 0; j < batchSize && (i + j) < frameSamples.length; j++) {
-          final int index = i + j;
-          batchTasks.add(Future(() async {
-            final sample = frameSamples[index];
-            final customLogo =
-                await _loadCustomLogo(sample.settings.activeWatermarkLogoPath);
-            final pngBytes = await generateSingleFrameBytes(
-              data: sample.data,
-              orientation: sample.orientation,
-              width: width,
-              height: height,
-              showOverlay: showOverlay,
-              showWatermark: showWatermark,
-              settings: sample.settings,
-              pictureInfo: pictureInfo,
-              customLogo: customLogo,
-            );
-            customLogo?.dispose();
+          final List<Future<void>> batchTasks = [];
 
-            if (pngBytes != null) {
-              final file = File(p.join(
-                sequenceDir.path,
-                'frame_${index.toString().padLeft(5, '0')}.png',
-              ));
-              await file.writeAsBytes(pngBytes, flush: false);
-            }
-          }));
+          for (int j = 0; j < batchSize && (i + j) < frameSamples.length; j++) {
+            final int index = i + j;
+            batchTasks.add(Future(() async {
+              final sample = frameSamples[index];
+              final customLogoPath = sample.settings.activeWatermarkLogoPath;
+              final pngBytes = await generateSingleFrameBytes(
+                data: sample.data,
+                orientation: sample.orientation,
+                width: width,
+                height: height,
+                showOverlay: showOverlay,
+                showWatermark: showWatermark,
+                settings: sample.settings,
+                pictureInfo: pictureInfo,
+                customLogo:
+                    customLogoPath == null ? null : customLogos[customLogoPath],
+              );
+
+              if (pngBytes != null) {
+                final file = File(p.join(
+                  sequenceDir.path,
+                  'frame_${index.toString().padLeft(5, '0')}.png',
+                ));
+                await file.writeAsBytes(pngBytes, flush: false);
+              }
+            }));
+          }
+
+          await Future.wait(batchTasks);
+
+          if (onProgress != null) {
+            final currentProgress =
+                min(1.0, (i + batchSize) / frameSamples.length);
+            onProgress(currentProgress);
+          }
+
+          if (i % 8 == 0) {
+            await Future<void>.delayed(Duration.zero);
+          }
         }
 
-        await Future.wait(batchTasks);
-
-        // Report progress for image generation (0% to 40%)
-        if (onProgress != null) {
-          final currentProgress =
-              min(1.0, (i + batchSize) / frameSamples.length);
-          onProgress(currentProgress);
+        return sequenceDir.path;
+      } catch (_) {
+        try {
+          await sequenceDir.delete(recursive: true);
+        } catch (_) {}
+        rethrow;
+      } finally {
+        for (final logo in customLogos.values) {
+          logo?.dispose();
         }
-
-        if (i % 8 == 0) {
-          await Future<void>.delayed(Duration.zero);
-        }
+        pictureInfo.picture.dispose();
       }
-
-      return sequenceDir.path;
     } catch (e) {
       debugPrint("Error generating sequence: $e");
       return null;
@@ -532,7 +555,8 @@ class VideoWatermarkProcessor {
     const double margin = 15.0;
     final brandText = settings.activeWatermarkText.trim();
     final hasText = brandText.isNotEmpty;
-    final hasLogo = settings.activeWatermarkShowLogo;
+    final hasLogo = settings.activeWatermarkShowLogo &&
+        (settings.watermarkPresetIndex == 0 || customLogo != null);
 
     final textPainter = TextPainter(
       text: TextSpan(
@@ -636,6 +660,7 @@ class VideoWatermarkProcessor {
       final bytes = await file.readAsBytes();
       final codec = await ui.instantiateImageCodec(bytes);
       final frame = await codec.getNextFrame();
+      codec.dispose();
       return frame.image;
     } catch (_) {
       return null;
@@ -709,84 +734,139 @@ class VideoWatermarkProcessor {
       if (settings.showDateTime && data.dateTime.isNotEmpty) {
         spans.add(TextSpan(text: "${data.dateTime}\n", style: textStyle));
       }
-      if (data.locationWarning != null) {
-        spans.add(TextSpan(
-            text: "${data.locationWarning}\n",
-            style: textStyle.copyWith(color: Colors.redAccent)));
-      } else if (settings.showCoordinates) {
-        spans.add(TextSpan(
-            text:
-                "Lat: ${data.latitude.toStringAsFixed(6)}\nLon: ${data.longitude.toStringAsFixed(6)}\n",
-            style: textStyle));
+      if (settings.showCoordinates) {
+        if (data.locationWarning != null) {
+          spans.add(TextSpan(
+              text: "${data.locationWarning}\n",
+              style: textStyle.copyWith(color: Colors.redAccent)));
+        } else {
+          final latLabel = OverlayUtils.getLabel('latitude', settings.language);
+          final lonLabel =
+              OverlayUtils.getLabel('longitude', settings.language);
+          final latitude = OverlayUtils.formatCoordinate(
+            data.latitude,
+            true,
+            settings.coordinateFormat,
+          );
+          final longitude = OverlayUtils.formatCoordinate(
+            data.longitude,
+            false,
+            settings.coordinateFormat,
+          );
+          spans.add(TextSpan(
+            text: '$latLabel: $latitude\n$lonLabel: $longitude\n',
+            style: textStyle,
+          ));
+        }
+      }
+
+      var altitudeDirection = '';
+      if (settings.showAltitude) {
+        final label = OverlayUtils.getLabel('altitude', settings.language);
+        altitudeDirection += '$label: ${data.altitude.toStringAsFixed(1)}m  ';
+      }
+      if (settings.showDirection) {
+        final label = OverlayUtils.getLabel('direction', settings.language);
+        altitudeDirection +=
+            '$label: ${data.direction} ${data.heading.toStringAsFixed(0)}°';
+      }
+      if (altitudeDirection.isNotEmpty) {
+        spans.add(TextSpan(text: '$altitudeDirection\n', style: textStyle));
+      }
+      if (settings.showWeather && data.weather != null) {
+        final label = OverlayUtils.getLabel('weather', settings.language);
+        spans
+            .add(TextSpan(text: '$label: ${data.weather}\n', style: textStyle));
+      }
+      if (settings.showHumidity && data.humidity != null) {
+        final label = OverlayUtils.getLabel('humidity', settings.language);
+        spans.add(
+            TextSpan(text: '$label: ${data.humidity}\n', style: textStyle));
+      }
+      if (settings.showPressure && data.pressure != null) {
+        final label = OverlayUtils.getLabel('pressure', settings.language);
+        spans.add(
+            TextSpan(text: '$label: ${data.pressure}\n', style: textStyle));
+      }
+      if (settings.showAir && data.air != null) {
+        final label = OverlayUtils.getLabel('air', settings.language);
+        spans.add(TextSpan(text: '$label: ${data.air}\n', style: textStyle));
       }
       if (extraNote.isNotEmpty) {
         spans.add(TextSpan(text: extraNote, style: noteStyle));
       }
-      final textPainter = TextPainter(
-        text: TextSpan(children: spans),
-        textDirection: TextDirection.ltr,
-      )..layout(maxWidth: baseSize * 0.75);
-
-      final paddingH = baseSize * 0.03;
-      final paddingV = baseSize * 0.02;
-      final boxWidth = textPainter.width + (paddingH * 2);
-      final boxHeight = textPainter.height + (paddingV * 2);
-      const double margin = 15.0;
-
-      final bool isLandscape = orientation == DeviceOrientation.landscapeLeft ||
-          orientation == DeviceOrientation.landscapeRight;
-
-      // Swap positions in landscape: Overlay moves to Top-Right
-      final double targetX;
-      final double targetY;
-      if (useLandscapeLeftMarkedArea) {
-        targetX = size.width - margin;
-        targetY = margin + boxHeight;
-      } else if (isLandscape) {
-        targetX = size.width - margin;
-        targetY = margin;
+      if (spans.isEmpty) {
+        canvas.restore();
       } else {
-        targetX = margin;
-        targetY = size.height - margin;
-      }
+        final textPainter = TextPainter(
+          text: TextSpan(children: spans),
+          textDirection: TextDirection.ltr,
+          maxLines: 14,
+          ellipsis: '...',
+        )..layout(maxWidth: baseSize * 0.75);
 
-      canvas.translate(targetX, targetY);
+        final paddingH = baseSize * 0.03;
+        final paddingV = baseSize * 0.02;
+        final boxWidth = textPainter.width + (paddingH * 2);
+        final boxHeight = textPainter.height + (paddingV * 2);
+        const double margin = 15.0;
 
-      switch (orientation) {
-        case DeviceOrientation.portraitDown:
-          canvas.rotate(pi);
-          canvas.translate(-boxWidth, 0);
-          break;
-        case DeviceOrientation.landscapeLeft:
-          canvas.rotate(-pi / 2);
-          canvas.translate(-boxWidth, -boxHeight);
-          break;
-        case DeviceOrientation.landscapeRight:
-          canvas.rotate(pi / 2);
-          break;
-        default:
-          if (useLandscapeLeftMarkedArea) {
+        final bool isLandscape =
+            orientation == DeviceOrientation.landscapeLeft ||
+                orientation == DeviceOrientation.landscapeRight;
+
+        // Swap positions in landscape: Overlay moves to Top-Right
+        final double targetX;
+        final double targetY;
+        if (useLandscapeLeftMarkedArea) {
+          targetX = size.width - margin;
+          targetY = margin + boxHeight;
+        } else if (isLandscape) {
+          targetX = size.width - margin;
+          targetY = margin;
+        } else {
+          targetX = margin;
+          targetY = size.height - margin;
+        }
+
+        canvas.translate(targetX, targetY);
+
+        switch (orientation) {
+          case DeviceOrientation.portraitDown:
             canvas.rotate(pi);
+            canvas.translate(-boxWidth, 0);
             break;
-          }
-          // portraitUp
-          canvas.translate(0, -boxHeight);
-          break;
+          case DeviceOrientation.landscapeLeft:
+            canvas.rotate(-pi / 2);
+            canvas.translate(-boxWidth, -boxHeight);
+            break;
+          case DeviceOrientation.landscapeRight:
+            canvas.rotate(pi / 2);
+            break;
+          default:
+            if (useLandscapeLeftMarkedArea) {
+              canvas.rotate(pi);
+              break;
+            }
+            // portraitUp
+            canvas.translate(0, -boxHeight);
+            break;
+        }
+
+        // Draw Background
+        final rect = Rect.fromLTWH(0, 0, boxWidth, boxHeight);
+        canvas.drawRRect(
+          RRect.fromRectAndRadius(rect, const Radius.circular(8)),
+          Paint()
+            ..color = settings.backgroundColor
+                .withValues(alpha: settings.backgroundOpacity),
+        );
+
+        // Draw Text
+        textPainter.paint(canvas, Offset(paddingH, paddingV));
+
+        canvas.restore();
       }
-
-      // Draw Background
-      final rect = Rect.fromLTWH(0, 0, boxWidth, boxHeight);
-      canvas.drawRRect(
-        RRect.fromRectAndRadius(rect, const Radius.circular(8)),
-        Paint()
-          ..color = settings.backgroundColor
-              .withValues(alpha: settings.backgroundOpacity),
-      );
-
-      // Draw Text
-      textPainter.paint(canvas, Offset(paddingH, paddingV));
-
-      canvas.restore();
     }
 
     if (showWatermark) {
@@ -921,6 +1001,9 @@ class VideoWatermarkProcessor {
 
       return completedPath;
     } catch (e) {
+      try {
+        await Directory(sequenceDir).delete(recursive: true);
+      } catch (_) {}
       debugPrint("Error applying sequence: $e");
       return null;
     }
