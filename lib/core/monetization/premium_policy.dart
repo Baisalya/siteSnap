@@ -1,6 +1,8 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import 'billing_controller.dart';
 import 'premium_feature.dart';
+import 'premium_config.dart';
 
 class PremiumPolicy {
   const PremiumPolicy({
@@ -18,5 +20,14 @@ class PremiumPolicy {
 }
 
 final premiumPolicyProvider = Provider<PremiumPolicy>((ref) {
-  return const PremiumPolicy();
+  if (PremiumConfig.freeLaunchMode) {
+    // Avoid starting the billing client during the free launch. This keeps the
+    // camera startup path small until monetization is deliberately enabled.
+    return const PremiumPolicy(freeLaunchMode: true);
+  }
+  final billing = ref.watch(billingControllerProvider);
+  return PremiumPolicy(
+    freeLaunchMode: PremiumConfig.freeLaunchMode,
+    userHasProPurchase: billing.isPro,
+  );
 });

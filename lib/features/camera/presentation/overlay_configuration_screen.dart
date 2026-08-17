@@ -8,6 +8,7 @@ import 'package:path/path.dart' as p;
 import 'package:path_provider/path_provider.dart';
 import 'package:surveycam/core/monetization/premium_feature.dart';
 import 'package:surveycam/core/monetization/premium_policy.dart';
+import 'package:surveycam/core/monetization/pro_upgrade_screen.dart';
 import 'package:surveycam/core/services/weather_service.dart';
 import 'package:surveycam/features/overlay/domain/overlay_settings.dart';
 import 'package:surveycam/features/overlay/presentation/overlay_settings_provider.dart';
@@ -125,8 +126,11 @@ class _OverlayConfigurationScreenState
   Widget build(BuildContext context) {
     final settings = ref.watch(overlaySettingsProvider);
     final notifier = ref.read(overlaySettingsProvider.notifier);
+    final premiumPolicy = ref.watch(premiumPolicyProvider);
     final canUseCustomBranding =
-        ref.watch(premiumPolicyProvider).canUse(PremiumFeature.customBranding);
+        premiumPolicy.canUse(PremiumFeature.customBranding);
+    final canUseOverlayColors =
+        premiumPolicy.canUse(PremiumFeature.overlayColors);
 
     return Scaffold(
       backgroundColor: const Color(0xFF121212),
@@ -157,7 +161,11 @@ class _OverlayConfigurationScreenState
           const SizedBox(height: 24),
           _buildSectionLabel("VISUAL APPEARANCE"),
           const SizedBox(height: 12),
-          _buildVisualAppearanceCard(settings, notifier),
+          _buildVisualAppearanceCard(
+            settings,
+            notifier,
+            canUseOverlayColors: canUseOverlayColors,
+          ),
           const SizedBox(height: 24),
           KeyedSubtree(
             key: _brandWatermarkKey,
@@ -166,6 +174,10 @@ class _OverlayConfigurationScreenState
               children: [
                 _buildSectionLabel("BRAND WATERMARK"),
                 const SizedBox(height: 12),
+                if (!canUseCustomBranding) ...[
+                  _buildBrandingProGate(),
+                  const SizedBox(height: 12),
+                ],
                 _buildBrandWatermarkCard(
                   settings,
                   notifier,
@@ -191,6 +203,33 @@ class _OverlayConfigurationScreenState
         fontSize: 11,
         fontWeight: FontWeight.w900,
         letterSpacing: 1.5,
+      ),
+    );
+  }
+
+  Widget _buildBrandingProGate() {
+    return Container(
+      padding: const EdgeInsets.fromLTRB(14, 10, 8, 10),
+      decoration: BoxDecoration(
+        color: Colors.blueAccent.withValues(alpha: 0.1),
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: Colors.blueAccent.withValues(alpha: 0.3)),
+      ),
+      child: Row(
+        children: [
+          const Icon(Icons.workspace_premium_rounded, color: Colors.blueAccent),
+          const SizedBox(width: 10),
+          const Expanded(
+            child: Text(
+              'Custom logos, colors, and branding require SurveyCam Pro.',
+              style: TextStyle(color: Colors.white70, fontSize: 12),
+            ),
+          ),
+          TextButton(
+            onPressed: () => showProUpgrade(context),
+            child: const Text('View Pro'),
+          ),
+        ],
       ),
     );
   }
@@ -279,8 +318,9 @@ class _OverlayConfigurationScreenState
 
   Widget _buildVisualAppearanceCard(
     OverlaySettings settings,
-    OverlaySettingsNotifier notifier,
-  ) {
+    OverlaySettingsNotifier notifier, {
+    required bool canUseOverlayColors,
+  }) {
     return _buildCard(
       children: [
         _buildSliderRow(
@@ -299,6 +339,7 @@ class _OverlayConfigurationScreenState
             const Color(0xFF1976D2),
             const Color(0xFF2E7D32),
           ],
+          canUseOverlayColors: canUseOverlayColors,
         ),
         const SizedBox(height: 20),
         _buildColorRow(
@@ -311,6 +352,7 @@ class _OverlayConfigurationScreenState
             Colors.yellow.shade100,
             Colors.blue.shade100,
           ],
+          canUseOverlayColors: canUseOverlayColors,
         ),
       ],
     );
@@ -763,21 +805,54 @@ class _OverlayConfigurationScreenState
     String label,
     ValueChanged<Color> onSelect,
     Color current,
-    List<Color> options,
-  ) {
+    List<Color> options, {
+    required bool canUseOverlayColors,
+  }) {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Text(
-          label,
-          style: const TextStyle(color: Colors.white70, fontSize: 13),
+        Row(
+          children: [
+            Expanded(
+              child: Text(
+                label,
+                style: const TextStyle(color: Colors.white70, fontSize: 13),
+              ),
+            ),
+            if (!canUseOverlayColors)
+              const Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Icon(
+                    Icons.lock_outline_rounded,
+                    color: Colors.amberAccent,
+                    size: 13,
+                  ),
+                  SizedBox(width: 4),
+                  Text(
+                    'White & black free',
+                    style: TextStyle(
+                      color: Colors.amberAccent,
+                      fontSize: 10,
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                ],
+              ),
+          ],
         ),
         const SizedBox(height: 12),
         Row(
           mainAxisAlignment: MainAxisAlignment.spaceBetween,
-          children: options
-              .map((color) => _colorOption(onSelect, color, current == color))
-              .toList(),
+          children: options.map((color) {
+            final requiresPro = !isFreeOverlayColor(color);
+            return _colorOption(
+              onSelect,
+              color,
+              current == color,
+              isLocked: requiresPro && !canUseOverlayColors,
+            );
+          }).toList(),
         ),
       ],
     );
@@ -786,37 +861,62 @@ class _OverlayConfigurationScreenState
   Widget _colorOption(
     ValueChanged<Color> onTap,
     Color color,
-    bool isSelected,
-  ) {
-    return GestureDetector(
-      onTap: () => onTap(color),
-      child: AnimatedContainer(
-        duration: const Duration(milliseconds: 200),
-        width: 44,
-        height: 44,
-        decoration: BoxDecoration(
-          color: color,
-          shape: BoxShape.circle,
-          border: Border.all(
-            color: isSelected ? Colors.blueAccent : Colors.white10,
-            width: isSelected ? 3 : 1,
+    bool isSelected, {
+    required bool isLocked,
+  }) {
+    return Semantics(
+      button: true,
+      selected: isSelected,
+      label: isLocked ? 'SurveyCam Pro overlay color' : 'Overlay color',
+      child: GestureDetector(
+        onTap: () {
+          if (isLocked) {
+            showProUpgrade(context);
+            return;
+          }
+          onTap(color);
+        },
+        child: AnimatedContainer(
+          duration: const Duration(milliseconds: 200),
+          width: 44,
+          height: 44,
+          decoration: BoxDecoration(
+            color: color,
+            shape: BoxShape.circle,
+            border: Border.all(
+              color: isSelected ? Colors.blueAccent : Colors.white10,
+              width: isSelected ? 3 : 1,
+            ),
+            boxShadow: isSelected
+                ? [
+                    BoxShadow(
+                      color: Colors.blueAccent.withValues(alpha: 0.4),
+                      blurRadius: 10,
+                    )
+                  ]
+                : null,
           ),
-          boxShadow: isSelected
-              ? [
-                  BoxShadow(
-                    color: Colors.blueAccent.withValues(alpha: 0.4),
-                    blurRadius: 10,
-                  )
-                ]
-              : null,
+          child: isLocked
+              ? Container(
+                  margin: const EdgeInsets.all(9),
+                  decoration: BoxDecoration(
+                    color: Colors.black.withValues(alpha: 0.62),
+                    shape: BoxShape.circle,
+                  ),
+                  child: const Icon(
+                    Icons.lock_rounded,
+                    color: Colors.white,
+                    size: 16,
+                  ),
+                )
+              : isSelected
+                  ? const Icon(
+                      Icons.check_rounded,
+                      color: Colors.blueAccent,
+                      size: 24,
+                    )
+                  : null,
         ),
-        child: isSelected
-            ? const Icon(
-                Icons.check_rounded,
-                color: Colors.blueAccent,
-                size: 24,
-              )
-            : null,
       ),
     );
   }

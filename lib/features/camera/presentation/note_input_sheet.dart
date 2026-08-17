@@ -1,5 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:surveycam/core/monetization/premium_feature.dart';
+import 'package:surveycam/core/monetization/premium_policy.dart';
+import 'package:surveycam/core/monetization/pro_upgrade_screen.dart';
 import 'package:surveycam/core/services/location_service.dart';
 import 'package:surveycam/features/camera/presentation/camera_settings_provider.dart';
 import 'package:surveycam/features/overlay/domain/WatermarkPosition.dart';
@@ -105,6 +108,8 @@ class _NoteInputSheetState extends ConsumerState<NoteInputSheet> {
       overlayPreviewProvider.select((value) => value.position),
     );
     final overlaySettings = ref.watch(overlaySettingsProvider);
+    final canUseSavedTemplates =
+        ref.watch(premiumPolicyProvider).canUse(PremiumFeature.savedTemplates);
 
     ref.listen(cameraSettingsProvider, (previous, next) {
       if (previous?.autoFetchLocation == true &&
@@ -116,8 +121,8 @@ class _NoteInputSheetState extends ConsumerState<NoteInputSheet> {
       }
     });
 
-    final recent = notes.take(3).toList();
-    final allNotes = notes;
+    final recent = canUseSavedTemplates ? notes.take(3).toList() : const [];
+    final allNotes = canUseSavedTemplates ? notes : const [];
 
     return Container(
       decoration: BoxDecoration(
@@ -172,6 +177,10 @@ class _NoteInputSheetState extends ConsumerState<NoteInputSheet> {
                   const SizedBox(height: 24),
 
                   // ───── RECENT / SAVED NOTES ─────
+                  if (!canUseSavedTemplates) ...[
+                    _buildSavedTemplatesProGate(),
+                    const SizedBox(height: 20),
+                  ],
                   if (recent.isNotEmpty) ...[
                     _buildSectionLabel("RECENTLY USED"),
                     const SizedBox(height: 12),
@@ -732,6 +741,33 @@ class _NoteInputSheetState extends ConsumerState<NoteInputSheet> {
     );
   }
 
+  Widget _buildSavedTemplatesProGate() {
+    return Container(
+      padding: const EdgeInsets.fromLTRB(14, 10, 8, 10),
+      decoration: BoxDecoration(
+        color: Colors.blueAccent.withValues(alpha: 0.1),
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: Colors.blueAccent.withValues(alpha: 0.3)),
+      ),
+      child: Row(
+        children: [
+          const Icon(Icons.note_alt_rounded, color: Colors.blueAccent),
+          const SizedBox(width: 10),
+          const Expanded(
+            child: Text(
+              'Saved note templates are included with SurveyCam Pro.',
+              style: TextStyle(color: Colors.white70, fontSize: 12),
+            ),
+          ),
+          TextButton(
+            onPressed: () => showProUpgrade(context),
+            child: const Text('View Pro'),
+          ),
+        ],
+      ),
+    );
+  }
+
   Widget _buildRecentNotes(List<dynamic> recent) {
     return SizedBox(
       height: 44,
@@ -876,7 +912,9 @@ class _NoteInputSheetState extends ConsumerState<NoteInputSheet> {
     final value = _composeWatermarkText();
     final extraNote = extraNoteController.text.trim();
     if (value.isNotEmpty) {
-      if (extraNote.isNotEmpty) {
+      final canSaveTemplate =
+          ref.read(premiumPolicyProvider).canUse(PremiumFeature.savedTemplates);
+      if (extraNote.isNotEmpty && canSaveTemplate) {
         await ref.read(savedNotesProvider.notifier).addNote(extraNote);
       }
       final overlay = ref.read(overlayPreviewProvider);

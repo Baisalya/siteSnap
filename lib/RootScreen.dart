@@ -1,13 +1,14 @@
 import 'dart:io';
 
-import 'package:flutter/foundation.dart'; // ✅ IMPORTANT
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:in_app_update/in_app_update.dart';
 import 'package:package_info_plus/package_info_plus.dart';
 import 'package:safe_device/safe_device.dart';
 
+import 'core/update/app_update_controller.dart';
+import 'core/update/app_update_models.dart';
+import 'core/update/app_update_widgets.dart';
 import 'package:surveycam/privacypolicy/SplashScreen.dart';
 import 'package:surveycam/privacypolicy/privacyProvider.dart';
 import 'features/camera/presentation/camera_screen.dart';
@@ -20,17 +21,18 @@ class AppLauncher extends ConsumerStatefulWidget {
   ConsumerState<AppLauncher> createState() => _AppLauncherState();
 }
 
-class _AppLauncherState extends ConsumerState<AppLauncher> {
+class _AppLauncherState extends ConsumerState<AppLauncher>
+    with WidgetsBindingObserver {
   bool _isUnauthorized = false;
   String _unauthorizedTitle = "";
   String _unauthorizedMessage = "";
   String _unauthorizedSolution = "";
   bool _cameraInitRequested = false;
-  bool _updateCheckRequested = false;
 
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     // _performSecurityCheck();
     _scheduleUpdateCheck();
   }
@@ -38,8 +40,21 @@ class _AppLauncherState extends ConsumerState<AppLauncher> {
   void _scheduleUpdateCheck() {
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted) return;
-      _checkForUpdate();
+      ref.read(appUpdateControllerProvider.notifier).checkForUpdate();
     });
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) {
+      ref.read(appUpdateControllerProvider.notifier).checkForUpdate();
+    }
+  }
+
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    super.dispose();
   }
 
   Future<void> _performSecurityCheck() async {
@@ -117,7 +132,7 @@ class _AppLauncherState extends ConsumerState<AppLauncher> {
       });
 
       /// 🔥 Safe update check
-      _checkForUpdate();
+      ref.read(appUpdateControllerProvider.notifier).checkForUpdate();
     } catch (e) {
       debugPrint('Security check error: $e');
     }
@@ -134,58 +149,6 @@ class _AppLauncherState extends ConsumerState<AppLauncher> {
       _unauthorizedMessage = message;
       _unauthorizedSolution = solution;
     });
-  }
-
-  /// 🔥 FULLY SAFE UPDATE CHECK
-  Future<void> _checkForUpdate() async {
-    if (_updateCheckRequested) return;
-    _updateCheckRequested = true;
-
-    if (!Platform.isAndroid) {
-      debugPrint("In-app update is only available on Android");
-      return;
-    }
-
-    /// ❌ Skip in debug/dev
-    if (!kReleaseMode) {
-      debugPrint("⛔ Debug mode → skipping in-app update");
-      return;
-    }
-
-    try {
-      final packageInfo = await PackageInfo.fromPlatform();
-      final installer = packageInfo.installerStore;
-
-      /// ❌ Not Play Store install
-      if (installer == null || !installer.contains('vending')) {
-        debugPrint("⛔ Not Play Store install → skipping update");
-        return;
-      }
-
-      final updateInfo = await InAppUpdate.checkForUpdate();
-
-      if (updateInfo.updateAvailability == UpdateAvailability.updateAvailable) {
-        final currentVersionCode = int.tryParse(packageInfo.buildNumber) ?? 0;
-        final availableVersionCode = updateInfo.availableVersionCode ?? 0;
-
-        final versionGap = availableVersionCode - currentVersionCode;
-
-        debugPrint(
-            "Update available: current=$currentVersionCode, available=$availableVersionCode, gap=$versionGap");
-
-        if (versionGap >= 2) {
-          debugPrint("🚀 Mandatory update (gap >= 2) → Immediate Update");
-          await InAppUpdate.performImmediateUpdate();
-        } else if (versionGap > 0) {
-          debugPrint("🔔 Optional update (gap < 2) → Flexible Update");
-          await InAppUpdate.startFlexibleUpdate();
-          // Note: Flexible updates require completeUpdate() call after download,
-          // but for now we just initiate the download to satisfy the "not mandatory" requirement.
-        }
-      }
-    } catch (e) {
-      debugPrint('Update check safe error: $e');
-    }
   }
 
   @override
@@ -278,6 +241,11 @@ class _AppLauncherState extends ConsumerState<AppLauncher> {
       );
     }
 
+    final updateState = ref.watch(appUpdateControllerProvider);
+    if (updateState.requirement == AppUpdateRequirement.required) {
+      return const MandatoryUpdateScreen();
+    }
+
     final status = ref.watch(privacyProvider);
 
     if (status == null) {
@@ -300,6 +268,14 @@ class _AppLauncherState extends ConsumerState<AppLauncher> {
       });
     }
 
-    return const CameraScreen();
+    return const Stack(
+      children: [
+        CameraScreen(),
+        Align(
+          alignment: Alignment.topCenter,
+          child: OptionalUpdateBanner(),
+        ),
+      ],
+    );
   }
 }

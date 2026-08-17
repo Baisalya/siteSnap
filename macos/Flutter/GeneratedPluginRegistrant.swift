@@ -10,6 +10,7 @@ import file_selector_macos
 import flutter_video_thumbnail_plus
 import gal
 import geolocator_apple
+import in_app_purchase_storekit
 import package_info_plus
 import share_plus
 import shared_preferences_foundation
@@ -22,6 +23,7 @@ func RegisterGeneratedPlugins(registry: FlutterPluginRegistry) {
   FlutterVideoThumbnailPlusPlugin.register(with: registry.registrar(forPlugin: "FlutterVideoThumbnailPlusPlugin"))
   GalPlugin.register(with: registry.registrar(forPlugin: "GalPlugin"))
   GeolocatorPlugin.register(with: registry.registrar(forPlugin: "GeolocatorPlugin"))
+  InAppPurchasePlugin.register(with: registry.registrar(forPlugin: "InAppPurchasePlugin"))
   FPPPackageInfoPlusPlugin.register(with: registry.registrar(forPlugin: "FPPPackageInfoPlusPlugin"))
   SharePlusMacosPlugin.register(with: registry.registrar(forPlugin: "SharePlusMacosPlugin"))
   SharedPreferencesPlugin.register(with: registry.registrar(forPlugin: "SharedPreferencesPlugin"))

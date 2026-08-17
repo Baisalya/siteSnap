@@ -5,6 +5,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import 'package:surveycam/core/monetization/premium_feature.dart';
 import 'package:surveycam/core/monetization/premium_policy.dart';
+import 'package:surveycam/core/monetization/pro_upgrade_screen.dart';
 import 'project_provider.dart';
 
 Future<void> showProjectPickerSheet(BuildContext context) {
@@ -99,6 +100,10 @@ class _ProjectPickerSheetState extends ConsumerState<ProjectPickerSheet> {
                   ],
                 ),
                 const SizedBox(height: 12),
+                if (!canUseProjects) ...[
+                  const _ProjectsProGate(),
+                  const SizedBox(height: 12),
+                ],
                 _ProjectTile(
                   icon: Icons.all_inbox_rounded,
                   title: 'All captures',
@@ -400,6 +405,10 @@ class _ProjectAssignmentSheetState
                     shrinkWrap: true,
                     padding: const EdgeInsets.fromLTRB(12, 4, 12, 16),
                     children: [
+                      if (!canUseProjects) ...[
+                        const _ProjectsProGate(),
+                        const SizedBox(height: 8),
+                      ],
                       _assignmentTile(
                         icon: Icons.folder_off_rounded,
                         title: 'No project',
@@ -460,6 +469,41 @@ class _ProjectAssignmentSheetState
         const SnackBar(content: Text('Could not update project assignments.')),
       );
     }
+  }
+}
+
+class _ProjectsProGate extends StatelessWidget {
+  const _ProjectsProGate();
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.fromLTRB(14, 10, 8, 10),
+      decoration: BoxDecoration(
+        color: Colors.amberAccent.withValues(alpha: 0.09),
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(
+          color: Colors.amberAccent.withValues(alpha: 0.28),
+        ),
+      ),
+      child: Row(
+        children: [
+          const Icon(Icons.workspace_premium_rounded,
+              color: Colors.amberAccent),
+          const SizedBox(width: 10),
+          const Expanded(
+            child: Text(
+              'Project folders are included with SurveyCam Pro.',
+              style: TextStyle(color: Colors.white70, fontSize: 12),
+            ),
+          ),
+          TextButton(
+            onPressed: () => showProUpgrade(context),
+            child: const Text('View Pro'),
+          ),
+        ],
+      ),
+    );
   }
 }
 

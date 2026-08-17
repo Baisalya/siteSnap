@@ -5,6 +5,7 @@ import 'package:flutter_riverpod/legacy.dart';
 import 'package:share_plus/share_plus.dart';
 import 'package:surveycam/core/monetization/premium_feature.dart';
 import 'package:surveycam/core/monetization/premium_policy.dart';
+import 'package:surveycam/core/monetization/pro_upgrade_screen.dart';
 import 'package:surveycam/core/permissions/permission_service.dart';
 import 'package:surveycam/core/services/pdf_proof_report_service.dart';
 import 'package:surveycam/core/utils/thumbnail_utils.dart';
@@ -92,7 +93,7 @@ class _GalleryFolderScreenState extends ConsumerState<GalleryFolderScreen>
     final canUsePdfReports =
         ref.read(premiumPolicyProvider).canUse(PremiumFeature.pdfReports);
     if (!canUsePdfReports) {
-      _showSnack('PDF proof reports are a SurveyCam Pro feature.');
+      await showProUpgrade(context);
       return;
     }
 

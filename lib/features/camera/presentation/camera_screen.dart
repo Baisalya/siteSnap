@@ -25,6 +25,7 @@ import 'package:surveycam/privacypolicy/privacyProvider.dart';
 import '../domain/camera_lens_type.dart';
 
 import 'package:surveycam/features/camera/data/CameraState.dart';
+import 'package:surveycam/features/camera/domain/camera_interaction_utils.dart';
 import 'camera_settings_provider.dart';
 import 'camera_viewmodel.dart';
 import 'capture_button.dart';
@@ -42,9 +43,14 @@ class _CameraScreenState extends ConsumerState<CameraScreen> {
   Timer? _dateTimer;
   Timer? _focusTimer;
   Timer? _recordingTimer;
+  Timer? _zoomIndicatorTimer;
   Timer? _shutterFeedbackTimer;
   Timer? _processingBubbleIdleTimer;
-  int _recordingSeconds = 0;
+  Duration _recordingElapsed = Duration.zero;
+  DateTime? _recordingStartedAt;
+  double _zoomAtGestureStart = 1.0;
+  bool _zoomGestureActive = false;
+  bool _showZoomIndicator = false;
   bool _isCapturing = false;
   bool _showShutterFeedback = false;
   int _shutterFeedbackTick = 0;
@@ -102,29 +108,35 @@ class _CameraScreenState extends ConsumerState<CameraScreen> {
   }
 
   void _startRecordingTimer() {
-    _recordingSeconds = 0;
+    _recordingStartedAt = DateTime.now();
+    _recordingElapsed = Duration.zero;
     _recordingTimer?.cancel();
-    _recordingTimer = Timer.periodic(const Duration(seconds: 1), (timer) {
-      if (mounted) {
-        setState(() {
-          _recordingSeconds++;
-        });
-      }
+    _recordingTimer = Timer.periodic(const Duration(milliseconds: 250), (_) {
+      final startedAt = _recordingStartedAt;
+      if (!mounted || startedAt == null) return;
+      final elapsed = DateTime.now().difference(startedAt);
+      if (elapsed.inSeconds == _recordingElapsed.inSeconds) return;
+      setState(() => _recordingElapsed = elapsed);
     });
   }
 
   void _stopRecordingTimer() {
     _recordingTimer?.cancel();
     _recordingTimer = null;
-    setState(() {
-      _recordingSeconds = 0;
-    });
+    _recordingStartedAt = null;
+    if (mounted) {
+      setState(() => _recordingElapsed = Duration.zero);
+    }
   }
 
-  String _formatDuration(int seconds) {
-    final minutes = (seconds / 60).floor();
-    final remainingSeconds = seconds % 60;
-    return '${minutes.toString().padLeft(2, '0')}:${remainingSeconds.toString().padLeft(2, '0')}';
+  void _showZoomTemporarily() {
+    _zoomIndicatorTimer?.cancel();
+    if (!_showZoomIndicator && mounted) {
+      setState(() => _showZoomIndicator = true);
+    }
+    _zoomIndicatorTimer = Timer(const Duration(milliseconds: 900), () {
+      if (mounted) setState(() => _showZoomIndicator = false);
+    });
   }
 
   String _mergeLocationWithExistingExtraNote({
@@ -262,6 +274,7 @@ class _CameraScreenState extends ConsumerState<CameraScreen> {
     _dateTimer?.cancel();
     _focusTimer?.cancel();
     _recordingTimer?.cancel();
+    _zoomIndicatorTimer?.cancel();
     _shutterFeedbackTimer?.cancel();
     _processingBubbleIdleTimer?.cancel();
     super.dispose();
@@ -306,6 +319,8 @@ class _CameraScreenState extends ConsumerState<CameraScreen> {
       screenSize,
       _processingBubbleExpanded,
     );
+    final shouldShowZoomIndicator =
+        _showZoomIndicator || (cameraState.zoom - 1).abs() >= 0.02;
 
     if (hasProcessingBubble && _processingBubbleIdleTimer == null) {
       WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -487,6 +502,12 @@ class _CameraScreenState extends ConsumerState<CameraScreen> {
     );
 
     ref.listen<CameraState>(cameraViewModelProvider, (previous, next) {
+      if (next.isRecording && previous?.isRecording != true) {
+        _startRecordingTimer();
+      } else if (!next.isRecording && previous?.isRecording == true) {
+        _stopRecordingTimer();
+      }
+
       final processingError = next.videoProcessingError;
       if (processingError != null &&
           processingError != previous?.videoProcessingError) {
@@ -573,14 +594,27 @@ class _CameraScreenState extends ConsumerState<CameraScreen> {
                                 }
                               });
                             },
+                            onScaleStart: (details) {
+                              _zoomAtGestureStart = cameraState.zoom;
+                              _zoomGestureActive = details.pointerCount >= 2;
+                              if (details.pointerCount >= 2) {
+                                _showZoomTemporarily();
+                              }
+                            },
                             onScaleUpdate: (details) {
                               if (controller == null ||
                                   !controller.value.isInitialized) {
                                 return;
                               }
-                              if (details.scale != 1.0) {
-                                cameraVM
-                                    .setZoom(cameraState.zoom * details.scale);
+                              if (details.pointerCount >= 2) {
+                                _zoomGestureActive = true;
+                                _showZoomTemporarily();
+                                unawaited(cameraVM.setZoom(zoomForGesture(
+                                  startZoom: _zoomAtGestureStart,
+                                  scale: details.scale,
+                                  minZoom: cameraState.minZoom,
+                                  maxZoom: cameraState.maxZoom,
+                                )));
                               } else {
                                 final delta =
                                     -details.focalPointDelta.dy * 0.02;
@@ -591,6 +625,12 @@ class _CameraScreenState extends ConsumerState<CameraScreen> {
                                   }
                                 }
                               }
+                            },
+                            onScaleEnd: (_) {
+                              if (_zoomGestureActive) {
+                                _showZoomTemporarily();
+                              }
+                              _zoomGestureActive = false;
                             },
                             child: Stack(
                               children: [
@@ -701,6 +741,65 @@ class _CameraScreenState extends ConsumerState<CameraScreen> {
                                   ),
                                 ),
                               ],
+                            ),
+                          ),
+                          Positioned(
+                            left: 0,
+                            right: 0,
+                            bottom: 18,
+                            child: IgnorePointer(
+                              ignoring: !shouldShowZoomIndicator,
+                              child: AnimatedSlide(
+                                offset: shouldShowZoomIndicator
+                                    ? Offset.zero
+                                    : const Offset(0, 0.35),
+                                duration: const Duration(milliseconds: 180),
+                                curve: Curves.easeOutCubic,
+                                child: AnimatedOpacity(
+                                  opacity: shouldShowZoomIndicator ? 1 : 0,
+                                  duration: const Duration(milliseconds: 160),
+                                  child: Center(
+                                    child: Semantics(
+                                      button: true,
+                                      label:
+                                          'Zoom ${cameraState.zoom.toStringAsFixed(1)} times. Tap to reset.',
+                                      child: GestureDetector(
+                                        onTap: () {
+                                          _showZoomTemporarily();
+                                          unawaited(cameraVM.animateZoomTo(1));
+                                        },
+                                        child: AnimatedContainer(
+                                          duration:
+                                              const Duration(milliseconds: 140),
+                                          curve: Curves.easeOut,
+                                          padding: const EdgeInsets.symmetric(
+                                            horizontal: 14,
+                                            vertical: 7,
+                                          ),
+                                          decoration: BoxDecoration(
+                                            color: Colors.black
+                                                .withValues(alpha: 0.68),
+                                            borderRadius:
+                                                BorderRadius.circular(999),
+                                            border: Border.all(
+                                              color: Colors.white
+                                                  .withValues(alpha: 0.7),
+                                            ),
+                                          ),
+                                          child: Text(
+                                            '${cameraState.zoom.toStringAsFixed(1)}x',
+                                            style: const TextStyle(
+                                              color: Colors.white,
+                                              fontSize: 14,
+                                              fontWeight: FontWeight.w800,
+                                            ),
+                                          ),
+                                        ),
+                                      ),
+                                    ),
+                                  ),
+                                ),
+                              ),
                             ),
                           ),
 
@@ -937,35 +1036,8 @@ class _CameraScreenState extends ConsumerState<CameraScreen> {
                               mainAxisSize: MainAxisSize.min,
                               children: [
                                 if (cameraState.isRecording)
-                                  Container(
-                                    padding: const EdgeInsets.symmetric(
-                                        horizontal: 10, vertical: 4),
-                                    decoration: BoxDecoration(
-                                      color: Colors.red,
-                                      borderRadius: BorderRadius.circular(16),
-                                    ),
-                                    child: Row(
-                                      mainAxisSize: MainAxisSize.min,
-                                      children: [
-                                        Container(
-                                          width: 8,
-                                          height: 8,
-                                          decoration: const BoxDecoration(
-                                            color: Colors.white,
-                                            shape: BoxShape.circle,
-                                          ),
-                                        ),
-                                        const SizedBox(width: 8),
-                                        Text(
-                                          _formatDuration(_recordingSeconds),
-                                          style: const TextStyle(
-                                            color: Colors.white,
-                                            fontWeight: FontWeight.bold,
-                                            fontSize: 14,
-                                          ),
-                                        ),
-                                      ],
-                                    ),
+                                  _RecordingTimerBadge(
+                                    elapsed: _recordingElapsed,
                                   )
                                 else ...[
                                   IconButton(
@@ -1160,15 +1232,12 @@ class _CameraScreenState extends ConsumerState<CameraScreen> {
                                       }
 
                                       if (cameraState.isRecording) {
-                                        _stopRecordingTimer();
                                         await cameraVM
                                             .stopVideoRecording(context);
                                       } else {
                                         final started = await cameraVM
                                             .startVideoRecording();
-                                        if (started && mounted) {
-                                          _startRecordingTimer();
-                                        } else {
+                                        if (!started && mounted) {
                                           _showCameraSnack(
                                             "Recording could not start. Please wait a moment and try again.",
                                           );
@@ -1726,6 +1795,94 @@ class _ShutterFeedbackOverlay extends StatelessWidget {
           ],
         );
       },
+    );
+  }
+}
+
+class _RecordingTimerBadge extends StatefulWidget {
+  final Duration elapsed;
+
+  const _RecordingTimerBadge({required this.elapsed});
+
+  @override
+  State<_RecordingTimerBadge> createState() => _RecordingTimerBadgeState();
+}
+
+class _RecordingTimerBadgeState extends State<_RecordingTimerBadge>
+    with SingleTickerProviderStateMixin {
+  late final AnimationController _pulseController;
+
+  @override
+  void initState() {
+    super.initState();
+    _pulseController = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 850),
+      lowerBound: 0.55,
+      upperBound: 1,
+    )..repeat(reverse: true);
+  }
+
+  @override
+  void dispose() {
+    _pulseController.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final durationText = formatRecordingDuration(widget.elapsed);
+    return Semantics(
+      liveRegion: true,
+      label: 'Recording $durationText',
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 11, vertical: 6),
+        decoration: BoxDecoration(
+          color: const Color(0xFFD71920),
+          borderRadius: BorderRadius.circular(18),
+          boxShadow: [
+            BoxShadow(
+              color: Colors.black.withValues(alpha: 0.28),
+              blurRadius: 8,
+              offset: const Offset(0, 2),
+            ),
+          ],
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            FadeTransition(
+              opacity: _pulseController,
+              child: Container(
+                width: 9,
+                height: 9,
+                decoration: const BoxDecoration(
+                  color: Colors.white,
+                  shape: BoxShape.circle,
+                ),
+              ),
+            ),
+            const SizedBox(width: 8),
+            AnimatedSwitcher(
+              duration: const Duration(milliseconds: 160),
+              transitionBuilder: (child, animation) => FadeTransition(
+                opacity: animation,
+                child: child,
+              ),
+              child: Text(
+                durationText,
+                key: ValueKey(durationText),
+                style: const TextStyle(
+                  color: Colors.white,
+                  fontFeatures: [FontFeature.tabularFigures()],
+                  fontWeight: FontWeight.w800,
+                  fontSize: 14,
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
     );
   }
 }

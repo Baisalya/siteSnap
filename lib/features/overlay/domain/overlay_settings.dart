@@ -4,6 +4,14 @@ enum CoordinateFormat { decimal, dms }
 
 enum AppLanguage { auto, en, de, ru, hi, es, fr, pt, it }
 
+/// White and black are the permanent free overlay palette. Keeping this rule
+/// next to [OverlaySettings] makes both the picker and capture-time enforcement
+/// use exactly the same definition.
+bool isFreeOverlayColor(Color color) {
+  final value = color.toARGB32();
+  return value == Colors.white.toARGB32() || value == Colors.black.toARGB32();
+}
+
 class OverlaySettings {
   final Color backgroundColor;
   final Color textColor;

@@ -250,10 +250,23 @@ final overlaySettingsProvider =
 
 final effectiveOverlaySettingsProvider = Provider<OverlaySettings>((ref) {
   final settings = ref.watch(overlaySettingsProvider);
-  final canUseCustomBranding =
-      ref.watch(premiumPolicyProvider).canUse(PremiumFeature.customBranding);
-  if (canUseCustomBranding || settings.watermarkPresetIndex == 0) {
-    return settings;
-  }
-  return settings.copyWith(watermarkPresetIndex: 0);
+  final policy = ref.watch(premiumPolicyProvider);
+  final canUseCustomBranding = policy.canUse(PremiumFeature.customBranding);
+  final canUseOverlayColors = policy.canUse(PremiumFeature.overlayColors);
+
+  final effectiveBackgroundColor =
+      canUseOverlayColors || isFreeOverlayColor(settings.backgroundColor)
+          ? settings.backgroundColor
+          : Colors.white;
+  final effectiveTextColor =
+      canUseOverlayColors || isFreeOverlayColor(settings.textColor)
+          ? settings.textColor
+          : Colors.black;
+
+  return settings.copyWith(
+    backgroundColor: effectiveBackgroundColor,
+    textColor: effectiveTextColor,
+    watermarkPresetIndex:
+        canUseCustomBranding ? settings.watermarkPresetIndex : 0,
+  );
 });

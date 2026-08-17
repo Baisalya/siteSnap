@@ -37,6 +37,7 @@ final cameraViewModelProvider =
 
 const Duration _photoCaptureTimeout = Duration(seconds: 12);
 const Duration _flashExposureSettleDelay = Duration(milliseconds: 60);
+const Duration _captureDependencySoftWait = Duration(milliseconds: 80);
 
 class CameraViewModel extends StateNotifier<CameraState>
     with WidgetsBindingObserver {
@@ -53,6 +54,10 @@ class CameraViewModel extends StateNotifier<CameraState>
   bool _captureInFlight = false;
   bool _startRecordingInFlight = false;
   bool _stopRecordingInFlight = false;
+  bool _captureDependenciesWarmed = false;
+  bool _zoomCommandInFlight = false;
+  double? _pendingZoom;
+  int _zoomAnimationGeneration = 0;
   Timer? _videoHistoryTimer;
   late final Future<void> _captureDependenciesReady;
 
@@ -75,7 +80,9 @@ class CameraViewModel extends StateNotifier<CameraState>
     WidgetsBinding.instance.addObserver(this);
     // Start plugin/preferences initialization while CameraX is opening so the
     // first shutter press does not pay these one-time costs.
-    _captureDependenciesReady = _warmCaptureDependencies();
+    _captureDependenciesReady = _warmCaptureDependencies().whenComplete(() {
+      _captureDependenciesWarmed = true;
+    });
     ref.listen<OverlayData>(
       overlayPreviewProvider,
       (_, __) => _recordCurrentVideoOverlaySample(),
@@ -109,6 +116,18 @@ class CameraViewModel extends StateNotifier<CameraState>
       // Capture can still continue with provider defaults. Individual save
       // paths retain their own error handling and persistence fallbacks.
       debugPrint('Photo dependency warm-up skipped: $e');
+    }
+  }
+
+  Future<void> _waitBrieflyForCaptureDependencies() async {
+    if (_captureDependenciesWarmed) return;
+    try {
+      await _captureDependenciesReady.timeout(_captureDependencySoftWait);
+    } on TimeoutException {
+      // The native shutter must not wait on preferences or storage warm-up.
+      // The original future keeps running and normal save-time fallbacks still
+      // protect the capture if a dependency is unusually slow.
+      debugPrint('Capture dependency warm-up is continuing in background');
     }
   }
 
@@ -693,19 +712,79 @@ class CameraViewModel extends StateNotifier<CameraState>
   // ================= ZOOM =================
 
   Future<void> setZoom(double zoom) async {
+    _zoomAnimationGeneration++;
+    await _queueZoom(zoom);
+  }
+
+  Future<void> animateZoomTo(
+    double zoom, {
+    Duration duration = const Duration(milliseconds: 220),
+  }) async {
     final controller = state.controller;
     if (controller == null || !controller.value.isInitialized) return;
 
-    try {
-      final clampedZoom = zoom.clamp(state.minZoom, state.maxZoom);
-      await _safeCameraCommand(
-        controller,
-        'zoom level',
-        () => controller.setZoomLevel(clampedZoom),
-      );
+    final startZoom = state.zoom;
+    final targetZoom = zoom.clamp(state.minZoom, state.maxZoom).toDouble();
+    if ((targetZoom - startZoom).abs() < 0.01) {
+      await _queueZoom(targetZoom);
+      return;
+    }
+
+    final generation = ++_zoomAnimationGeneration;
+    const steps = 9;
+    final stepDelay = Duration(
+      microseconds: duration.inMicroseconds ~/ steps,
+    );
+
+    for (var step = 1; step <= steps; step++) {
+      if (!mounted || generation != _zoomAnimationGeneration) return;
+      final progress = step / steps;
+      final eased = Curves.easeOutCubic.transform(progress);
+      await _queueZoom(startZoom + ((targetZoom - startZoom) * eased));
+      if (step < steps) {
+        await Future<void>.delayed(stepDelay);
+      }
+    }
+  }
+
+  Future<void> _queueZoom(double zoom) async {
+    final controller = state.controller;
+    if (controller == null || !controller.value.isInitialized) return;
+
+    final clampedZoom = zoom.clamp(state.minZoom, state.maxZoom).toDouble();
+    _pendingZoom = clampedZoom;
+    if ((state.zoom - clampedZoom).abs() >= 0.001) {
       state = state.copyWith(zoom: clampedZoom);
+    }
+
+    // Pinch events arrive faster than CameraX can apply native commands.
+    // Keep only the newest requested level so the shared camera queue is not
+    // blocked by a long tail of obsolete zoom updates.
+    if (_zoomCommandInFlight) return;
+    _zoomCommandInFlight = true;
+    try {
+      while (mounted && _pendingZoom != null) {
+        final target = _pendingZoom!;
+        _pendingZoom = null;
+        if (!_isActiveController(controller)) return;
+        await _safeCameraCommand(
+          controller,
+          'zoom level',
+          () => controller.setZoomLevel(target),
+        );
+      }
     } catch (e) {
-      debugPrint("Zoom error: $e");
+      debugPrint('Zoom error: $e');
+    } finally {
+      _zoomCommandInFlight = false;
+    }
+
+    // A controller switch can finish an old zoom command after the new camera
+    // has already received a gesture. Restart the pump for that newest value.
+    final pendingZoom = _pendingZoom;
+    if (pendingZoom != null && mounted) {
+      _pendingZoom = null;
+      unawaited(_queueZoom(pendingZoom));
     }
   }
 
@@ -983,7 +1062,7 @@ class CameraViewModel extends StateNotifier<CameraState>
     );
 
     try {
-      await _captureDependenciesReady;
+      await _waitBrieflyForCaptureDependencies();
       if (!_isActiveController(controller)) return null;
 
       final overlayData = ref.read(overlayPreviewProvider);

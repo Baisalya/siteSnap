@@ -1,3 +1,4 @@
+import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -46,6 +47,13 @@ void main() {
     expect(settings.activeWatermarkShowLogo, isTrue);
     expect(settings.watermarkText, isEmpty);
     expect(settings.watermarkText2, isEmpty);
+  });
+
+  test('only pure white and black are permanent free overlay colors', () {
+    expect(isFreeOverlayColor(const Color(0xFFFFFFFF)), isTrue);
+    expect(isFreeOverlayColor(const Color(0xFF000000)), isTrue);
+    expect(isFreeOverlayColor(const Color(0xFF1976D2)), isFalse);
+    expect(isFreeOverlayColor(const Color(0xFFFFFFFE)), isFalse);
   });
 
   test('selects first custom watermark slot independently', () {
@@ -111,6 +119,88 @@ void main() {
       container.read(effectiveOverlaySettingsProvider).watermarkPresetIndex,
       0,
     );
+  });
+
+  test('effective settings replace paid colors when Pro is unavailable',
+      () async {
+    final container = ProviderContainer(
+      overrides: [
+        premiumPolicyProvider.overrideWithValue(
+          const PremiumPolicy(freeLaunchMode: false),
+        ),
+      ],
+    );
+    addTearDown(container.dispose);
+    final notifier = container.read(overlaySettingsProvider.notifier);
+    await notifier.ready;
+    await notifier.updateSettings(
+      const OverlaySettings(
+        backgroundColor: Color(0xFF1976D2),
+        textColor: Color(0xFFFFF9C4),
+      ),
+      persistImmediately: true,
+    );
+
+    final saved = container.read(overlaySettingsProvider);
+    final effective = container.read(effectiveOverlaySettingsProvider);
+
+    expect(saved.backgroundColor, const Color(0xFF1976D2));
+    expect(saved.textColor, const Color(0xFFFFF9C4));
+    expect(effective.backgroundColor, Colors.white);
+    expect(effective.textColor, Colors.black);
+  });
+
+  test('effective settings preserve white and black without Pro', () async {
+    final container = ProviderContainer(
+      overrides: [
+        premiumPolicyProvider.overrideWithValue(
+          const PremiumPolicy(freeLaunchMode: false),
+        ),
+      ],
+    );
+    addTearDown(container.dispose);
+    final notifier = container.read(overlaySettingsProvider.notifier);
+    await notifier.ready;
+    await notifier.updateSettings(
+      const OverlaySettings(
+        backgroundColor: Colors.black,
+        textColor: Colors.white,
+      ),
+      persistImmediately: true,
+    );
+
+    final effective = container.read(effectiveOverlaySettingsProvider);
+
+    expect(effective.backgroundColor, Colors.black);
+    expect(effective.textColor, Colors.white);
+  });
+
+  test('effective settings preserve paid colors for Pro members', () async {
+    final container = ProviderContainer(
+      overrides: [
+        premiumPolicyProvider.overrideWithValue(
+          const PremiumPolicy(
+            freeLaunchMode: false,
+            userHasProPurchase: true,
+          ),
+        ),
+      ],
+    );
+    addTearDown(container.dispose);
+    final notifier = container.read(overlaySettingsProvider.notifier);
+    await notifier.ready;
+    await notifier.updateSettings(
+      const OverlaySettings(
+        backgroundColor: Color(0xFF1976D2),
+        textColor: Color(0xFFFFF9C4),
+      ),
+      persistImmediately: true,
+    );
+
+    final effective = container.read(effectiveOverlaySettingsProvider);
+
+    expect(effective.backgroundColor, const Color(0xFF1976D2));
+    expect(effective.textColor, const Color(0xFFFFF9C4));
   });
 
   test('an immediate setting update waits for persisted settings to load',
