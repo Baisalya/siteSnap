@@ -3,6 +3,7 @@
 #
 
 list(APPEND FLUTTER_PLUGIN_LIST
+  ffmpeg_kit_flutter_new_https_gpl
   file_selector_windows
   flutter_video_thumbnail_plus
   gal

@@ -198,6 +198,83 @@ void main() {
     expect(controller.state.purchasePending, isTrue);
   });
 
+  test('anonymous Play cancellation clears a pending purchase', () async {
+    final client = _FakeBillingClient();
+    final controller = BillingController(
+      client: client,
+      verifier: _FakeVerifier(active: true),
+      storage: _MemoryEntitlementStorage(),
+      now: () => _now,
+    );
+    addTearDown(controller.dispose);
+    addTearDown(client.dispose);
+    await controller.initialize();
+
+    await controller.buyPro();
+    client.emit([
+      _purchase(
+        status: StorePurchaseStatus.canceled,
+        productId: '',
+      ),
+    ]);
+    await pumpEventQueue();
+
+    expect(controller.state.purchasePending, isFalse);
+    expect(controller.state.message, 'Purchase cancelled.');
+  });
+
+  test('anonymous Play payment error clears a pending purchase', () async {
+    final client = _FakeBillingClient();
+    final controller = BillingController(
+      client: client,
+      verifier: _FakeVerifier(active: true),
+      storage: _MemoryEntitlementStorage(),
+      now: () => _now,
+    );
+    addTearDown(controller.dispose);
+    addTearDown(client.dispose);
+    await controller.initialize();
+
+    await controller.buyPro();
+    client.emit([
+      _purchase(
+        status: StorePurchaseStatus.error,
+        productId: '',
+        errorMessage: 'Payment declined.',
+      ),
+    ]);
+    await pumpEventQueue();
+
+    expect(controller.state.purchasePending, isFalse);
+    expect(controller.state.error, 'Payment declined.');
+  });
+
+  test('anonymous terminal updates are ignored without a pending checkout',
+      () async {
+    final client = _FakeBillingClient();
+    final controller = BillingController(
+      client: client,
+      verifier: _FakeVerifier(active: true),
+      storage: _MemoryEntitlementStorage(),
+      now: () => _now,
+    );
+    addTearDown(controller.dispose);
+    addTearDown(client.dispose);
+    await controller.initialize();
+
+    client.emit([
+      _purchase(
+        status: StorePurchaseStatus.error,
+        productId: '',
+        errorMessage: 'Unrelated billing error.',
+      ),
+    ]);
+    await pumpEventQueue();
+
+    expect(controller.state.purchasePending, isFalse);
+    expect(controller.state.error, isNull);
+  });
+
   test('unsupported stores cannot grant or restore Google Play entitlement',
       () async {
     final client = _FakeBillingClient(
@@ -241,10 +318,12 @@ BillingProduct _product({String? offerId}) {
 
 StorePurchase _purchase({
   required StorePurchaseStatus status,
+  String productId = PremiumConfig.proProductId,
   bool pendingCompletePurchase = false,
+  String? errorMessage,
 }) {
   return StorePurchase(
-    productId: PremiumConfig.proProductId,
+    productId: productId,
     status: status,
     purchaseId: 'purchase-id',
     transactionDate: '1',
@@ -252,7 +331,7 @@ StorePurchase _purchase({
     localVerificationData: 'local-data',
     verificationSource: 'google_play',
     pendingCompletePurchase: pendingCompletePurchase,
-    errorMessage: null,
+    errorMessage: errorMessage,
     storeDetails: Object(),
   );
 }
@@ -300,6 +379,10 @@ class _FakeBillingClient implements BillingClient {
 
   @override
   Future<List<StorePurchase>> restorePurchases() async => restored;
+
+  void emit(List<StorePurchase> purchases) {
+    _streamController.add(purchases);
+  }
 
   Future<void> dispose() => _streamController.close();
 }

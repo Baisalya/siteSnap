@@ -112,7 +112,7 @@ class VideoWatermarkProcessor {
         {'sessionId': sessionId},
       );
 
-      return _ffmpegKitChannel.invokeMethod<int>(
+      return await _ffmpegKitChannel.invokeMethod<int>(
         'abstractSessionGetReturnCode',
         {'sessionId': sessionId},
       );

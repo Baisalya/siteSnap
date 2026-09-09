@@ -195,6 +195,8 @@ class BillingController extends StateNotifier<BillingState> {
     try {
       final launched = await _client.purchase(product);
       if (!launched && mounted) {
+        // FIX: If Google Play fails to launch the checkout window (e.g. system error),
+        // reset the pending state immediately so the button is not stuck on loading.
         state = state.copyWith(
           purchasePending: false,
           error: 'Google Play could not start the purchase.',
@@ -203,6 +205,7 @@ class BillingController extends StateNotifier<BillingState> {
       }
     } catch (error) {
       if (mounted) {
+        // FIX: Ensure pending state is cleared if the purchase launch throws an exception.
         state = state.copyWith(
           purchasePending: false,
           error: 'Purchase could not start: $error',
@@ -266,7 +269,12 @@ class BillingController extends StateNotifier<BillingState> {
     var foundTransientFailure = false;
     var foundDefinitiveInactive = false;
     for (final purchase in purchases) {
-      if (purchase.productId != PremiumConfig.proProductId) continue;
+      final isProPurchase = purchase.productId == PremiumConfig.proProductId;
+      final isAnonymousTerminalUpdate = state.purchasePending &&
+          purchase.productId.isEmpty &&
+          (purchase.status == StorePurchaseStatus.canceled ||
+              purchase.status == StorePurchaseStatus.error);
+      if (!isProPurchase && !isAnonymousTerminalUpdate) continue;
 
       switch (purchase.status) {
         case StorePurchaseStatus.pending:
@@ -279,6 +287,8 @@ class BillingController extends StateNotifier<BillingState> {
           }
         case StorePurchaseStatus.canceled:
           if (mounted) {
+            // FIX: Clear the loading/pending state when a user manually cancels
+            // the purchase from the Google Play sheet (e.g. by pressing Back).
             state = state.copyWith(
               purchasePending: false,
               message: 'Purchase cancelled.',
@@ -287,6 +297,8 @@ class BillingController extends StateNotifier<BillingState> {
           }
         case StorePurchaseStatus.error:
           if (mounted) {
+            // FIX: Clear the loading/pending state if Google Play reports an error
+            // during the checkout flow (e.g. declined payment).
             state = state.copyWith(
               purchasePending: false,
               error: purchase.errorMessage ??
