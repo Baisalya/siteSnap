@@ -11,21 +11,25 @@ import android.net.Uri
 import android.os.Build
 import android.os.Handler
 import android.os.Looper
+import android.os.StatFs
 import android.provider.MediaStore
 import android.util.Log
 import io.flutter.embedding.android.FlutterActivity
 import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.plugin.common.MethodChannel
 import io.flutter.view.TextureRegistry
+import io.flutter.plugins.camerax.SiteSnapRealtimeOverlayController
 
 class MainActivity : FlutterActivity() {
     private val localEnvironmentChannel = "surveycam/local_environment"
+    private val realtimeOverlayChannelName = "surveycam/realtime_video_overlay"
     private val sensorReadTimeoutMs = 1200L
     private val sensorHandler = Handler(Looper.getMainLooper())
     private val activeSensorListeners = mutableSetOf<SensorEventListener>()
     private var engineGeneration = 0
     private var engineAttached = false
     private var methodChannel: MethodChannel? = null
+    private var realtimeOverlayChannel: MethodChannel? = null
 
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
@@ -41,7 +45,100 @@ class MainActivity : FlutterActivity() {
                     "readEnvironment" -> readEnvironmentSensors(result)
                     "listSurveyCamMedia" -> result.success(listSurveyCamMedia())
                     "getLastAppExitInfo" -> result.success(getLastAppExitInfo())
+                    "getUsableStorageBytes" -> result.success(getUsableStorageBytes())
                     else -> result.notImplemented()
+                }
+            }
+        }
+
+        realtimeOverlayChannel = MethodChannel(
+            flutterEngine.dartExecutor.binaryMessenger,
+            realtimeOverlayChannelName
+        ).also { channel ->
+            channel.setMethodCallHandler { call, result ->
+                try {
+                    when (call.method) {
+                        "isSupported" -> result.success(Build.VERSION.SDK_INT >= Build.VERSION_CODES.M)
+                        "arm" -> {
+                            SiteSnapRealtimeOverlayController.arm()
+                            result.success(true)
+                        }
+                        "disarm" -> {
+                            SiteSnapRealtimeOverlayController.disarm()
+                            result.success(null)
+                        }
+                        "beginHandshake" -> {
+                            val captureOrientation =
+                                call.argument<String>("captureOrientation")
+                            result.success(
+                                SiteSnapRealtimeOverlayController.beginHandshake(
+                                    captureOrientation
+                                )
+                            )
+                        }
+                        "cancelHandshake" -> {
+                            SiteSnapRealtimeOverlayController.cancelHandshake()
+                            result.success(null)
+                        }
+                        "releaseHandshakePrebind" -> {
+                            SiteSnapRealtimeOverlayController.releaseHandshakePrebindForFallback()
+                            result.success(null)
+                        }
+                        "markRecordingStarted" -> {
+                            SiteSnapRealtimeOverlayController.markRecordingStarted()
+                            result.success(null)
+                        }
+                        "getFrameGeometry" ->
+                            result.success(SiteSnapRealtimeOverlayController.frameGeometryMap())
+                        "getStatus" ->
+                            result.success(SiteSnapRealtimeOverlayController.statusMap())
+                        "setFrontVideoMirroring" -> {
+                            val enabled = call.argument<Boolean>("enabled") ?: false
+                            result.success(
+                                SiteSnapRealtimeOverlayController.setFrontVideoMirroring(enabled)
+                            )
+                        }
+                        "getCaptureTransformStatus" ->
+                            result.success(
+                                SiteSnapRealtimeOverlayController.captureTransformStatusMap()
+                            )
+                        "setOverlayPng" -> {
+                            val bytes = call.argument<ByteArray>("bytes")
+                            val orientation = call.argument<String>("orientation")
+                            result.success(
+                                SiteSnapRealtimeOverlayController.setOverlayPng(
+                                    bytes,
+                                    orientation
+                                )
+                            )
+                        }
+                        "setEnabled" -> {
+                            val enabled = call.argument<Boolean>("enabled") ?: false
+                            SiteSnapRealtimeOverlayController.setEnabled(enabled)
+                            result.success(SiteSnapRealtimeOverlayController.isEnabled())
+                        }
+                        "setDynamicOrientation" -> {
+                            val orientation = call.argument<String>("orientation")
+                            result.success(
+                                SiteSnapRealtimeOverlayController.setDynamicCaptureOrientation(
+                                    orientation
+                                )
+                            )
+                        }
+                        "clear" -> {
+                            SiteSnapRealtimeOverlayController.clearOverlay()
+                            result.success(null)
+                        }
+                        "consumeLastError" ->
+                            result.success(SiteSnapRealtimeOverlayController.consumeLastError())
+                        else -> result.notImplemented()
+                    }
+                } catch (error: RuntimeException) {
+                    result.error(
+                        "realtime_overlay_error",
+                        error.message ?: "Realtime CameraX overlay failed",
+                        null,
+                    )
                 }
             }
         }
@@ -66,6 +163,9 @@ class MainActivity : FlutterActivity() {
 
         methodChannel?.setMethodCallHandler(null)
         methodChannel = null
+        realtimeOverlayChannel?.setMethodCallHandler(null)
+        realtimeOverlayChannel = null
+        SiteSnapRealtimeOverlayController.reset()
         super.cleanUpFlutterEngine(flutterEngine)
     }
 
@@ -105,6 +205,15 @@ class MainActivity : FlutterActivity() {
                 "Flutter surface producer teardown workaround was unavailable",
                 error,
             )
+        }
+    }
+
+
+    private fun getUsableStorageBytes(): Long? {
+        return try {
+            StatFs(filesDir.absolutePath).availableBytes
+        } catch (_: RuntimeException) {
+            null
         }
     }
 

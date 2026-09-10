@@ -47,18 +47,6 @@ enum CameraMode {
 
 const Object _unsetCameraStateValue = Object();
 
-class VideoSegment {
-  final String path;
-  final CameraLensType lens;
-  final bool mirror;
-
-  VideoSegment({
-    required this.path,
-    required this.lens,
-    this.mirror = false,
-  });
-}
-
 /// =======================================================
 /// ✅ CAMERA STATE
 /// =======================================================
@@ -69,6 +57,7 @@ class CameraState {
   final CameraLensType currentLens;
   final bool isCapturing;
   final bool isRecording;
+  final bool isRealtimeOverlayActive;
   final CameraMode cameraMode;
   final bool isManualFocus;
   final CameraAspectRatio aspectRatio;
@@ -89,12 +78,9 @@ class CameraState {
 
   final String? error;
 
-  final List<VideoSegment> videoSegments;
   final double? processingProgress;
   final String? processingMessage;
   final String? videoProcessingError;
-
-  final String? videoSequenceDir;
 
   const CameraState({
     required this.isReady,
@@ -103,11 +89,11 @@ class CameraState {
     this.currentLens = CameraLensType.normal,
     this.isCapturing = false,
     this.isRecording = false,
+    this.isRealtimeOverlayActive = false,
     this.cameraMode = CameraMode.photo,
     this.isManualFocus = false,
     this.aspectRatio = CameraAspectRatio.ratio16_9,
     this.error,
-    this.videoSegments = const [],
     this.processingProgress,
     this.processingMessage,
     this.videoProcessingError,
@@ -120,7 +106,6 @@ class CameraState {
     this.orientation = DeviceOrientation.portraitUp,
     this.captureOrientation,
     this.captureLens,
-    this.videoSequenceDir,
   });
 
   CameraState copyWith({
@@ -131,6 +116,7 @@ class CameraState {
     CameraLensType? currentLens,
     bool? isCapturing,
     bool? isRecording,
+    bool? isRealtimeOverlayActive,
     CameraMode? cameraMode,
     bool? isManualFocus,
     CameraAspectRatio? aspectRatio,
@@ -144,12 +130,10 @@ class CameraState {
     DeviceOrientation? orientation,
     DeviceOrientation? captureOrientation,
     CameraLensType? captureLens,
-    List<VideoSegment>? videoSegments,
     double? processingProgress,
     bool clearProcessingProgress = false,
     Object? processingMessage = _unsetCameraStateValue,
     Object? videoProcessingError = _unsetCameraStateValue,
-    String? videoSequenceDir,
   }) {
     return CameraState(
       isReady: isReady ?? this.isReady,
@@ -158,13 +142,14 @@ class CameraState {
       currentLens: currentLens ?? this.currentLens,
       isCapturing: isCapturing ?? this.isCapturing,
       isRecording: isRecording ?? this.isRecording,
+      isRealtimeOverlayActive:
+          isRealtimeOverlayActive ?? this.isRealtimeOverlayActive,
       cameraMode: cameraMode ?? this.cameraMode,
       isManualFocus: isManualFocus ?? this.isManualFocus,
       aspectRatio: aspectRatio ?? this.aspectRatio,
       error: identical(error, _unsetCameraStateValue)
           ? this.error
           : error as String?,
-      videoSegments: videoSegments ?? this.videoSegments,
       processingProgress: clearProcessingProgress
           ? null
           : (processingProgress ?? this.processingProgress),
@@ -184,7 +169,6 @@ class CameraState {
       orientation: orientation ?? this.orientation,
       captureOrientation: captureOrientation ?? this.captureOrientation,
       captureLens: captureLens ?? this.captureLens,
-      videoSequenceDir: videoSequenceDir ?? this.videoSequenceDir,
     );
   }
 }

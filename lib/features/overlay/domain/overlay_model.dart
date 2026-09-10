@@ -49,7 +49,8 @@ class OverlayData {
       pressure: json['pressure'] as String?,
       position: WatermarkPosition.values[
           (json['position'] as int? ?? WatermarkPosition.bottomLeft.index)
-              .clamp(0, WatermarkPosition.values.length - 1)],
+              .clamp(0, WatermarkPosition.values.length - 1)
+              .toInt()],
     );
   }
 

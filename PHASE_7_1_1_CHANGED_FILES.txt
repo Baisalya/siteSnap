@@ -1,0 +1,6 @@
+lib/features/camera/presentation/camera_viewmodel.dart
+lib/features/camera/data/realtime_video_overlay_bridge.dart
+lib/features/camera/presentation/capture_button.dart
+test/realtime_video_overlay_bridge_test.dart
+PHASE_7_1_1_STOP_RESPONSIVENESS_HOTFIX.md
+PHASE_7_1_1_CHANGED_FILES.txt

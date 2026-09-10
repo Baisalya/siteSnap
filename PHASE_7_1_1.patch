@@ -1,0 +1,517 @@
+--- /mnt/data/sitesnap_p71_work/lib/features/camera/presentation/camera_viewmodel.dart	2026-09-09 18:25:53.438395329 +0000
++++ /mnt/data/sitesnap_p711_work/lib/features/camera/presentation/camera_viewmodel.dart	2026-09-09 18:50:17.673906850 +0000
+@@ -20,6 +20,7 @@
+ import 'package:surveycam/features/camera/data/CameraState.dart';
+ import 'package:surveycam/features/camera/domain/camera_lens_type.dart';
+ import 'package:surveycam/features/camera/domain/video_recording_session.dart';
++import 'package:surveycam/features/camera/domain/video_recording_backend.dart';
+ import 'package:surveycam/features/camera/domain/video_recording_production_gate.dart';
+ import 'package:surveycam/features/camera/presentation/camera_settings_provider.dart';
+ import 'package:surveycam/features/overlay/presentation/overlay_settings_provider.dart';
+@@ -60,6 +61,8 @@
+   bool _captureInFlight = false;
+   bool _startRecordingInFlight = false;
+   bool _stopRecordingInFlight = false;
++  bool _nativeRecordingStarted = false;
++  int _realtimeActivationToken = 0;
+   bool _captureDependenciesWarmed = false;
+   bool _zoomCommandInFlight = false;
+   bool _currentRecordingUsesNativeFrontMirror = false;
+@@ -908,6 +911,8 @@
+       debugPrint('Switch camera error: $e');
+       if (state.isRecording) {
+         _recordingSession.abort();
++        ++_realtimeActivationToken;
++        _nativeRecordingStarted = false;
+         await ref.read(videoRecordingBackendProvider).finishRealtimeOverlay();
+         _currentRecordingUsesNativeFrontMirror = false;
+       }
+@@ -929,9 +934,11 @@
+     required CameraLensType nextLens,
+   }) async {
+     final backend = ref.read(videoRecordingBackendProvider);
++    ++_realtimeActivationToken;
+     _recordCurrentVideoOverlaySample(force: true);
+     final segmentRealtime = await backend.inspectRealtimeOverlaySegment();
+     final segmentPath = await backend.stop();
++    _nativeRecordingStarted = false;
+     _recordingSession.addSegment(
+       VideoRecordingSegment(
+         path: segmentPath,
+@@ -965,12 +972,18 @@
+ 
+     await _restoreRecordingFlashForLens(nextLens);
+     await backend.start();
+-    final realtimeActive =
+-        realtimePrepared && await backend.activateRealtimeOverlay();
++    _nativeRecordingStarted = true;
+     state = state.copyWith(
+       isRecording: true,
+-      isRealtimeOverlayActive: realtimeActive,
++      isRealtimeOverlayActive: false,
+     );
++    final activationToken = ++_realtimeActivationToken;
++    if (realtimePrepared) {
++      unawaited(_completeRealtimeOverlayActivation(
++        backend: backend,
++        activationToken: activationToken,
++      ));
++    }
+     _recordCurrentVideoOverlaySample(force: true);
+   }
+ 
+@@ -1155,9 +1168,11 @@
+ 
+     var segmentClosed = false;
+     try {
++      ++_realtimeActivationToken;
+       _recordCurrentVideoOverlaySample(force: true);
+       final segmentRealtime = await backend.inspectRealtimeOverlaySegment();
+       final segmentPath = await backend.stop();
++      _nativeRecordingStarted = false;
+       segmentClosed = true;
+       _recordingSession.addSegment(
+         VideoRecordingSegment(
+@@ -1192,18 +1207,26 @@
+       }
+ 
+       await backend.start();
+-      final realtimeActive =
+-          realtimePrepared && await backend.activateRealtimeOverlay();
++      _nativeRecordingStarted = true;
+       state = state.copyWith(
+         isRecording: true,
+-        isRealtimeOverlayActive: realtimeActive,
++        isRealtimeOverlayActive: false,
+       );
++      final activationToken = ++_realtimeActivationToken;
++      if (realtimePrepared) {
++        unawaited(_completeRealtimeOverlayActivation(
++          backend: backend,
++          activationToken: activationToken,
++        ));
++      }
+       _recordCurrentVideoOverlaySample(force: true);
+     } catch (e) {
+       debugPrint('Mirror toggle while recording failed: $e');
+       await settingsNotifier.setMirrorFrontVideo(mirror);
+       if (segmentClosed) {
+         _recordingSession.abort();
++        ++_realtimeActivationToken;
++        _nativeRecordingStarted = false;
+         await backend.finishRealtimeOverlay();
+         _currentRecordingUsesNativeFrontMirror = false;
+         state = state.copyWith(
+@@ -1571,11 +1594,7 @@
+       // the first geometry-correct raster before Recorder.start(). Starting the
+       // recorder now cannot leak a clean opening frame on the realtime path.
+       await backend.start();
+-
+-      var realtimeOverlayActive = false;
+-      if (realtimeOverlayPrepared) {
+-        realtimeOverlayActive = await backend.activateRealtimeOverlay();
+-      }
++      _nativeRecordingStarted = true;
+ 
+       // The app can be backgrounded while CameraX is asynchronously creating
+       // the recorder. Do not publish a recording state for a controller that
+@@ -1588,10 +1607,14 @@
+         try {
+           await backend.stop();
+         } catch (_) {}
++        _nativeRecordingStarted = false;
+         await backend.finishRealtimeOverlay();
+         _currentRecordingUsesNativeFrontMirror = false;
+         if (mounted) {
+-          state = state.copyWith(isRealtimeOverlayActive: false);
++          state = state.copyWith(
++            isRecording: false,
++            isRealtimeOverlayActive: false,
++          );
+         }
+         return false;
+       }
+@@ -1602,9 +1625,14 @@
+         clearSegments: clearSegments,
+       );
+ 
++      // IMPORTANT: publish the native recorder state immediately. Realtime
++      // overlay verification is a certification step, not a prerequisite for
++      // the Stop button. Keeping isRecording=false while activate() polls the
++      // native effect makes a second shutter tap enter Start again instead of
++      // Stop even though CameraX is already recording.
+       state = state.copyWith(
+         isRecording: true,
+-        isRealtimeOverlayActive: realtimeOverlayActive,
++        isRealtimeOverlayActive: false,
+         processingMessage: null,
+         videoProcessingError: null,
+       );
+@@ -1612,14 +1640,35 @@
+         snapshotReader: _currentOverlaySnapshot,
+         shouldContinue: () => mounted && state.isRecording,
+       );
++
++      final activationToken = ++_realtimeActivationToken;
++      if (realtimeOverlayPrepared) {
++        unawaited(_completeRealtimeOverlayActivation(
++          backend: backend,
++          activationToken: activationToken,
++        ));
++      }
++
++      debugPrint('Video recording UI state: RECORDING');
+       unawaited(HapticFeedback.heavyImpact());
+       return true;
+     } catch (e) {
+       _recordingSession.abort();
+-      await ref.read(videoRecordingBackendProvider).finishRealtimeOverlay();
++      final backend = ref.read(videoRecordingBackendProvider);
++      if (_nativeRecordingStarted) {
++        try {
++          await backend.stop();
++        } catch (_) {}
++        _nativeRecordingStarted = false;
++      }
++      ++_realtimeActivationToken;
++      await backend.finishRealtimeOverlay();
+       _currentRecordingUsesNativeFrontMirror = false;
+       if (mounted) {
+-        state = state.copyWith(isRealtimeOverlayActive: false);
++        state = state.copyWith(
++          isRecording: false,
++          isRealtimeOverlayActive: false,
++        );
+       }
+       debugPrint("Start recording error: $e");
+       return false;
+@@ -1628,6 +1677,27 @@
+     }
+   }
+ 
++  Future<void> _completeRealtimeOverlayActivation({
++    required VideoRecordingBackend backend,
++    required int activationToken,
++  }) async {
++    final active = await backend.activateRealtimeOverlay();
++    if (!mounted ||
++        activationToken != _realtimeActivationToken ||
++        !_nativeRecordingStarted ||
++        !state.isRecording) {
++      return;
++    }
++
++    state = state.copyWith(isRealtimeOverlayActive: active);
++    if (active) {
++      // Push the freshest snapshot once activation is certified. Any overlay
++      // changes that happened during the short activation window are therefore
++      // not lost.
++      _recordCurrentVideoOverlaySample(force: true);
++    }
++  }
++
+   Future<void> stopVideoRecording(BuildContext context) async {
+     await _stopVideoRecording(context: context);
+   }
+@@ -1659,23 +1729,38 @@
+     final controller = state.controller;
+     if (controller == null ||
+         !controller.value.isInitialized ||
+-        !state.isRecording ||
++        (!state.isRecording && !_nativeRecordingStarted) ||
+         _stopRecordingInFlight) {
+       return;
+     }
+ 
+-    // Claim the stop before awaiting CameraX's recorder stabilization delay so
+-    // a second tap or lifecycle callback cannot enter another stop operation.
++    // Claim and publish Stop synchronously before any overlay verification or
++    // CameraX finalization awaits. This gives the shutter tap immediate UI
++    // feedback and prevents high-frequency overlay work from making Stop look
++    // ignored.
+     _stopRecordingInFlight = true;
++    ++_realtimeActivationToken;
++    _recordingSession.stopSampling();
++    state = state.copyWith(
++      isRecording: false,
++      isRealtimeOverlayActive: false,
++      processingMessage: 'Stopping video...',
++      videoProcessingError: null,
++    );
++    debugPrint('Video recording UI state: STOP_REQUESTED');
++    unawaited(HapticFeedback.mediumImpact());
++
+     var jobQueuedForProcessing = false;
+     try {
+-      _recordingSession.stopSampling();
+-
+       final backend = ref.read(videoRecordingBackendProvider);
+-      _recordCurrentVideoOverlaySample(force: true);
++
++      // Stop the actual recorder first. Native overlay status is retained by
++      // the bridge until finishRealtimeOverlay(), so certification can happen
++      // after the MP4 has stopped without extending the physical recording.
++      final lastSegmentPath = await backend.stop();
++      _nativeRecordingStarted = false;
+       final finalSegmentRealtime =
+           await backend.inspectRealtimeOverlaySegment();
+-      final lastSegmentPath = await backend.stop();
+       final completedSession = _recordingSession.complete(
+         finalSegment: VideoRecordingSegment(
+           path: lastSegmentPath,
+@@ -1697,7 +1782,6 @@
+         processingMessage: null,
+         videoProcessingError: null,
+       );
+-      unawaited(HapticFeedback.mediumImpact());
+ 
+       if (state.flashMode == FlashMode.always) {
+         await _softFlashQuench(controller);
+@@ -1802,6 +1886,7 @@
+       await _startForegroundService();
+ 
+     } catch (e) {
++      _nativeRecordingStarted = false;
+       await ref.read(videoRecordingBackendProvider).finishRealtimeOverlay();
+       _currentRecordingUsesNativeFrontMirror = false;
+       debugPrint("Stop recording error: $e");
+--- /mnt/data/sitesnap_p71_work/lib/features/camera/data/realtime_video_overlay_bridge.dart	2026-09-09 18:28:34.111618793 +0000
++++ /mnt/data/sitesnap_p711_work/lib/features/camera/data/realtime_video_overlay_bridge.dart	2026-09-09 18:50:17.673558636 +0000
+@@ -106,7 +106,7 @@
+   static const Duration _firstRenderTimeout = Duration(milliseconds: 900);
+   static const Duration _settleRenderTimeout = Duration(milliseconds: 350);
+   static const Duration _firstRenderPollInterval = Duration(milliseconds: 16);
+-  static const Duration _minimumRasterPushInterval = Duration(milliseconds: 120);
++  static const Duration _minimumRasterPushInterval = Duration(milliseconds: 500);
+   static const int _shortEdgePixels = 540;
+   static const int _maxLongEdgePixels = 1080;
+ 
+@@ -316,6 +316,12 @@
+         return false;
+       }
+ 
++      // Stop/finish may have cancelled this handshake while the first-frame
++      // poll was in flight. Never resurrect the bridge after Stop.
++      if (!_handshakePrepared || _preparedUpdate == null || !_armed) {
++        return false;
++      }
++
+       _active = true;
+       _handshakePrepared = false;
+       _preparedUpdate = null;
+@@ -330,9 +336,9 @@
+     }
+   }
+ 
+-  /// Coalesces rapid location/time/settings changes and places a hard floor on
+-  /// raster push cadence. This keeps long recordings from turning GPS/sensor
+-  /// bursts into an unbounded PNG encode queue.
++  /// Coalesces rapid location/time/settings changes and caps raster refresh at
++  /// 2 FPS. The overlay remains dynamic while keeping PNG encode/decode work off
++  /// the critical UI interaction path (especially the Stop shutter tap).
+   void update(
+     OverlayRenderSnapshot snapshot, {
+     double? viewportAspectRatio,
+--- /mnt/data/sitesnap_p71_work/lib/features/camera/presentation/capture_button.dart	2026-09-09 12:57:32.000000000 +0000
++++ /mnt/data/sitesnap_p711_work/lib/features/camera/presentation/capture_button.dart	2026-09-09 18:51:27.820487525 +0000
+@@ -93,6 +93,7 @@
+       height: 90,
+       width: 90,
+       child: GestureDetector(
++        behavior: HitTestBehavior.opaque,
+         onTap: _handleTap,
+         child: AnimatedBuilder(
+           animation: _controller!,
+--- /mnt/data/sitesnap_p71_work/test/realtime_video_overlay_bridge_test.dart	2026-09-09 18:28:15.690090761 +0000
++++ /mnt/data/sitesnap_p711_work/test/realtime_video_overlay_bridge_test.dart	2026-09-09 18:51:27.820341454 +0000
+@@ -1,3 +1,4 @@
++import 'dart:async';
+ import 'dart:typed_data';
+ 
+ import 'package:flutter/foundation.dart';
+@@ -303,6 +304,113 @@
+     } finally {
+       TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+           .setMockMethodCallHandler(channel, null);
++      debugDefaultTargetPlatformOverride = null;
++    }
++  });
++
++  test('stop cleanup cancels an in-flight Phase 7.1 activation', () async {
++    debugDefaultTargetPlatformOverride = TargetPlatform.android;
++    const channel = MethodChannel('surveycam/realtime_video_overlay');
++    var overlayGeneration = 0;
++    var enabled = false;
++    var recordingMarked = false;
++    final activationStatusRequested = Completer<void>();
++    final activationStatusResponse = Completer<Map<String, Object?>>();
++
++    TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
++        .setMockMethodCallHandler(channel, (call) async {
++      switch (call.method) {
++        case 'isSupported':
++        case 'arm':
++        case 'beginHandshake':
++          return true;
++        case 'getFrameGeometry':
++          return <String, Object?>{
++            'width': 1080,
++            'height': 1920,
++            'rotationDegrees': 90,
++            'mirrored': false,
++          };
++        case 'setOverlayPng':
++          overlayGeneration = 1;
++          return true;
++        case 'consumeLastError':
++          return null;
++        case 'setEnabled':
++          enabled = call.arguments is Map &&
++              (call.arguments as Map)['enabled'] == true;
++          return enabled;
++        case 'markRecordingStarted':
++          recordingMarked = true;
++          return null;
++        case 'getStatus':
++          if (recordingMarked) {
++            if (!activationStatusRequested.isCompleted) {
++              activationStatusRequested.complete();
++            }
++            return activationStatusResponse.future;
++          }
++          return <String, Object?>{
++            'armed': true,
++            'enabled': enabled,
++            'renderedFrames': 0,
++            'errorSinceEnable': false,
++            'overlayGeneration': overlayGeneration,
++            'renderedOverlayGeneration': 0,
++          };
++        case 'cancelHandshake':
++        case 'clear':
++        case 'disarm':
++          return null;
++      }
++      return null;
++    });
++
++    const snapshot = OverlayRenderSnapshot(
++      data: OverlayData(
++        dateTime: '2026-09-09 18:06:05',
++        latitude: 20.1,
++        longitude: 85.2,
++        altitude: 10,
++        heading: 0,
++        direction: 'N',
++        note: 'Stop race',
++      ),
++      settings: OverlaySettings(),
++      orientation: DeviceOrientation.portraitUp,
++    );
++
++    try {
++      final bridge = RealtimeVideoOverlayBridge(
++        rasterizer: ({
++          required OverlayRenderSnapshot snapshot,
++          required int width,
++          required int height,
++          double? viewportAspectRatio,
++        }) async => Uint8List.fromList(<int>[1, 2, 3]),
++      );
++
++      expect(await bridge.prepare(snapshot), isTrue);
++      final activationFuture = bridge.activate();
++      await activationStatusRequested.future;
++
++      final finishFuture = bridge.finish();
++      await Future<void>.delayed(Duration.zero);
++      activationStatusResponse.complete(<String, Object?>{
++        'armed': true,
++        'enabled': true,
++        'renderedFrames': 1,
++        'errorSinceEnable': false,
++        'overlayGeneration': 1,
++        'renderedOverlayGeneration': 1,
++      });
++
++      await finishFuture;
++      expect(await activationFuture, isFalse);
++      expect(bridge.isActive, isFalse);
++    } finally {
++      TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
++          .setMockMethodCallHandler(channel, null);
+       debugDefaultTargetPlatformOverride = null;
+     }
+   });
+--- /dev/null	2026-09-09 18:08:50.857046764 +0000
++++ /mnt/data/sitesnap_p711_work/PHASE_7_1_1_STOP_RESPONSIVENESS_HOTFIX.md	2026-09-09 18:52:18.768622792 +0000
+@@ -0,0 +1,69 @@
++# Phase 7.1.1 — Stop Responsiveness Hotfix
++
++## Evidence from the physical-device log
++
++The Motorola Edge 60 Stylus run proved that the Phase 7.1 CameraX handshake is now working:
++
++- `Handshake prebound VideoCapture; waiting for geometry`
++- `Realtime CameraX overlay: geometry 1080x1920 rotation=90 mirror=false`
++- `Realtime CameraX overlay: RASTER_READY generation=1`
++- `First realtime overlay frame rendered generation=1`
++- `Realtime CameraX overlay: ACTIVE generation=1`
++
++The remaining failure was interaction/state timing: CameraX could already be recording while Flutter was still awaiting realtime-overlay certification before publishing `CameraState.isRecording=true`. During that window a second shutter tap could be routed through the Start branch instead of Stop. The device log also showed repeated HWUI image-decoding pressure and occasional `SurfaceProcessorImpl: Timed out waiting canvas post` messages while the realtime bitmap was being refreshed aggressively.
++
++## Changes
++
++1. Recorder state is authoritative.
++   - Immediately after `VideoRecordingBackend.start()` succeeds, SiteSnap records `_nativeRecordingStarted=true`.
++   - `CameraState.isRecording=true` is published before realtime overlay certification finishes.
++   - Realtime certification now runs asynchronously and only toggles `isRealtimeOverlayActive` after success.
++
++2. Stop always wins.
++   - Stop accepts either Flutter recording state or the native-recorder latch.
++   - On tap it synchronously publishes `isRecording=false`, logs `STOP_REQUESTED`, and gives haptic feedback.
++   - The physical CameraX recorder is stopped before overlay-health inspection/finalization.
++   - Native overlay status is inspected after Recorder finalization but before bridge cleanup, so instant-save certification remains available.
++
++3. Activation cancellation safety.
++   - A token prevents an old async activation from mutating Flutter state after Stop, camera switch, or mirror-segment restart.
++   - The bridge also refuses to resurrect itself if `finish()` cancelled the handshake while first-frame polling was still in flight.
++
++4. Lower raster pressure.
++   - Realtime overlay raster pushes are capped at 2 FPS (500 ms minimum interval), matching the existing recording overlay sampling cadence.
++   - Rapid GPS/compass/settings updates remain coalesced to the newest snapshot.
++
++5. Shutter hit target hardened.
++   - Capture/Stop gesture now uses `HitTestBehavior.opaque` over the complete 90x90 shutter area.
++
++## Expected device log
++
++At recording start:
++
++```text
++Realtime CameraX overlay: RASTER_READY generation=1
++Video recording UI state: RECORDING
++Realtime CameraX overlay: ACTIVE generation=1
++```
++
++On shutter Stop tap:
++
++```text
++Video recording UI state: STOP_REQUESTED
++```
++
++Then CameraX should finalize the recording. For a healthy single realtime-overlay segment the production gate should direct-save without generating an `overlay_seq_*` PNG sequence.
++
++## Validation
++
++Run:
++
++```powershell
++dart format lib test tool
++flutter analyze
++flutter test test/realtime_video_overlay_bridge_test.dart
++flutter test
++flutter build apk --debug
++```
++
++Then record 15–30 seconds on the physical Android device and press Stop once. Verify that `STOP_REQUESTED` appears immediately in the log and recording duration stops at that tap.

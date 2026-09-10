@@ -18,6 +18,7 @@ import 'package:surveycam/features/gallery/presentation/last_image_provider.dart
 import 'package:surveycam/features/location/presentation/location_viewmodel.dart';
 import 'package:surveycam/features/overlay/presentation/live_overlay_painter.dart';
 import 'package:surveycam/features/overlay/presentation/overlay_preview_state.dart';
+import 'package:surveycam/features/overlay/presentation/overlay_render_snapshot_provider.dart';
 import 'package:surveycam/features/overlay/presentation/overlay_settings_provider.dart';
 import 'package:surveycam/features/projects/presentation/project_picker_sheet.dart';
 import 'package:surveycam/features/projects/presentation/project_provider.dart';
@@ -674,22 +675,25 @@ class _CameraScreenState extends ConsumerState<CameraScreen> {
                                                 ),
 
                                                 /// OVERLAY (CONSTRAINED TO PREVIEW)
+                                                ///
+                                                /// Phase 7.1 keeps Flutter as the
+                                                /// preview source of truth. The
+                                                /// native CameraX effect targets
+                                                /// VideoCapture only, so this is
+                                                /// never duplicated in preview.
                                                 IgnorePointer(
                                                   child: Consumer(
                                                     builder:
                                                         (context, ref, child) {
-                                                      final overlayData = ref.watch(
-                                                          overlayPreviewProvider);
-                                                      final orientation = ref.watch(
-                                                          deviceOrientationProvider);
-                                                      final settings = ref.watch(
-                                                          effectiveOverlaySettingsProvider);
+                                                      final snapshot =
+                                                          ref.watch(
+                                                        overlayRenderSnapshotProvider,
+                                                      );
                                                       return CustomPaint(
                                                         painter:
-                                                            LiveOverlayPainter(
-                                                          overlayData,
-                                                          orientation,
-                                                          settings: settings,
+                                                            LiveOverlayPainter
+                                                                .snapshot(
+                                                          snapshot,
                                                         ),
                                                       );
                                                     },

@@ -1,3 +1,4 @@
+import 'dart:ui' as ui;
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:flutter_svg/flutter_svg.dart' as svg;
@@ -7,6 +8,7 @@ import 'package:surveycam/features/overlay/domain/WatermarkPosition.dart';
 import 'package:surveycam/features/overlay/domain/overlay_model.dart';
 import 'package:surveycam/features/overlay/domain/overlay_settings.dart';
 import 'package:surveycam/features/overlay/domain/video_overlay_sample.dart';
+import 'package:surveycam/features/overlay/presentation/live_overlay_painter.dart';
 import 'package:surveycam/features/overlay/presentation/video_watermark_processor.dart';
 import 'package:vector_graphics/vector_graphics.dart';
 
@@ -20,6 +22,28 @@ const _overlayData = OverlayData(
   note: '',
 );
 
+Future<Uint8List> _renderLiveOverlayPng({
+  required OverlayData data,
+  required DeviceOrientation orientation,
+  required double width,
+  required double height,
+  required OverlaySettings settings,
+}) async {
+  final recorder = ui.PictureRecorder();
+  final canvas = ui.Canvas(recorder);
+  LiveOverlayPainter(
+    data,
+    orientation,
+    settings: settings,
+  ).paint(canvas, ui.Size(width, height));
+  final picture = recorder.endRecording();
+  final image = await picture.toImage(width.toInt(), height.toInt());
+  final bytes = await image.toByteData(format: ui.ImageByteFormat.png);
+  image.dispose();
+  picture.dispose();
+  return bytes!.buffer.asUint8List();
+}
+
 VideoOverlaySample _sample(DeviceOrientation orientation, int timestampMs) {
   return VideoOverlaySample(
     data: _overlayData,
@@ -31,6 +55,50 @@ VideoOverlaySample _sample(DeviceOrientation orientation, int timestampMs) {
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
+
+  test('live preview and saved video share the same card renderer', () async {
+    final svgString = await rootBundle.loadString('Assets/app_logo.svg');
+    final PictureInfo pictureInfo = await svg.vg.loadPicture(
+      svg.SvgStringLoader(svgString),
+      null,
+    );
+    addTearDown(pictureInfo.picture.dispose);
+
+    const data = OverlayData(
+      dateTime: '2026-09-09 18:30:00',
+      latitude: 20.1234,
+      longitude: 85.5678,
+      altitude: 42.5,
+      heading: 135,
+      direction: 'SE',
+      note: 'Site A\nPier 4',
+      position: WatermarkPosition.bottomRight,
+    );
+    const settings = OverlaySettings(
+      backgroundColor: ui.Color(0xCCFFFFFF),
+      textColor: ui.Color(0xFF000000),
+      showWeather: false,
+    );
+
+    final live = await _renderLiveOverlayPng(
+      data: data,
+      orientation: DeviceOrientation.portraitUp,
+      width: 320,
+      height: 480,
+      settings: settings,
+    );
+    final saved = await VideoWatermarkProcessor.generateSingleFrameBytes(
+      data: data,
+      orientation: DeviceOrientation.portraitUp,
+      width: 320,
+      height: 480,
+      pictureInfo: pictureInfo,
+      showWatermark: false,
+      settings: settings,
+    );
+
+    expect(saved, live);
+  });
 
   test('video overlays honor field toggles and hide location warnings',
       () async {
@@ -123,7 +191,7 @@ void main() {
   test('landscape-start overlay does not double rotate on landscape frame', () {
     expect(
       VideoWatermarkProcessor.shouldRotateVideoOverlayForFrame(
-        frameSize: const Size(1920, 1080),
+        frameSize: const ui.Size(1920, 1080),
         orientation: DeviceOrientation.landscapeLeft,
       ),
       isFalse,
@@ -133,7 +201,7 @@ void main() {
   test('portrait-start recording still rotates landscape overlay samples', () {
     expect(
       VideoWatermarkProcessor.shouldRotateVideoOverlayForFrame(
-        frameSize: const Size(1080, 1920),
+        frameSize: const ui.Size(1080, 1920),
         orientation: DeviceOrientation.landscapeLeft,
       ),
       isTrue,
@@ -143,14 +211,14 @@ void main() {
   test('saved video overlay paints in final frame coordinates', () {
     expect(
       VideoWatermarkProcessor.overlayPaintOrientationForFrame(
-        frameSize: const Size(1080, 1920),
+        frameSize: const ui.Size(1080, 1920),
         orientation: DeviceOrientation.landscapeLeft,
       ),
       DeviceOrientation.landscapeLeft,
     );
     expect(
       VideoWatermarkProcessor.overlayPaintOrientationForFrame(
-        frameSize: const Size(1920, 1080),
+        frameSize: const ui.Size(1920, 1080),
         orientation: DeviceOrientation.landscapeRight,
       ),
       DeviceOrientation.portraitUp,

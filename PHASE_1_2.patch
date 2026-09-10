@@ -1,0 +1,1980 @@
+diff -ruN siteSnap-original/siteSnap-master/docs/PHASE_1_2_RECORDING_OVERLAY_REFACTOR.md siteSnap-work/siteSnap-master/docs/PHASE_1_2_RECORDING_OVERLAY_REFACTOR.md
+--- siteSnap-original/siteSnap-master/docs/PHASE_1_2_RECORDING_OVERLAY_REFACTOR.md	1970-01-01 00:00:00.000000000 +0000
++++ siteSnap-work/siteSnap-master/docs/PHASE_1_2_RECORDING_OVERLAY_REFACTOR.md	2026-09-09 13:20:02.275818658 +0000
+@@ -0,0 +1,47 @@
++# Phase 1 + Phase 2 — Recording Boundary + Unified Overlay Layout
++
++## What changed
++
++### Recording architecture boundary
++- `VideoRecordingBackend` is now the stable start/stop contract used by `CameraViewModel`.
++- `CameraRepositoryVideoRecordingBackend` preserves the current Flutter `camera` implementation behind that contract.
++- `RecordingSessionCoordinator` owns logical recording state: project binding, segment list, duration, overlay history, periodic sampling and cleanup.
++- Recording-only segment/history state was removed from `CameraState`; it no longer leaks session internals into UI state.
++
++This boundary is intentionally compatible with the current recorder. A later CameraX realtime-overlay backend can replace `VideoRecordingBackend` without moving session bookkeeping back into the ViewModel.
++
++### Unified overlay render model
++- `OverlayRenderSnapshot` groups the exact `OverlayData`, `OverlaySettings` and `DeviceOrientation` used for one visual state.
++- `overlayRenderSnapshotProvider` supplies the same snapshot to camera preview and recording sampling.
++- `OverlayFrameGeometry` owns orientation/frame normalization rules.
++- `OverlayCardRenderer` owns the information-card typography, fields, padding, background and bottom-left/bottom-right placement.
++- `LiveOverlayPainter` is now a thin adapter over `OverlayCardRenderer`.
++- `VideoWatermarkProcessor` delegates its information-card rendering and frame orientation mapping to the same shared engine.
++- `VideoOverlaySample` can be created from / converted back to an `OverlayRenderSnapshot` while retaining the existing JSON schema for pending video jobs.
++
++## Behavior intentionally unchanged in this phase
++- Video still records through the existing Flutter camera / CameraX plugin path.
++- Video overlay burn-in still uses the legacy background FFmpeg processing path.
++- Foreground processing/recovery remains available.
++- Existing camera switch and front-video mirror segmentation remain supported.
++
++The realtime CameraX compositor belongs to the next implementation phase; this phase creates the seam it will plug into.
++
++## Verification added
++- `test/recording_session_coordinator_test.dart`
++- `test/overlay_render_snapshot_test.dart`
++- `test/video_recording_backend_test.dart`
++- `test/video_watermark_processor_test.dart` now includes live-vs-saved card-render parity coverage.
++
++## Run on the project machine
++
++```powershell
++dart format lib test
++flutter analyze
++flutter test test/recording_session_coordinator_test.dart test/overlay_render_snapshot_test.dart test/video_recording_backend_test.dart test/live_overlay_painter_test.dart test/video_watermark_processor_test.dart
++flutter test
++```
++
++## Environment note
++
++The implementation workspace used to prepare this phase does not contain a Flutter/Dart SDK, so the commands above could not be executed there. Run them on the normal SiteSnap Flutter development machine before merging/releasing.
+diff -ruN siteSnap-original/siteSnap-master/lib/core/di/providers.dart siteSnap-work/siteSnap-master/lib/core/di/providers.dart
+--- siteSnap-original/siteSnap-master/lib/core/di/providers.dart	2026-09-09 12:57:32.000000000 +0000
++++ siteSnap-work/siteSnap-master/lib/core/di/providers.dart	2026-09-09 13:15:23.724072573 +0000
+@@ -1,11 +1,19 @@
+ import 'package:flutter_riverpod/flutter_riverpod.dart';
+ import '../../features/camera/data/camera_repository_impl.dart';
++import '../../features/camera/data/camera_repository_video_recording_backend.dart';
++import '../../features/camera/domain/video_recording_backend.dart';
+ import '../../features/location/data/location_repository_impl.dart';
+ 
+ final cameraRepositoryProvider = Provider<CameraRepositoryImpl>((ref) {
+   return CameraRepositoryImpl();
+ });
+ 
++final videoRecordingBackendProvider = Provider<VideoRecordingBackend>((ref) {
++  return CameraRepositoryVideoRecordingBackend(
++    ref.read(cameraRepositoryProvider),
++  );
++});
++
+ final locationRepositoryProvider = Provider<LocationRepositoryImpl>((ref) {
+   return LocationRepositoryImpl();
+ });
+diff -ruN siteSnap-original/siteSnap-master/lib/features/camera/application/recording_session_coordinator.dart siteSnap-work/siteSnap-master/lib/features/camera/application/recording_session_coordinator.dart
+--- siteSnap-original/siteSnap-master/lib/features/camera/application/recording_session_coordinator.dart	1970-01-01 00:00:00.000000000 +0000
++++ siteSnap-work/siteSnap-master/lib/features/camera/application/recording_session_coordinator.dart	2026-09-09 13:16:01.459254146 +0000
+@@ -0,0 +1,155 @@
++import 'dart:async';
++
++import 'package:surveycam/features/camera/domain/video_recording_session.dart';
++import 'package:surveycam/features/overlay/domain/overlay_render_snapshot.dart';
++import 'package:surveycam/features/overlay/domain/video_overlay_sample.dart';
++
++/// Owns all mutable state that belongs to one logical video recording.
++///
++/// CameraViewModel remains responsible for UI/camera commands. This class owns
++/// session duration, overlay sampling, segment aggregation and project binding,
++/// which gives the future realtime recorder one stable integration boundary.
++class RecordingSessionCoordinator {
++  final DateTime Function() _now;
++  final Duration sampleInterval;
++
++  final List<VideoRecordingSegment> _segments = <VideoRecordingSegment>[];
++  final List<VideoOverlaySample> _overlayHistory = <VideoOverlaySample>[];
++
++  DateTime? _startedAt;
++  String? _projectId;
++  Timer? _sampleTimer;
++
++  RecordingSessionCoordinator({
++    DateTime Function()? now,
++    this.sampleInterval = const Duration(milliseconds: 500),
++  }) : _now = now ?? DateTime.now;
++
++  bool get isActive => _startedAt != null;
++  List<VideoRecordingSegment> get segments =>
++      List<VideoRecordingSegment>.unmodifiable(_segments);
++  List<VideoOverlaySample> get overlayHistory =>
++      List<VideoOverlaySample>.unmodifiable(_overlayHistory);
++
++  void begin({
++    required OverlayRenderSnapshot initialSnapshot,
++    required String? projectId,
++    bool clearSegments = true,
++  }) {
++    stopSampling();
++    if (clearSegments) {
++      _segments.clear();
++    }
++    _overlayHistory.clear();
++    _projectId = projectId;
++    _startedAt = _now();
++    recordOverlay(initialSnapshot, force: true);
++  }
++
++  void startSampling({
++    required OverlayRenderSnapshot Function() snapshotReader,
++    required bool Function() shouldContinue,
++  }) {
++    stopSampling();
++    if (!isActive) return;
++
++    _sampleTimer = Timer.periodic(sampleInterval, (timer) {
++      if (!isActive || !shouldContinue()) {
++        timer.cancel();
++        if (identical(_sampleTimer, timer)) {
++          _sampleTimer = null;
++        }
++        return;
++      }
++      recordOverlay(snapshotReader(), force: true);
++    });
++  }
++
++  void stopSampling() {
++    _sampleTimer?.cancel();
++    _sampleTimer = null;
++  }
++
++  void recordOverlay(
++    OverlayRenderSnapshot snapshot, {
++    bool force = false,
++  }) {
++    final startedAt = _startedAt;
++    if (startedAt == null) return;
++
++    final timestampMs = _now()
++        .difference(startedAt)
++        .inMilliseconds
++        .clamp(0, 1 << 31)
++        .toInt();
++
++    if (!force && _overlayHistory.isNotEmpty) {
++      final previous = _overlayHistory.last;
++      if (previous.snapshot == snapshot &&
++          timestampMs - previous.timestampMs < 80) {
++        return;
++      }
++    }
++
++    _overlayHistory.add(
++      VideoOverlaySample.fromSnapshot(
++        snapshot,
++        timestampMs: timestampMs,
++      ),
++    );
++  }
++
++  void addSegment(VideoRecordingSegment segment) {
++    if (!isActive) return;
++    _segments.add(segment);
++  }
++
++  CompletedVideoRecordingSession complete({
++    required VideoRecordingSegment finalSegment,
++    required OverlayRenderSnapshot finalSnapshot,
++  }) {
++    final startedAt = _startedAt;
++    if (startedAt == null) {
++      throw StateError('No active video recording session to complete.');
++    }
++
++    stopSampling();
++    addSegment(finalSegment);
++    recordOverlay(finalSnapshot, force: true);
++
++    final history = List<VideoOverlaySample>.from(_overlayHistory);
++    if (history.isEmpty) {
++      history.add(
++        VideoOverlaySample.fromSnapshot(finalSnapshot, timestampMs: 0),
++      );
++    }
++
++    final result = CompletedVideoRecordingSession(
++      segments: List<VideoRecordingSegment>.unmodifiable(_segments),
++      overlayHistory: List<VideoOverlaySample>.unmodifiable(history),
++      durationMs: _now()
++          .difference(startedAt)
++          .inMilliseconds
++          .clamp(0, 1 << 31)
++          .toInt(),
++      projectId: _projectId,
++    );
++
++    _reset(clearSegments: true);
++    return result;
++  }
++
++  void abort({bool clearSegments = true}) {
++    stopSampling();
++    _reset(clearSegments: clearSegments);
++  }
++
++  void _reset({required bool clearSegments}) {
++    if (clearSegments) {
++      _segments.clear();
++    }
++    _overlayHistory.clear();
++    _startedAt = null;
++    _projectId = null;
++  }
++}
+diff -ruN siteSnap-original/siteSnap-master/lib/features/camera/data/CameraState.dart siteSnap-work/siteSnap-master/lib/features/camera/data/CameraState.dart
+--- siteSnap-original/siteSnap-master/lib/features/camera/data/CameraState.dart	2026-09-09 12:57:32.000000000 +0000
++++ siteSnap-work/siteSnap-master/lib/features/camera/data/CameraState.dart	2026-09-09 13:14:44.223018025 +0000
+@@ -47,18 +47,6 @@
+ 
+ const Object _unsetCameraStateValue = Object();
+ 
+-class VideoSegment {
+-  final String path;
+-  final CameraLensType lens;
+-  final bool mirror;
+-
+-  VideoSegment({
+-    required this.path,
+-    required this.lens,
+-    this.mirror = false,
+-  });
+-}
+-
+ /// =======================================================
+ /// ✅ CAMERA STATE
+ /// =======================================================
+@@ -89,12 +77,10 @@
+ 
+   final String? error;
+ 
+-  final List<VideoSegment> videoSegments;
+   final double? processingProgress;
+   final String? processingMessage;
+   final String? videoProcessingError;
+ 
+-  final String? videoSequenceDir;
+ 
+   const CameraState({
+     required this.isReady,
+@@ -107,7 +93,6 @@
+     this.isManualFocus = false,
+     this.aspectRatio = CameraAspectRatio.ratio16_9,
+     this.error,
+-    this.videoSegments = const [],
+     this.processingProgress,
+     this.processingMessage,
+     this.videoProcessingError,
+@@ -120,7 +105,6 @@
+     this.orientation = DeviceOrientation.portraitUp,
+     this.captureOrientation,
+     this.captureLens,
+-    this.videoSequenceDir,
+   });
+ 
+   CameraState copyWith({
+@@ -144,12 +128,10 @@
+     DeviceOrientation? orientation,
+     DeviceOrientation? captureOrientation,
+     CameraLensType? captureLens,
+-    List<VideoSegment>? videoSegments,
+     double? processingProgress,
+     bool clearProcessingProgress = false,
+     Object? processingMessage = _unsetCameraStateValue,
+     Object? videoProcessingError = _unsetCameraStateValue,
+-    String? videoSequenceDir,
+   }) {
+     return CameraState(
+       isReady: isReady ?? this.isReady,
+@@ -164,7 +146,6 @@
+       error: identical(error, _unsetCameraStateValue)
+           ? this.error
+           : error as String?,
+-      videoSegments: videoSegments ?? this.videoSegments,
+       processingProgress: clearProcessingProgress
+           ? null
+           : (processingProgress ?? this.processingProgress),
+@@ -184,7 +165,6 @@
+       orientation: orientation ?? this.orientation,
+       captureOrientation: captureOrientation ?? this.captureOrientation,
+       captureLens: captureLens ?? this.captureLens,
+-      videoSequenceDir: videoSequenceDir ?? this.videoSequenceDir,
+     );
+   }
+ }
+diff -ruN siteSnap-original/siteSnap-master/lib/features/camera/data/camera_repository_video_recording_backend.dart siteSnap-work/siteSnap-master/lib/features/camera/data/camera_repository_video_recording_backend.dart
+--- siteSnap-original/siteSnap-master/lib/features/camera/data/camera_repository_video_recording_backend.dart	1970-01-01 00:00:00.000000000 +0000
++++ siteSnap-work/siteSnap-master/lib/features/camera/data/camera_repository_video_recording_backend.dart	2026-09-09 13:15:23.236562195 +0000
+@@ -0,0 +1,17 @@
++import 'package:surveycam/features/camera/domain/camera_repository.dart';
++import 'package:surveycam/features/camera/domain/video_recording_backend.dart';
++
++class CameraRepositoryVideoRecordingBackend implements VideoRecordingBackend {
++  final CameraRepository repository;
++
++  const CameraRepositoryVideoRecordingBackend(this.repository);
++
++  @override
++  Future<void> start() => repository.startVideoRecording();
++
++  @override
++  Future<String> stop() async {
++    final file = await repository.stopVideoRecording();
++    return file.path;
++  }
++}
+diff -ruN siteSnap-original/siteSnap-master/lib/features/camera/domain/video_recording_backend.dart siteSnap-work/siteSnap-master/lib/features/camera/domain/video_recording_backend.dart
+--- siteSnap-original/siteSnap-master/lib/features/camera/domain/video_recording_backend.dart	1970-01-01 00:00:00.000000000 +0000
++++ siteSnap-work/siteSnap-master/lib/features/camera/domain/video_recording_backend.dart	2026-09-09 13:15:23.236554081 +0000
+@@ -0,0 +1,11 @@
++/// Stable recording boundary used by the camera presentation layer.
++///
++/// The current implementation delegates to the Flutter camera repository.
++/// A realtime CameraX compositor can replace this backend later without
++/// changing CameraViewModel's session/orchestration logic.
++abstract class VideoRecordingBackend {
++  Future<void> start();
++
++  /// Finalizes the active native recording and returns its temporary file path.
++  Future<String> stop();
++}
+diff -ruN siteSnap-original/siteSnap-master/lib/features/camera/domain/video_recording_session.dart siteSnap-work/siteSnap-master/lib/features/camera/domain/video_recording_session.dart
+--- siteSnap-original/siteSnap-master/lib/features/camera/domain/video_recording_session.dart	1970-01-01 00:00:00.000000000 +0000
++++ siteSnap-work/siteSnap-master/lib/features/camera/domain/video_recording_session.dart	2026-09-09 13:11:56.384217366 +0000
+@@ -0,0 +1,28 @@
++import 'package:surveycam/features/camera/domain/camera_lens_type.dart';
++import 'package:surveycam/features/overlay/domain/video_overlay_sample.dart';
++
++class VideoRecordingSegment {
++  final String path;
++  final CameraLensType lens;
++  final bool mirror;
++
++  const VideoRecordingSegment({
++    required this.path,
++    required this.lens,
++    this.mirror = false,
++  });
++}
++
++class CompletedVideoRecordingSession {
++  final List<VideoRecordingSegment> segments;
++  final List<VideoOverlaySample> overlayHistory;
++  final int durationMs;
++  final String? projectId;
++
++  const CompletedVideoRecordingSession({
++    required this.segments,
++    required this.overlayHistory,
++    required this.durationMs,
++    required this.projectId,
++  });
++}
+diff -ruN siteSnap-original/siteSnap-master/lib/features/camera/presentation/camera_screen.dart siteSnap-work/siteSnap-master/lib/features/camera/presentation/camera_screen.dart
+--- siteSnap-original/siteSnap-master/lib/features/camera/presentation/camera_screen.dart	2026-09-09 12:57:32.000000000 +0000
++++ siteSnap-work/siteSnap-master/lib/features/camera/presentation/camera_screen.dart	2026-09-09 13:17:25.771124799 +0000
+@@ -18,6 +18,7 @@
+ import 'package:surveycam/features/location/presentation/location_viewmodel.dart';
+ import 'package:surveycam/features/overlay/presentation/live_overlay_painter.dart';
+ import 'package:surveycam/features/overlay/presentation/overlay_preview_state.dart';
++import 'package:surveycam/features/overlay/presentation/overlay_render_snapshot_provider.dart';
+ import 'package:surveycam/features/overlay/presentation/overlay_settings_provider.dart';
+ import 'package:surveycam/features/projects/presentation/project_picker_sheet.dart';
+ import 'package:surveycam/features/projects/presentation/project_provider.dart';
+@@ -678,18 +679,13 @@
+                                                   child: Consumer(
+                                                     builder:
+                                                         (context, ref, child) {
+-                                                      final overlayData = ref.watch(
+-                                                          overlayPreviewProvider);
+-                                                      final orientation = ref.watch(
+-                                                          deviceOrientationProvider);
+-                                                      final settings = ref.watch(
+-                                                          effectiveOverlaySettingsProvider);
++                                                      final snapshot = ref.watch(
++                                                        overlayRenderSnapshotProvider,
++                                                      );
+                                                       return CustomPaint(
+                                                         painter:
+-                                                            LiveOverlayPainter(
+-                                                          overlayData,
+-                                                          orientation,
+-                                                          settings: settings,
++                                                            LiveOverlayPainter.snapshot(
++                                                          snapshot,
+                                                         ),
+                                                       );
+                                                     },
+diff -ruN siteSnap-original/siteSnap-master/lib/features/camera/presentation/camera_viewmodel.dart siteSnap-work/siteSnap-master/lib/features/camera/presentation/camera_viewmodel.dart
+--- siteSnap-original/siteSnap-master/lib/features/camera/presentation/camera_viewmodel.dart	2026-09-09 12:57:32.000000000 +0000
++++ siteSnap-work/siteSnap-master/lib/features/camera/presentation/camera_viewmodel.dart	2026-09-09 13:17:25.770717318 +0000
+@@ -14,20 +14,23 @@
+ import 'package:surveycam/core/services/media_audit_service.dart';
+ import 'package:surveycam/core/services/video_processing_job.dart';
+ import 'package:surveycam/core/utils/gallery_saver.dart';
++import 'package:surveycam/features/camera/application/recording_session_coordinator.dart';
+ import 'package:surveycam/features/camera/data/CameraState.dart';
+ import 'package:surveycam/features/camera/domain/camera_lens_type.dart';
++import 'package:surveycam/features/camera/domain/video_recording_session.dart';
+ import 'package:surveycam/features/camera/presentation/camera_settings_provider.dart';
+ import 'package:surveycam/features/overlay/presentation/overlay_settings_provider.dart';
+ import 'package:surveycam/features/gallery/presentation/image_preview_screen.dart';
+ import 'package:surveycam/features/gallery/presentation/last_image_provider.dart';
+ import 'package:surveycam/features/location/presentation/location_viewmodel.dart';
+ import 'package:surveycam/features/overlay/domain/overlay_model.dart';
++import 'package:surveycam/features/overlay/domain/overlay_render_snapshot.dart';
++import 'package:surveycam/features/overlay/presentation/overlay_render_snapshot_provider.dart';
+ import 'package:surveycam/features/overlay/domain/overlay_settings.dart';
+ import 'package:surveycam/features/overlay/presentation/captured_overlay_provider.dart';
+ import 'package:surveycam/features/overlay/presentation/overlay_preview_state.dart';
+ import 'package:surveycam/features/overlay/presentation/overlay_viewmodel.dart';
+ import 'package:surveycam/features/gallery/data/sitesnap_gallery_repository.dart';
+-import 'package:surveycam/features/overlay/domain/video_overlay_sample.dart';
+ import 'package:surveycam/features/projects/presentation/project_provider.dart';
+ 
+ final cameraViewModelProvider =
+@@ -58,7 +61,6 @@
+   bool _zoomCommandInFlight = false;
+   double? _pendingZoom;
+   int _zoomAnimationGeneration = 0;
+-  Timer? _videoHistoryTimer;
+   late final Future<void> _captureDependenciesReady;
+ 
+   // App lifecycle events can arrive as inactive -> paused -> resumed in quick
+@@ -68,10 +70,8 @@
+   int _lifecycleGeneration = 0;
+   AppLifecycleState _latestLifecycleState = AppLifecycleState.resumed;
+ 
+-  // Optimized overlay history storage
+-  final List<VideoOverlaySample> _videoDataHistory = [];
+-  DateTime? _recordingStartTime;
+-  String? _recordingProjectId;
++  final RecordingSessionCoordinator _recordingSession =
++      RecordingSessionCoordinator();
+ 
+   bool get isCameraStable => _isCameraStable;
+   double get exposureValue => _currentExposure;
+@@ -475,36 +475,16 @@
+     }
+   }
+ 
++  OverlayRenderSnapshot _currentOverlaySnapshot() {
++    return ref.read(overlayRenderSnapshotProvider);
++  }
++
+   void _recordCurrentVideoOverlaySample({bool force = false}) {
+-    final startedAt = _recordingStartTime;
+-    if (startedAt == null) return;
+     if (!force && !state.isRecording) return;
+-
+-    final timestamp = DateTime.now()
+-        .difference(startedAt)
+-        .inMilliseconds
+-        .clamp(0, 1 << 31)
+-        .toInt();
+-    final data = ref.read(overlayPreviewProvider);
+-    final settings = ref.read(effectiveOverlaySettingsProvider);
+-    final orientation = state.orientation;
+-
+-    if (!force && _videoDataHistory.isNotEmpty) {
+-      final previous = _videoDataHistory.last;
+-      final duplicateState = previous.data == data &&
+-          previous.settings == settings &&
+-          previous.orientation == orientation;
+-      if (duplicateState && timestamp - previous.timestampMs < 80) {
+-        return;
+-      }
+-    }
+-
+-    _videoDataHistory.add(VideoOverlaySample(
+-      data: data,
+-      orientation: orientation,
+-      settings: settings,
+-      timestampMs: timestamp,
+-    ));
++    _recordingSession.recordOverlay(
++      _currentOverlaySnapshot(),
++      force: force,
++    );
+   }
+ 
+   // ================= LIFECYCLE =================
+@@ -860,18 +840,16 @@
+       final wasRecording = state.isRecording;
+       if (wasRecording) {
+         try {
+-          final repo = ref.read(cameraRepositoryProvider);
+-          final segmentFile = await repo.stopVideoRecording();
+-          final segment = VideoSegment(
+-            path: segmentFile.path,
+-            lens: state.currentLens,
+-            mirror: _shouldMirrorSegment(state.currentLens),
+-          );
+-          state = state.copyWith(
+-            videoSegments: [...state.videoSegments, segment],
++          final segmentPath =
++              await ref.read(videoRecordingBackendProvider).stop();
++          _recordingSession.addSegment(
++            VideoRecordingSegment(
++              path: segmentPath,
++              lens: state.currentLens,
++              mirror: _shouldMirrorSegment(state.currentLens),
++            ),
+           );
+-          // Note: We don't set isRecording to false here to avoid UI flicker
+-          // and we don't stop the _videoHistoryTimer yet
++          // Keep the logical session active while the native camera is swapped.
+         } catch (e) {
+           debugPrint("Error saving segment during switch: $e");
+         }
+@@ -933,7 +911,6 @@
+ 
+           if (wasRecording) {
+             // Restart recording segment without clearing history/sequence
+-            final repo = ref.read(cameraRepositoryProvider);
+             if (state.flashMode == FlashMode.always &&
+                 state.currentLens != CameraLensType.front) {
+               await _safeCameraCommand(
+@@ -942,14 +919,14 @@
+                 () => controller.setFlashMode(FlashMode.torch),
+               );
+             }
+-            await repo.startVideoRecording();
++            await ref.read(videoRecordingBackendProvider).start();
+           }
+         }
+       } catch (e) {
+         debugPrint("Switch camera error: $e");
+         state = state.copyWith(
+             isReady: false, error: e.toString(), isRecording: false);
+-        _videoHistoryTimer?.cancel();
++        _recordingSession.abort();
+       }
+     } finally {
+       _isRestarting = false;
+@@ -999,24 +976,21 @@
+     var segmentClosed = false;
+ 
+     try {
+-      final repo = ref.read(cameraRepositoryProvider);
+-      final segmentFile = await repo.stopVideoRecording();
++      final segmentPath = await ref.read(videoRecordingBackendProvider).stop();
+       segmentClosed = true;
+-      final segment = VideoSegment(
+-        path: segmentFile.path,
+-        lens: state.currentLens,
+-        mirror: _shouldMirrorSegment(state.currentLens),
+-      );
+-
+-      state = state.copyWith(
+-        videoSegments: [...state.videoSegments, segment],
++      _recordingSession.addSegment(
++        VideoRecordingSegment(
++          path: segmentPath,
++          lens: state.currentLens,
++          mirror: _shouldMirrorSegment(state.currentLens),
++        ),
+       );
+ 
+       await ref
+           .read(cameraSettingsProvider.notifier)
+           .setMirrorFrontVideo(mirror);
+ 
+-      await repo.startVideoRecording();
++      await ref.read(videoRecordingBackendProvider).start();
+       state = state.copyWith(isRecording: true);
+     } catch (e) {
+       debugPrint("Mirror toggle while recording failed: $e");
+@@ -1024,7 +998,7 @@
+           .read(cameraSettingsProvider.notifier)
+           .setMirrorFrontVideo(mirror);
+       if (segmentClosed) {
+-        _videoHistoryTimer?.cancel();
++        _recordingSession.abort();
+         state = state.copyWith(isRecording: false);
+       }
+     }
+@@ -1340,7 +1314,6 @@
+         processingMessage: null,
+         videoProcessingError: null,
+       );
+-      final repo = ref.read(cameraRepositoryProvider);
+ 
+       if (state.flashMode == FlashMode.always &&
+           state.currentLens != CameraLensType.front) {
+@@ -1351,7 +1324,7 @@
+         );
+       }
+ 
+-      await repo.startVideoRecording();
++      await ref.read(videoRecordingBackendProvider).start();
+ 
+       // The app can be backgrounded while CameraX is asynchronously creating
+       // the recorder. Do not publish a recording state for a controller that
+@@ -1364,40 +1337,27 @@
+         return false;
+       }
+ 
+-      // Start history tracking
+-      _videoHistoryTimer?.cancel();
+-      if (clearSegments || state.videoSegments.isEmpty) {
+-        _videoDataHistory.clear();
+-        await ref.read(projectProvider.notifier).ready;
+-        await ref.read(overlaySettingsProvider.notifier).ready;
+-        _recordingProjectId = ref.read(effectiveActiveProjectIdProvider);
+-      }
+-      _recordingStartTime = DateTime.now();
+-
+-      // Sample overlay at 2 FPS
+-      _videoHistoryTimer =
+-          Timer.periodic(const Duration(milliseconds: 500), (timer) {
+-        if (!state.isRecording) {
+-          timer.cancel();
+-          return;
+-        }
+-
+-        // 🔥 FRESH DATA CAPTURE
+-        _recordCurrentVideoOverlaySample(force: true);
+-      });
+-
+-      // Initial sample
+-      _recordCurrentVideoOverlaySample(force: true);
++      await ref.read(projectProvider.notifier).ready;
++      await ref.read(overlaySettingsProvider.notifier).ready;
++      _recordingSession.begin(
++        initialSnapshot: _currentOverlaySnapshot(),
++        projectId: ref.read(effectiveActiveProjectIdProvider),
++        clearSegments: clearSegments,
++      );
+ 
+       state = state.copyWith(
+         isRecording: true,
+-        videoSegments: clearSegments ? <VideoSegment>[] : state.videoSegments,
+         processingMessage: null,
+         videoProcessingError: null,
+       );
++      _recordingSession.startSampling(
++        snapshotReader: _currentOverlaySnapshot,
++        shouldContinue: () => mounted && state.isRecording,
++      );
+       unawaited(HapticFeedback.heavyImpact());
+       return true;
+     } catch (e) {
++      _recordingSession.abort();
+       debugPrint("Start recording error: $e");
+       return false;
+     } finally {
+@@ -1446,32 +1406,18 @@
+     _stopRecordingInFlight = true;
+     var jobQueuedForProcessing = false;
+     try {
+-      final repo = ref.read(cameraRepositoryProvider);
+-      _videoHistoryTimer?.cancel();
+-      _videoHistoryTimer = null;
++      _recordingSession.stopSampling();
+ 
+-      final lastSegmentFile = await repo.stopVideoRecording();
+-      final lastSegment = VideoSegment(
+-        path: lastSegmentFile.path,
+-        lens: state.currentLens,
+-        mirror: _shouldMirrorSegment(state.currentLens),
+-      );
+-      final allSegments = [...state.videoSegments, lastSegment];
+-      final totalDurationMs = _recordingStartTime == null
+-          ? 0
+-          : DateTime.now().difference(_recordingStartTime!).inMilliseconds;
+-
+-      // Capture data needed for processing before clearing local state
+-      _recordCurrentVideoOverlaySample(force: true);
+-      final history = List<VideoOverlaySample>.from(_videoDataHistory);
+-      if (history.isEmpty) {
+-        history.add(VideoOverlaySample(
+-          data: ref.read(overlayPreviewProvider),
+-          orientation: state.orientation,
+-          settings: ref.read(effectiveOverlaySettingsProvider),
+-          timestampMs: 0,
+-        ));
+-      }
++      final lastSegmentPath =
++          await ref.read(videoRecordingBackendProvider).stop();
++      final completedSession = _recordingSession.complete(
++        finalSegment: VideoRecordingSegment(
++          path: lastSegmentPath,
++          lens: state.currentLens,
++          mirror: _shouldMirrorSegment(state.currentLens),
++        ),
++        finalSnapshot: _currentOverlaySnapshot(),
++      );
+ 
+       // Update state: stop recording and start processing overlay
+       state = state.copyWith(
+@@ -1499,48 +1445,35 @@
+       final now = DateTime.now();
+       final job = VideoProcessingJob(
+         id: 'video_${now.microsecondsSinceEpoch}',
+-        segments: allSegments
++        segments: completedSession.segments
+             .map((segment) => VideoProcessingSegment(
+                   path: segment.path,
+                   lens: segment.lens,
+                   mirror: segment.mirror,
+                 ))
+             .toList(),
+-        history: history,
+-        durationMs: totalDurationMs,
++        history: completedSession.overlayHistory,
++        durationMs: completedSession.durationMs,
+         createdAtMs: now.millisecondsSinceEpoch,
+-        projectId: _recordingProjectId,
++        projectId: completedSession.projectId,
+       );
+ 
+       await VideoProcessingTaskHandler.enqueueJob(job);
+       jobQueuedForProcessing = true;
+       await _startForegroundService();
+ 
+-      state = state.copyWith(
+-        videoSegments: [],
+-        videoSequenceDir: null,
+-      );
+-      _videoDataHistory.clear();
+-      _recordingStartTime = null;
+-      _recordingProjectId = null;
+     } catch (e) {
+       debugPrint("Stop recording error: $e");
+       final friendlyError = _friendlyStopRecordingError(e);
+       state = state.copyWith(
+         isRecording: false,
+         clearProcessingProgress: true,
+-        videoSegments: [],
+-        videoSequenceDir: null,
+         processingMessage: jobQueuedForProcessing
+             ? 'Video queued for processing.'
+             : 'Video recording failed.',
+         videoProcessingError: friendlyError,
+       );
+-      _videoHistoryTimer?.cancel();
+-      _videoHistoryTimer = null;
+-      _videoDataHistory.clear();
+-      _recordingStartTime = null;
+-      _recordingProjectId = null;
++      _recordingSession.abort();
+       if (!jobQueuedForProcessing) {
+         await FlutterForegroundTask.stopService();
+       }
+@@ -1674,7 +1607,7 @@
+   @override
+   void dispose() {
+     WidgetsBinding.instance.removeObserver(this);
+-    _videoHistoryTimer?.cancel();
++    _recordingSession.abort();
+     FlutterForegroundTask.removeTaskDataCallback(_onReceiveTaskData);
+     state = state.copyWith(clearController: true, isReady: false);
+     unawaited(ref.read(cameraRepositoryProvider).dispose());
+diff -ruN siteSnap-original/siteSnap-master/lib/features/overlay/domain/overlay_render_snapshot.dart siteSnap-work/siteSnap-master/lib/features/overlay/domain/overlay_render_snapshot.dart
+--- siteSnap-original/siteSnap-master/lib/features/overlay/domain/overlay_render_snapshot.dart	1970-01-01 00:00:00.000000000 +0000
++++ siteSnap-work/siteSnap-master/lib/features/overlay/domain/overlay_render_snapshot.dart	2026-09-09 13:12:16.630424619 +0000
+@@ -0,0 +1,63 @@
++import 'package:flutter/foundation.dart';
++import 'package:flutter/services.dart';
++
++import 'overlay_model.dart';
++import 'overlay_settings.dart';
++
++/// Immutable visual state consumed by every overlay renderer.
++///
++/// Keeping data, settings and device orientation together prevents preview,
++/// photo and video code paths from reconstructing slightly different overlay
++/// states at render time.
++class OverlayRenderSnapshot {
++  final OverlayData data;
++  final OverlaySettings settings;
++  final DeviceOrientation orientation;
++
++  const OverlayRenderSnapshot({
++    required this.data,
++    required this.settings,
++    required this.orientation,
++  });
++
++  factory OverlayRenderSnapshot.fromJson(Map<String, dynamic> json) {
++    return OverlayRenderSnapshot(
++      data: OverlayData.fromJson(
++        Map<String, dynamic>.from(json['data'] as Map? ?? const {}),
++      ),
++      settings: OverlaySettings.fromJson(
++        Map<String, dynamic>.from(json['settings'] as Map? ?? const {}),
++      ),
++      orientation: DeviceOrientation.values[
++        (json['orientation'] as int? ?? DeviceOrientation.portraitUp.index)
++            .clamp(0, DeviceOrientation.values.length - 1),
++      ],
++    );
++  }
++
++  Map<String, dynamic> toJson() {
++    return {
++      'data': data.toJson(),
++      'settings': settings.toJson(),
++      'orientation': orientation.index,
++    };
++  }
++
++  @override
++  bool operator ==(Object other) {
++    return identical(this, other) ||
++        other is OverlayRenderSnapshot &&
++            mapEquals(other.data.toJson(), data.toJson()) &&
++            mapEquals(other.settings.toJson(), settings.toJson()) &&
++            other.orientation == orientation;
++  }
++
++  @override
++  int get hashCode => Object.hash(
++        Object.hashAll(data.toJson().entries.map((e) => Object.hash(e.key, e.value))),
++        Object.hashAll(
++          settings.toJson().entries.map((e) => Object.hash(e.key, e.value)),
++        ),
++        orientation,
++      );
++}
+diff -ruN siteSnap-original/siteSnap-master/lib/features/overlay/domain/video_overlay_sample.dart siteSnap-work/siteSnap-master/lib/features/overlay/domain/video_overlay_sample.dart
+--- siteSnap-original/siteSnap-master/lib/features/overlay/domain/video_overlay_sample.dart	2026-09-09 12:57:32.000000000 +0000
++++ siteSnap-work/siteSnap-master/lib/features/overlay/domain/video_overlay_sample.dart	2026-09-09 13:12:05.552329634 +0000
+@@ -1,5 +1,7 @@
+ import 'package:flutter/services.dart';
++
+ import 'overlay_model.dart';
++import 'overlay_render_snapshot.dart';
+ import 'overlay_settings.dart';
+ 
+ class VideoOverlaySample {
+@@ -15,6 +17,24 @@
+     required this.timestampMs,
+   });
+ 
++  factory VideoOverlaySample.fromSnapshot(
++    OverlayRenderSnapshot snapshot, {
++    required int timestampMs,
++  }) {
++    return VideoOverlaySample(
++      data: snapshot.data,
++      orientation: snapshot.orientation,
++      settings: snapshot.settings,
++      timestampMs: timestampMs,
++    );
++  }
++
++  OverlayRenderSnapshot get snapshot => OverlayRenderSnapshot(
++        data: data,
++        settings: settings,
++        orientation: orientation,
++      );
++
+   factory VideoOverlaySample.fromJson(Map<String, dynamic> json) {
+     return VideoOverlaySample(
+       data: OverlayData.fromJson(
+diff -ruN siteSnap-original/siteSnap-master/lib/features/overlay/presentation/live_overlay_painter.dart siteSnap-work/siteSnap-master/lib/features/overlay/presentation/live_overlay_painter.dart
+--- siteSnap-original/siteSnap-master/lib/features/overlay/presentation/live_overlay_painter.dart	2026-09-09 12:57:32.000000000 +0000
++++ siteSnap-work/siteSnap-master/lib/features/overlay/presentation/live_overlay_painter.dart	2026-09-09 13:12:24.977154632 +0000
+@@ -1,224 +1,41 @@
+-import 'dart:math';
+ import 'package:flutter/material.dart';
+ import 'package:flutter/services.dart';
+ 
+ import 'package:surveycam/features/overlay/domain/overlay_model.dart';
+-import 'package:surveycam/features/overlay/domain/WatermarkPosition.dart';
++import 'package:surveycam/features/overlay/domain/overlay_render_snapshot.dart';
+ import 'package:surveycam/features/overlay/domain/overlay_settings.dart';
+-import 'package:surveycam/core/utils/overlay_utils.dart';
++import 'package:surveycam/features/overlay/presentation/overlay_layout_engine.dart';
+ 
+ class LiveOverlayPainter extends CustomPainter {
+-  final OverlayData data;
+-  final DeviceOrientation orientation;
+-  final OverlaySettings settings;
++  final OverlayRenderSnapshot snapshot;
+ 
+-  LiveOverlayPainter(this.data, this.orientation,
+-      {this.settings = const OverlaySettings()});
++  LiveOverlayPainter(
++    OverlayData data,
++    DeviceOrientation orientation, {
++    OverlaySettings settings = const OverlaySettings(),
++  }) : snapshot = OverlayRenderSnapshot(
++          data: data,
++          settings: settings,
++          orientation: orientation,
++        );
++
++  LiveOverlayPainter.snapshot(this.snapshot);
++
++  OverlayData get data => snapshot.data;
++  DeviceOrientation get orientation => snapshot.orientation;
++  OverlaySettings get settings => snapshot.settings;
+ 
+   @override
+   void paint(Canvas canvas, Size size) {
+-    if (size.width == 0 || size.height == 0) return;
+-
+-    canvas.save();
+-
+-    // ===============================
+-    // ROTATE CANVAS
+-    // ===============================
+-    switch (orientation) {
+-      case DeviceOrientation.portraitUp:
+-        break;
+-
+-      case DeviceOrientation.portraitDown:
+-        canvas.translate(size.width, size.height);
+-        canvas.rotate(pi);
+-        break;
+-
+-      case DeviceOrientation.landscapeLeft:
+-        canvas.translate(0, size.height);
+-        canvas.rotate(-pi / 2);
+-        break;
+-
+-      case DeviceOrientation.landscapeRight:
+-        canvas.translate(size.width, 0);
+-        canvas.rotate(pi / 2);
+-        break;
+-    }
+-
+-    // ===============================
+-    // DRAW SIZE FIX
+-    // ===============================
+-    double drawWidth = size.width;
+-    double drawHeight = size.height;
+-
+-    if (orientation == DeviceOrientation.landscapeLeft ||
+-        orientation == DeviceOrientation.landscapeRight) {
+-      drawWidth = size.height;
+-      drawHeight = size.width;
+-    }
+-
+-    final baseSize = min(drawWidth, drawHeight);
+-
+-    // ===============================
+-    // PROFESSIONAL TEXT STYLE
+-    // ===============================
+-    final textStyle = TextStyle(
+-      color: settings.textColor,
+-      fontSize: baseSize * 0.032,
+-      fontWeight: FontWeight.w600,
+-      height: 1.2,
+-      letterSpacing: 0.2,
+-    );
+-
+-    final warningStyle = textStyle.copyWith(color: Colors.redAccent);
+-    final noteStyle = textStyle.copyWith(
+-      fontSize: baseSize * 0.035,
+-      color: settings.textColor,
+-      fontStyle: FontStyle.italic,
+-    );
+-
+-    // ===============================
+-    // BUILD TEXT SPANS
+-    // ===============================
+-    final List<TextSpan> spans = [];
+-    final noteLines = settings.showNote && data.note.trim().isNotEmpty
+-        ? data.note.trim().split(RegExp(r'\r?\n'))
+-        : const <String>[];
+-    final placeLine = noteLines.isEmpty ? '' : noteLines.first.trim();
+-    final extraNote =
+-        noteLines.length <= 1 ? '' : noteLines.skip(1).join('\n').trim();
+-
+-    if (placeLine.isNotEmpty) {
+-      spans.add(TextSpan(text: "$placeLine\n", style: noteStyle));
+-    } else if (extraNote.isNotEmpty) {
+-      // Keep Line 1 space even if empty, so Line 2 doesn't shift up
+-      spans.add(TextSpan(text: "\n", style: noteStyle));
+-    }
+-
+-    if (settings.showDateTime && data.dateTime.isNotEmpty) {
+-      spans.add(TextSpan(text: "${data.dateTime}\n", style: textStyle));
+-    }
+-
+-    if (settings.showCoordinates) {
+-      if (data.locationWarning != null) {
+-        spans.add(
+-            TextSpan(text: "${data.locationWarning}\n", style: warningStyle));
+-      } else {
+-        final latLabel = OverlayUtils.getLabel('latitude', settings.language);
+-        final lonLabel = OverlayUtils.getLabel('longitude', settings.language);
+-        final latVal = OverlayUtils.formatCoordinate(
+-            data.latitude, true, settings.coordinateFormat);
+-        final lonVal = OverlayUtils.formatCoordinate(
+-            data.longitude, false, settings.coordinateFormat);
+-
+-        spans.add(TextSpan(
+-          text: "$latLabel: $latVal\n$lonLabel: $lonVal\n",
+-          style: textStyle,
+-        ));
+-      }
+-    }
+-
+-    String altDirText = "";
+-    if (settings.showAltitude) {
+-      final altLabel = OverlayUtils.getLabel('altitude', settings.language);
+-      altDirText += "$altLabel: ${data.altitude.toStringAsFixed(1)}m  ";
+-    }
+-    if (settings.showDirection) {
+-      final dirLabel = OverlayUtils.getLabel('direction', settings.language);
+-      altDirText +=
+-          "$dirLabel: ${data.direction} ${data.heading.toStringAsFixed(0)}°";
+-    }
+-    if (altDirText.isNotEmpty) {
+-      spans.add(TextSpan(text: "$altDirText\n", style: textStyle));
+-    }
+-
+-    if (settings.showWeather && data.weather != null) {
+-      final label = OverlayUtils.getLabel('weather', settings.language);
+-      spans.add(TextSpan(text: "$label: ${data.weather}\n", style: textStyle));
+-    }
+-
+-    if (settings.showHumidity && data.humidity != null) {
+-      final label = OverlayUtils.getLabel('humidity', settings.language);
+-      spans.add(TextSpan(text: "$label: ${data.humidity}\n", style: textStyle));
+-    }
+-
+-    if (settings.showPressure && data.pressure != null) {
+-      final label = OverlayUtils.getLabel('pressure', settings.language);
+-      spans.add(TextSpan(text: "$label: ${data.pressure}\n", style: textStyle));
+-    }
+-
+-    if (settings.showAir && data.air != null) {
+-      final label = OverlayUtils.getLabel('air', settings.language);
+-      spans.add(TextSpan(text: "$label: ${data.air}\n", style: textStyle));
+-    }
+-
+-    if (extraNote.isNotEmpty) {
+-      spans.add(TextSpan(text: extraNote, style: noteStyle));
+-    }
+-
+-    if (spans.isEmpty) {
+-      canvas.restore();
+-      return;
+-    }
+-
+-    final textPainter = TextPainter(
+-      text: TextSpan(children: spans),
+-      textDirection: TextDirection.ltr,
+-      maxLines: 14,
+-      ellipsis: '...',
++    OverlayCardRenderer.paint(
++      canvas: canvas,
++      size: size,
++      snapshot: snapshot,
+     );
+-
+-    textPainter.layout(maxWidth: baseSize * 0.75);
+-
+-    // ===============================
+-    // POSITION
+-    // ===============================
+-    final paddingH = baseSize * 0.03;
+-    final paddingV = baseSize * 0.02;
+-
+-    final boxWidth = textPainter.width + (paddingH * 2);
+-    final boxHeight = textPainter.height + (paddingV * 2);
+-
+-    final dx = data.position == WatermarkPosition.bottomLeft
+-        ? 0.0
+-        : drawWidth - boxWidth;
+-
+-    final dy = drawHeight - boxHeight;
+-
+-    final boxRect = Rect.fromLTWH(dx, dy, boxWidth, boxHeight);
+-
+-    // ===============================
+-    // BACKGROUND CARD
+-    // ===============================
+-    final bgPaint = Paint()
+-      ..color =
+-          settings.backgroundColor.withOpacity(settings.backgroundOpacity);
+-
+-    final borderPaint = Paint()
+-      ..color = Colors.black.withOpacity(0.1)
+-      ..style = PaintingStyle.stroke
+-      ..strokeWidth = 1.0;
+-
+-    canvas.drawRRect(
+-      RRect.fromRectAndRadius(boxRect, const Radius.circular(8)),
+-      bgPaint,
+-    );
+-    canvas.drawRRect(
+-      RRect.fromRectAndRadius(boxRect, const Radius.circular(8)),
+-      borderPaint,
+-    );
+-
+-    // ===============================
+-    // DRAW TEXT
+-    // ===============================
+-    textPainter.paint(canvas, Offset(dx + paddingH, dy + paddingV));
+-
+-    canvas.restore();
+   }
+ 
+   @override
+   bool shouldRepaint(covariant LiveOverlayPainter oldDelegate) {
+-    return oldDelegate.data != data ||
+-        oldDelegate.orientation != orientation ||
+-        oldDelegate.settings != settings;
++    return oldDelegate.snapshot != snapshot;
+   }
+ }
+diff -ruN siteSnap-original/siteSnap-master/lib/features/overlay/presentation/overlay_layout_engine.dart siteSnap-work/siteSnap-master/lib/features/overlay/presentation/overlay_layout_engine.dart
+--- siteSnap-original/siteSnap-master/lib/features/overlay/presentation/overlay_layout_engine.dart	1970-01-01 00:00:00.000000000 +0000
++++ siteSnap-work/siteSnap-master/lib/features/overlay/presentation/overlay_layout_engine.dart	2026-09-09 13:11:56.382239525 +0000
+@@ -0,0 +1,239 @@
++import 'dart:math';
++
++import 'package:flutter/material.dart';
++import 'package:flutter/services.dart';
++
++import 'package:surveycam/core/utils/overlay_utils.dart';
++import 'package:surveycam/features/overlay/domain/WatermarkPosition.dart';
++import 'package:surveycam/features/overlay/domain/overlay_render_snapshot.dart';
++
++/// Geometry helpers shared by live preview and encoded-frame rendering.
++class OverlayFrameGeometry {
++  const OverlayFrameGeometry._();
++
++  static bool shouldRotateForFrame({
++    required Size frameSize,
++    required DeviceOrientation orientation,
++  }) {
++    final frameIsLandscape = frameSize.width > frameSize.height;
++    final overlayIsLandscape = orientation == DeviceOrientation.landscapeLeft ||
++        orientation == DeviceOrientation.landscapeRight;
++    return frameIsLandscape != overlayIsLandscape;
++  }
++
++  /// Converts device orientation into the orientation that should be painted
++  /// on a frame whose pixels may already have been normalized by the recorder.
++  static DeviceOrientation orientationForEncodedFrame({
++    required Size frameSize,
++    required DeviceOrientation orientation,
++  }) {
++    final isFrameLandscape = frameSize.width > frameSize.height;
++    if (!isFrameLandscape) return orientation;
++
++    switch (orientation) {
++      case DeviceOrientation.landscapeLeft:
++      case DeviceOrientation.landscapeRight:
++        return DeviceOrientation.portraitUp;
++      case DeviceOrientation.portraitUp:
++        return DeviceOrientation.landscapeLeft;
++      case DeviceOrientation.portraitDown:
++        return DeviceOrientation.landscapeRight;
++    }
++  }
++
++  static Size logicalSizeForOrientation(
++    Size size,
++    DeviceOrientation orientation,
++  ) {
++    if (orientation == DeviceOrientation.landscapeLeft ||
++        orientation == DeviceOrientation.landscapeRight) {
++      return Size(size.height, size.width);
++    }
++    return size;
++  }
++
++  static void applyOrientationTransform(
++    Canvas canvas,
++    Size size,
++    DeviceOrientation orientation,
++  ) {
++    switch (orientation) {
++      case DeviceOrientation.portraitUp:
++        break;
++      case DeviceOrientation.portraitDown:
++        canvas.translate(size.width, size.height);
++        canvas.rotate(pi);
++        break;
++      case DeviceOrientation.landscapeLeft:
++        canvas.translate(0, size.height);
++        canvas.rotate(-pi / 2);
++        break;
++      case DeviceOrientation.landscapeRight:
++        canvas.translate(size.width, 0);
++        canvas.rotate(pi / 2);
++        break;
++    }
++  }
++}
++
++/// Single source of truth for the information card shown on camera preview,
++/// still images and video overlay frames.
++class OverlayCardRenderer {
++  const OverlayCardRenderer._();
++
++  static void paint({
++    required Canvas canvas,
++    required Size size,
++    required OverlayRenderSnapshot snapshot,
++  }) {
++    if (size.width <= 0 || size.height <= 0) return;
++
++    canvas.save();
++    OverlayFrameGeometry.applyOrientationTransform(
++      canvas,
++      size,
++      snapshot.orientation,
++    );
++
++    final logicalSize = OverlayFrameGeometry.logicalSizeForOrientation(
++      size,
++      snapshot.orientation,
++    );
++    final baseSize = min(logicalSize.width, logicalSize.height);
++    final data = snapshot.data;
++    final settings = snapshot.settings;
++
++    final textStyle = TextStyle(
++      color: settings.textColor,
++      fontSize: baseSize * 0.032,
++      fontWeight: FontWeight.w600,
++      height: 1.2,
++      letterSpacing: 0.2,
++    );
++    final warningStyle = textStyle.copyWith(color: Colors.redAccent);
++    final noteStyle = textStyle.copyWith(
++      fontSize: baseSize * 0.035,
++      color: settings.textColor,
++      fontStyle: FontStyle.italic,
++    );
++
++    final spans = <TextSpan>[];
++    final noteLines = settings.showNote && data.note.trim().isNotEmpty
++        ? data.note.trim().split(RegExp(r'\r?\n'))
++        : const <String>[];
++    final placeLine = noteLines.isEmpty ? '' : noteLines.first.trim();
++    final extraNote =
++        noteLines.length <= 1 ? '' : noteLines.skip(1).join('\n').trim();
++
++    if (placeLine.isNotEmpty) {
++      spans.add(TextSpan(text: '$placeLine\n', style: noteStyle));
++    } else if (extraNote.isNotEmpty) {
++      // Preserve the visual Line 1 slot used by the live overlay.
++      spans.add(TextSpan(text: '\n', style: noteStyle));
++    }
++
++    if (settings.showDateTime && data.dateTime.isNotEmpty) {
++      spans.add(TextSpan(text: '${data.dateTime}\n', style: textStyle));
++    }
++
++    if (settings.showCoordinates) {
++      if (data.locationWarning != null) {
++        spans.add(TextSpan(
++          text: '${data.locationWarning}\n',
++          style: warningStyle,
++        ));
++      } else {
++        final latLabel = OverlayUtils.getLabel('latitude', settings.language);
++        final lonLabel = OverlayUtils.getLabel('longitude', settings.language);
++        final latVal = OverlayUtils.formatCoordinate(
++          data.latitude,
++          true,
++          settings.coordinateFormat,
++        );
++        final lonVal = OverlayUtils.formatCoordinate(
++          data.longitude,
++          false,
++          settings.coordinateFormat,
++        );
++        spans.add(TextSpan(
++          text: '$latLabel: $latVal\n$lonLabel: $lonVal\n',
++          style: textStyle,
++        ));
++      }
++    }
++
++    var altitudeDirection = '';
++    if (settings.showAltitude) {
++      final label = OverlayUtils.getLabel('altitude', settings.language);
++      altitudeDirection += '$label: ${data.altitude.toStringAsFixed(1)}m  ';
++    }
++    if (settings.showDirection) {
++      final label = OverlayUtils.getLabel('direction', settings.language);
++      altitudeDirection +=
++          '$label: ${data.direction} ${data.heading.toStringAsFixed(0)}°';
++    }
++    if (altitudeDirection.isNotEmpty) {
++      spans.add(TextSpan(text: '$altitudeDirection\n', style: textStyle));
++    }
++
++    if (settings.showWeather && data.weather != null) {
++      final label = OverlayUtils.getLabel('weather', settings.language);
++      spans.add(TextSpan(text: '$label: ${data.weather}\n', style: textStyle));
++    }
++    if (settings.showHumidity && data.humidity != null) {
++      final label = OverlayUtils.getLabel('humidity', settings.language);
++      spans.add(TextSpan(text: '$label: ${data.humidity}\n', style: textStyle));
++    }
++    if (settings.showPressure && data.pressure != null) {
++      final label = OverlayUtils.getLabel('pressure', settings.language);
++      spans.add(TextSpan(text: '$label: ${data.pressure}\n', style: textStyle));
++    }
++    if (settings.showAir && data.air != null) {
++      final label = OverlayUtils.getLabel('air', settings.language);
++      spans.add(TextSpan(text: '$label: ${data.air}\n', style: textStyle));
++    }
++    if (extraNote.isNotEmpty) {
++      spans.add(TextSpan(text: extraNote, style: noteStyle));
++    }
++
++    if (spans.isEmpty) {
++      canvas.restore();
++      return;
++    }
++
++    final textPainter = TextPainter(
++      text: TextSpan(children: spans),
++      textDirection: TextDirection.ltr,
++      maxLines: 14,
++      ellipsis: '...',
++    )..layout(maxWidth: baseSize * 0.75);
++
++    final paddingH = baseSize * 0.03;
++    final paddingV = baseSize * 0.02;
++    final boxWidth = textPainter.width + (paddingH * 2);
++    final boxHeight = textPainter.height + (paddingV * 2);
++
++    final dx = data.position == WatermarkPosition.bottomLeft
++        ? 0.0
++        : logicalSize.width - boxWidth;
++    final dy = logicalSize.height - boxHeight;
++    final boxRect = Rect.fromLTWH(dx, dy, boxWidth, boxHeight);
++
++    canvas.drawRRect(
++      RRect.fromRectAndRadius(boxRect, const Radius.circular(8)),
++      Paint()
++        ..color = settings.backgroundColor.withValues(
++          alpha: settings.backgroundOpacity,
++        ),
++    );
++    canvas.drawRRect(
++      RRect.fromRectAndRadius(boxRect, const Radius.circular(8)),
++      Paint()
++        ..color = Colors.black.withValues(alpha: 0.1)
++        ..style = PaintingStyle.stroke
++        ..strokeWidth = 1.0,
++    );
++    textPainter.paint(canvas, Offset(dx + paddingH, dy + paddingV));
++    canvas.restore();
++  }
++}
+diff -ruN siteSnap-original/siteSnap-master/lib/features/overlay/presentation/overlay_render_snapshot_provider.dart siteSnap-work/siteSnap-master/lib/features/overlay/presentation/overlay_render_snapshot_provider.dart
+--- siteSnap-original/siteSnap-master/lib/features/overlay/presentation/overlay_render_snapshot_provider.dart	1970-01-01 00:00:00.000000000 +0000
++++ siteSnap-work/siteSnap-master/lib/features/overlay/presentation/overlay_render_snapshot_provider.dart	2026-09-09 13:17:25.200093320 +0000
+@@ -0,0 +1,15 @@
++import 'package:flutter_riverpod/flutter_riverpod.dart';
++import 'package:surveycam/core/utils/device_orientation_provider.dart';
++import 'package:surveycam/features/overlay/domain/overlay_render_snapshot.dart';
++import 'package:surveycam/features/overlay/presentation/overlay_preview_state.dart';
++import 'package:surveycam/features/overlay/presentation/overlay_settings_provider.dart';
++
++/// One provider for the exact visual state painted on the camera preview and
++/// sampled by video recording sessions.
++final overlayRenderSnapshotProvider = Provider<OverlayRenderSnapshot>((ref) {
++  return OverlayRenderSnapshot(
++    data: ref.watch(overlayPreviewProvider),
++    settings: ref.watch(effectiveOverlaySettingsProvider),
++    orientation: ref.watch(deviceOrientationProvider),
++  );
++});
+diff -ruN siteSnap-original/siteSnap-master/lib/features/overlay/presentation/video_watermark_processor.dart siteSnap-work/siteSnap-master/lib/features/overlay/presentation/video_watermark_processor.dart
+--- siteSnap-original/siteSnap-master/lib/features/overlay/presentation/video_watermark_processor.dart	2026-09-09 12:57:32.000000000 +0000
++++ siteSnap-work/siteSnap-master/lib/features/overlay/presentation/video_watermark_processor.dart	2026-09-09 13:16:01.459012600 +0000
+@@ -13,11 +13,12 @@
+ import 'package:path_provider/path_provider.dart';
+ import 'package:path/path.dart' as p;
+ 
+-import 'package:surveycam/core/utils/overlay_utils.dart';
+ import 'package:surveycam/features/camera/domain/camera_lens_type.dart';
+ import 'package:surveycam/features/overlay/domain/overlay_model.dart';
++import 'package:surveycam/features/overlay/domain/overlay_render_snapshot.dart';
+ import 'package:surveycam/features/overlay/domain/overlay_settings.dart';
+ import 'package:surveycam/features/overlay/domain/video_overlay_sample.dart';
++import 'package:surveycam/features/overlay/presentation/overlay_layout_engine.dart';
+ 
+ class VideoDimensions {
+   final int width;
+@@ -53,35 +54,20 @@
+     required Size frameSize,
+     required DeviceOrientation orientation,
+   }) {
+-    final frameIsLandscape = frameSize.width > frameSize.height;
+-    final overlayIsLandscape = orientation == DeviceOrientation.landscapeLeft ||
+-        orientation == DeviceOrientation.landscapeRight;
+-    return frameIsLandscape != overlayIsLandscape;
++    return OverlayFrameGeometry.shouldRotateForFrame(
++      frameSize: frameSize,
++      orientation: orientation,
++    );
+   }
+ 
+   static DeviceOrientation overlayPaintOrientationForFrame({
+     required Size frameSize,
+     required DeviceOrientation orientation,
+   }) {
+-    final isFrameLandscape = frameSize.width > frameSize.height;
+-
+-    if (isFrameLandscape) {
+-      // If the video frame itself is landscape (e.g. 1920x1080),
+-      // we need to translate the device's sensor orientation into a logical
+-      // orientation relative to that landscape canvas.
+-      switch (orientation) {
+-        case DeviceOrientation.landscapeLeft:
+-          return DeviceOrientation.portraitUp;
+-        case DeviceOrientation.landscapeRight:
+-          return DeviceOrientation.portraitUp;
+-        case DeviceOrientation.portraitUp:
+-          return DeviceOrientation.landscapeLeft;
+-        case DeviceOrientation.portraitDown:
+-          return DeviceOrientation.landscapeRight;
+-      }
+-    }
+-
+-    return orientation;
++    return OverlayFrameGeometry.orientationForEncodedFrame(
++      frameSize: frameSize,
++      orientation: orientation,
++    );
+   }
+ 
+   static Future<int> _createNativeSession(
+@@ -711,162 +697,15 @@
+     bool useLandscapeLeftMarkedArea = false,
+   }) {
+     if (showOverlay) {
+-      canvas.save();
+-
+-      final double baseSize = min(size.width, size.height);
+-      final List<TextSpan> spans = [];
+-      final textStyle = TextStyle(
+-        color: settings.textColor,
+-        fontSize: baseSize * 0.032,
+-        fontWeight: FontWeight.w600,
++      OverlayCardRenderer.paint(
++        canvas: canvas,
++        size: size,
++        snapshot: OverlayRenderSnapshot(
++          data: data,
++          settings: settings,
++          orientation: orientation,
++        ),
+       );
+-      final noteStyle = textStyle.copyWith(fontStyle: FontStyle.italic);
+-      final noteLines = settings.showNote && data.note.trim().isNotEmpty
+-          ? data.note.trim().split(RegExp(r'\r?\n'))
+-          : const <String>[];
+-      final placeLine = noteLines.isEmpty ? '' : noteLines.first.trim();
+-      final extraNote =
+-          noteLines.length <= 1 ? '' : noteLines.skip(1).join('\n').trim();
+-
+-      if (placeLine.isNotEmpty) {
+-        spans.add(TextSpan(text: "$placeLine\n", style: noteStyle));
+-      }
+-      if (settings.showDateTime && data.dateTime.isNotEmpty) {
+-        spans.add(TextSpan(text: "${data.dateTime}\n", style: textStyle));
+-      }
+-      if (settings.showCoordinates) {
+-        if (data.locationWarning != null) {
+-          spans.add(TextSpan(
+-              text: "${data.locationWarning}\n",
+-              style: textStyle.copyWith(color: Colors.redAccent)));
+-        } else {
+-          final latLabel = OverlayUtils.getLabel('latitude', settings.language);
+-          final lonLabel =
+-              OverlayUtils.getLabel('longitude', settings.language);
+-          final latitude = OverlayUtils.formatCoordinate(
+-            data.latitude,
+-            true,
+-            settings.coordinateFormat,
+-          );
+-          final longitude = OverlayUtils.formatCoordinate(
+-            data.longitude,
+-            false,
+-            settings.coordinateFormat,
+-          );
+-          spans.add(TextSpan(
+-            text: '$latLabel: $latitude\n$lonLabel: $longitude\n',
+-            style: textStyle,
+-          ));
+-        }
+-      }
+-
+-      var altitudeDirection = '';
+-      if (settings.showAltitude) {
+-        final label = OverlayUtils.getLabel('altitude', settings.language);
+-        altitudeDirection += '$label: ${data.altitude.toStringAsFixed(1)}m  ';
+-      }
+-      if (settings.showDirection) {
+-        final label = OverlayUtils.getLabel('direction', settings.language);
+-        altitudeDirection +=
+-            '$label: ${data.direction} ${data.heading.toStringAsFixed(0)}°';
+-      }
+-      if (altitudeDirection.isNotEmpty) {
+-        spans.add(TextSpan(text: '$altitudeDirection\n', style: textStyle));
+-      }
+-      if (settings.showWeather && data.weather != null) {
+-        final label = OverlayUtils.getLabel('weather', settings.language);
+-        spans
+-            .add(TextSpan(text: '$label: ${data.weather}\n', style: textStyle));
+-      }
+-      if (settings.showHumidity && data.humidity != null) {
+-        final label = OverlayUtils.getLabel('humidity', settings.language);
+-        spans.add(
+-            TextSpan(text: '$label: ${data.humidity}\n', style: textStyle));
+-      }
+-      if (settings.showPressure && data.pressure != null) {
+-        final label = OverlayUtils.getLabel('pressure', settings.language);
+-        spans.add(
+-            TextSpan(text: '$label: ${data.pressure}\n', style: textStyle));
+-      }
+-      if (settings.showAir && data.air != null) {
+-        final label = OverlayUtils.getLabel('air', settings.language);
+-        spans.add(TextSpan(text: '$label: ${data.air}\n', style: textStyle));
+-      }
+-      if (extraNote.isNotEmpty) {
+-        spans.add(TextSpan(text: extraNote, style: noteStyle));
+-      }
+-      if (spans.isEmpty) {
+-        canvas.restore();
+-      } else {
+-        final textPainter = TextPainter(
+-          text: TextSpan(children: spans),
+-          textDirection: TextDirection.ltr,
+-          maxLines: 14,
+-          ellipsis: '...',
+-        )..layout(maxWidth: baseSize * 0.75);
+-
+-        final paddingH = baseSize * 0.03;
+-        final paddingV = baseSize * 0.02;
+-        final boxWidth = textPainter.width + (paddingH * 2);
+-        final boxHeight = textPainter.height + (paddingV * 2);
+-        const double margin = 15.0;
+-
+-        final bool isLandscape =
+-            orientation == DeviceOrientation.landscapeLeft ||
+-                orientation == DeviceOrientation.landscapeRight;
+-
+-        // Swap positions in landscape: Overlay moves to Top-Right
+-        final double targetX;
+-        final double targetY;
+-        if (useLandscapeLeftMarkedArea) {
+-          targetX = size.width - margin;
+-          targetY = margin + boxHeight;
+-        } else if (isLandscape) {
+-          targetX = size.width - margin;
+-          targetY = margin;
+-        } else {
+-          targetX = margin;
+-          targetY = size.height - margin;
+-        }
+-
+-        canvas.translate(targetX, targetY);
+-
+-        switch (orientation) {
+-          case DeviceOrientation.portraitDown:
+-            canvas.rotate(pi);
+-            canvas.translate(-boxWidth, 0);
+-            break;
+-          case DeviceOrientation.landscapeLeft:
+-            canvas.rotate(-pi / 2);
+-            canvas.translate(-boxWidth, -boxHeight);
+-            break;
+-          case DeviceOrientation.landscapeRight:
+-            canvas.rotate(pi / 2);
+-            break;
+-          default:
+-            if (useLandscapeLeftMarkedArea) {
+-              canvas.rotate(pi);
+-              break;
+-            }
+-            // portraitUp
+-            canvas.translate(0, -boxHeight);
+-            break;
+-        }
+-
+-        // Draw Background
+-        final rect = Rect.fromLTWH(0, 0, boxWidth, boxHeight);
+-        canvas.drawRRect(
+-          RRect.fromRectAndRadius(rect, const Radius.circular(8)),
+-          Paint()
+-            ..color = settings.backgroundColor
+-                .withValues(alpha: settings.backgroundOpacity),
+-        );
+-
+-        // Draw Text
+-        textPainter.paint(canvas, Offset(paddingH, paddingV));
+-
+-        canvas.restore();
+-      }
+     }
+ 
+     if (showWatermark) {
+diff -ruN siteSnap-original/siteSnap-master/test/overlay_render_snapshot_test.dart siteSnap-work/siteSnap-master/test/overlay_render_snapshot_test.dart
+--- siteSnap-original/siteSnap-master/test/overlay_render_snapshot_test.dart	1970-01-01 00:00:00.000000000 +0000
++++ siteSnap-work/siteSnap-master/test/overlay_render_snapshot_test.dart	2026-09-09 13:16:51.582631680 +0000
+@@ -0,0 +1,80 @@
++import 'package:flutter/material.dart';
++import 'package:flutter/services.dart';
++import 'package:flutter_test/flutter_test.dart';
++import 'package:surveycam/features/overlay/domain/WatermarkPosition.dart';
++import 'package:surveycam/features/overlay/domain/overlay_model.dart';
++import 'package:surveycam/features/overlay/domain/overlay_render_snapshot.dart';
++import 'package:surveycam/features/overlay/domain/overlay_settings.dart';
++import 'package:surveycam/features/overlay/domain/video_overlay_sample.dart';
++import 'package:surveycam/features/overlay/presentation/overlay_layout_engine.dart';
++
++const _data = OverlayData(
++  dateTime: '2026-09-09 18:30:00',
++  latitude: 20.1,
++  longitude: 85.2,
++  altitude: 30,
++  heading: 45,
++  direction: 'NE',
++  note: 'Site A\nColumn 4',
++  position: WatermarkPosition.bottomRight,
++);
++
++const _settings = OverlaySettings(
++  backgroundColor: Colors.black,
++  textColor: Colors.white,
++  backgroundOpacity: 0.7,
++  showWeather: true,
++);
++
++void main() {
++  test('render snapshot equality is value based', () {
++    const first = OverlayRenderSnapshot(
++      data: _data,
++      settings: _settings,
++      orientation: DeviceOrientation.landscapeLeft,
++    );
++    final second = OverlayRenderSnapshot.fromJson(first.toJson());
++
++    expect(second, first);
++    expect(second.hashCode, first.hashCode);
++  });
++
++  test('video sample carries the same render snapshot contract', () {
++    const snapshot = OverlayRenderSnapshot(
++      data: _data,
++      settings: _settings,
++      orientation: DeviceOrientation.portraitDown,
++    );
++    final sample = VideoOverlaySample.fromSnapshot(
++      snapshot,
++      timestampMs: 750,
++    );
++
++    expect(sample.snapshot, snapshot);
++    expect(sample.timestampMs, 750);
++  });
++
++  test('encoded frame orientation normalization is shared geometry', () {
++    expect(
++      OverlayFrameGeometry.orientationForEncodedFrame(
++        frameSize: const Size(1920, 1080),
++        orientation: DeviceOrientation.landscapeLeft,
++      ),
++      DeviceOrientation.portraitUp,
++    );
++    expect(
++      OverlayFrameGeometry.orientationForEncodedFrame(
++        frameSize: const Size(1080, 1920),
++        orientation: DeviceOrientation.landscapeLeft,
++      ),
++      DeviceOrientation.landscapeLeft,
++    );
++    expect(
++      OverlayFrameGeometry.logicalSizeForOrientation(
++        const Size(1080, 1920),
++        DeviceOrientation.landscapeRight,
++      ),
++      const Size(1920, 1080),
++    );
++  });
++}
+diff -ruN siteSnap-original/siteSnap-master/test/recording_session_coordinator_test.dart siteSnap-work/siteSnap-master/test/recording_session_coordinator_test.dart
+--- siteSnap-original/siteSnap-master/test/recording_session_coordinator_test.dart	1970-01-01 00:00:00.000000000 +0000
++++ siteSnap-work/siteSnap-master/test/recording_session_coordinator_test.dart	2026-09-09 13:16:51.579385154 +0000
+@@ -0,0 +1,112 @@
++import 'package:flutter/services.dart';
++import 'package:flutter_test/flutter_test.dart';
++import 'package:surveycam/features/camera/application/recording_session_coordinator.dart';
++import 'package:surveycam/features/camera/domain/camera_lens_type.dart';
++import 'package:surveycam/features/camera/domain/video_recording_session.dart';
++import 'package:surveycam/features/overlay/domain/overlay_model.dart';
++import 'package:surveycam/features/overlay/domain/overlay_render_snapshot.dart';
++import 'package:surveycam/features/overlay/domain/overlay_settings.dart';
++
++OverlayRenderSnapshot _snapshot({
++  String note = '',
++  DeviceOrientation orientation = DeviceOrientation.portraitUp,
++}) {
++  return OverlayRenderSnapshot(
++    data: OverlayData(
++      dateTime: '2026-09-09 18:30:00',
++      latitude: 20.0,
++      longitude: 85.0,
++      altitude: 10.0,
++      heading: 90.0,
++      direction: 'E',
++      note: note,
++    ),
++    settings: const OverlaySettings(),
++    orientation: orientation,
++  );
++}
++
++void main() {
++  test('recording session owns duration, segments and overlay history', () {
++    var now = DateTime(2026, 9, 9, 18, 30);
++    final coordinator = RecordingSessionCoordinator(now: () => now);
++
++    coordinator.begin(
++      initialSnapshot: _snapshot(note: 'Start'),
++      projectId: 'project-a',
++    );
++
++    now = now.add(const Duration(milliseconds: 500));
++    coordinator.recordOverlay(_snapshot(note: 'Middle'), force: true);
++    coordinator.addSegment(
++      const VideoRecordingSegment(
++        path: 'segment-1.mp4',
++        lens: CameraLensType.normal,
++      ),
++    );
++
++    now = now.add(const Duration(milliseconds: 750));
++    final completed = coordinator.complete(
++      finalSegment: const VideoRecordingSegment(
++        path: 'segment-2.mp4',
++        lens: CameraLensType.front,
++        mirror: true,
++      ),
++      finalSnapshot: _snapshot(
++        note: 'End',
++        orientation: DeviceOrientation.landscapeLeft,
++      ),
++    );
++
++    expect(completed.durationMs, 1250);
++    expect(completed.projectId, 'project-a');
++    expect(completed.segments.map((segment) => segment.path), [
++      'segment-1.mp4',
++      'segment-2.mp4',
++    ]);
++    expect(completed.segments.last.mirror, isTrue);
++    expect(completed.overlayHistory.first.timestampMs, 0);
++    expect(completed.overlayHistory.last.timestampMs, 1250);
++    expect(
++      completed.overlayHistory.last.orientation,
++      DeviceOrientation.landscapeLeft,
++    );
++    expect(coordinator.isActive, isFalse);
++  });
++
++  test('duplicate visual updates inside debounce window are not stored', () {
++    var now = DateTime(2026, 9, 9, 18, 30);
++    final coordinator = RecordingSessionCoordinator(now: () => now);
++    final snapshot = _snapshot(note: 'Same');
++
++    coordinator.begin(initialSnapshot: snapshot, projectId: null);
++    now = now.add(const Duration(milliseconds: 40));
++    coordinator.recordOverlay(snapshot);
++
++    expect(coordinator.overlayHistory, hasLength(1));
++
++    now = now.add(const Duration(milliseconds: 100));
++    coordinator.recordOverlay(snapshot);
++    expect(coordinator.overlayHistory, hasLength(2));
++  });
++
++  test('abort clears active session state', () {
++    final coordinator = RecordingSessionCoordinator();
++    coordinator.begin(
++      initialSnapshot: _snapshot(),
++      projectId: 'project-a',
++    );
++    coordinator.addSegment(
++      const VideoRecordingSegment(
++        path: 'segment.mp4',
++        lens: CameraLensType.normal,
++      ),
++    );
++
++    coordinator.abort();
++
++    expect(coordinator.isActive, isFalse);
++    expect(coordinator.segments, isEmpty);
++    expect(coordinator.overlayHistory, isEmpty);
++  });
++}
+diff -ruN siteSnap-original/siteSnap-master/test/video_recording_backend_test.dart siteSnap-work/siteSnap-master/test/video_recording_backend_test.dart
+--- siteSnap-original/siteSnap-master/test/video_recording_backend_test.dart	1970-01-01 00:00:00.000000000 +0000
++++ siteSnap-work/siteSnap-master/test/video_recording_backend_test.dart	2026-09-09 13:16:51.584546720 +0000
+@@ -0,0 +1,47 @@
++import 'package:camera/camera.dart' hide CameraLensType;
++import 'package:flutter_test/flutter_test.dart';
++import 'package:surveycam/features/camera/data/camera_repository_video_recording_backend.dart';
++import 'package:surveycam/features/camera/domain/camera_lens_type.dart';
++import 'package:surveycam/features/camera/domain/camera_repository.dart';
++
++class _FakeCameraRepository implements CameraRepository {
++  int starts = 0;
++  int stops = 0;
++
++  @override
++  CameraController? get controller => null;
++
++  @override
++  Future<void> dispose() async {}
++
++  @override
++  Future<void> initialize(CameraLensType lens) async {}
++
++  @override
++  Future<void> startVideoRecording() async {
++    starts++;
++  }
++
++  @override
++  Future<XFile> stopVideoRecording() async {
++    stops++;
++    return XFile('/tmp/recording.mp4');
++  }
++
++  @override
++  Future<String> takePicture() async => '/tmp/photo.jpg';
++}
++
++void main() {
++  test('camera repository adapter exposes stable recording backend', () async {
++    final repository = _FakeCameraRepository();
++    final backend = CameraRepositoryVideoRecordingBackend(repository);
++
++    await backend.start();
++    final path = await backend.stop();
++
++    expect(repository.starts, 1);
++    expect(repository.stops, 1);
++    expect(path, '/tmp/recording.mp4');
++  });
++}
+diff -ruN siteSnap-original/siteSnap-master/test/video_watermark_processor_test.dart siteSnap-work/siteSnap-master/test/video_watermark_processor_test.dart
+--- siteSnap-original/siteSnap-master/test/video_watermark_processor_test.dart	2026-09-09 12:57:32.000000000 +0000
++++ siteSnap-work/siteSnap-master/test/video_watermark_processor_test.dart	2026-09-09 13:18:48.880964093 +0000
+@@ -1,3 +1,6 @@
++import 'dart:typed_data';
++import 'dart:ui' as ui;
++import 'package:flutter/material.dart';
+ import 'package:flutter/services.dart';
+ import 'package:flutter_test/flutter_test.dart';
+ import 'package:flutter_svg/flutter_svg.dart' as svg;
+@@ -7,6 +10,7 @@
+ import 'package:surveycam/features/overlay/domain/overlay_model.dart';
+ import 'package:surveycam/features/overlay/domain/overlay_settings.dart';
+ import 'package:surveycam/features/overlay/domain/video_overlay_sample.dart';
++import 'package:surveycam/features/overlay/presentation/live_overlay_painter.dart';
+ import 'package:surveycam/features/overlay/presentation/video_watermark_processor.dart';
+ import 'package:vector_graphics/vector_graphics.dart';
+ 
+@@ -20,6 +24,29 @@
+   note: '',
+ );
+ 
++
++Future<Uint8List> _renderLiveOverlayPng({
++  required OverlayData data,
++  required DeviceOrientation orientation,
++  required double width,
++  required double height,
++  required OverlaySettings settings,
++}) async {
++  final recorder = ui.PictureRecorder();
++  final canvas = ui.Canvas(recorder);
++  LiveOverlayPainter(
++    data,
++    orientation,
++    settings: settings,
++  ).paint(canvas, ui.Size(width, height));
++  final picture = recorder.endRecording();
++  final image = await picture.toImage(width.toInt(), height.toInt());
++  final bytes = await image.toByteData(format: ui.ImageByteFormat.png);
++  image.dispose();
++  picture.dispose();
++  return bytes!.buffer.asUint8List();
++}
++
+ VideoOverlaySample _sample(DeviceOrientation orientation, int timestampMs) {
+   return VideoOverlaySample(
+     data: _overlayData,
+@@ -32,6 +59,50 @@
+ void main() {
+   TestWidgetsFlutterBinding.ensureInitialized();
+ 
++  test('live preview and saved video share the same card renderer', () async {
++    final svgString = await rootBundle.loadString('Assets/app_logo.svg');
++    final PictureInfo pictureInfo = await svg.vg.loadPicture(
++      svg.SvgStringLoader(svgString),
++      null,
++    );
++    addTearDown(pictureInfo.picture.dispose);
++
++    const data = OverlayData(
++      dateTime: '2026-09-09 18:30:00',
++      latitude: 20.1234,
++      longitude: 85.5678,
++      altitude: 42.5,
++      heading: 135,
++      direction: 'SE',
++      note: 'Site A\nPier 4',
++      position: WatermarkPosition.bottomRight,
++    );
++    const settings = OverlaySettings(
++      backgroundColor: Color(0xCCFFFFFF),
++      textColor: Color(0xFF000000),
++      showWeather: false,
++    );
++
++    final live = await _renderLiveOverlayPng(
++      data: data,
++      orientation: DeviceOrientation.portraitUp,
++      width: 320,
++      height: 480,
++      settings: settings,
++    );
++    final saved = await VideoWatermarkProcessor.generateSingleFrameBytes(
++      data: data,
++      orientation: DeviceOrientation.portraitUp,
++      width: 320,
++      height: 480,
++      pictureInfo: pictureInfo,
++      showWatermark: false,
++      settings: settings,
++    );
++
++    expect(saved, live);
++  });
++
+   test('video overlays honor field toggles and hide location warnings',
+       () async {
+     final svgString = await rootBundle.loadString('Assets/app_logo.svg');

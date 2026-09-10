@@ -41,7 +41,8 @@ class ImageProcessingJob {
       ),
       orientation: DeviceOrientation.values[
           (json['orientation'] as int? ?? DeviceOrientation.portraitUp.index)
-              .clamp(0, DeviceOrientation.values.length - 1)],
+              .clamp(0, DeviceOrientation.values.length - 1)
+              .toInt()],
       settings: OverlaySettings.fromJson(
         Map<String, dynamic>.from(json['settings'] as Map? ?? const {}),
       ),
@@ -49,8 +50,9 @@ class ImageProcessingJob {
       showWatermark: json['showWatermark'] as bool? ?? true,
       aspectRatio: aspectRatioIndex == null
           ? null
-          : CameraAspectRatio.values[
-              aspectRatioIndex.clamp(0, CameraAspectRatio.values.length - 1)],
+          : CameraAspectRatio.values[aspectRatioIndex
+              .clamp(0, CameraAspectRatio.values.length - 1)
+              .toInt()],
       mirror: json['mirror'] as bool? ?? false,
       createdAtMs: json['createdAtMs'] as int? ?? 0,
       projectId: json['projectId'] as String?,

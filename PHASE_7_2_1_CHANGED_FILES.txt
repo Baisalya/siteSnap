@@ -1,0 +1,19 @@
+Phase 7.2.1 changed/new files relative to Phase 7.2:
+
+1. android/camerax_patch/SiteSnapDynamicVideoSurfaceProcessor.java
+2. lib/features/camera/data/realtime_video_overlay_bridge.dart
+3. lib/features/camera/domain/video_recording_backend.dart
+4. lib/features/camera/presentation/camera_viewmodel.dart
+5. lib/features/overlay/presentation/video_watermark_processor.dart
+6. test/realtime_video_overlay_bridge_test.dart
+7. test/realtime_video_overlay_layout_test.dart
+8. tool/phase7_2_1_release_gate.ps1
+9. PHASE_7_2_1_ATOMIC_ORIENTATION_LAYOUT_COMMIT.md
+10. PHASE_7_2_1_CHANGED_FILES.txt
+
+Explicitly unchanged PHOTO/Preview files:
+- lib/features/camera/presentation/camera_screen.dart
+- lib/features/overlay/presentation/live_overlay_painter.dart
+- lib/features/overlay/presentation/preview_overlay_painter.dart
+- lib/features/overlay/presentation/overlay_layout_engine.dart
+- lib/features/camera/data/camera_repository_impl.dart

@@ -13,11 +13,13 @@ import 'package:ffmpeg_kit_flutter_new_https_gpl/ffmpeg_kit_config.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:path/path.dart' as p;
 
-import 'package:surveycam/core/utils/overlay_utils.dart';
 import 'package:surveycam/features/camera/domain/camera_lens_type.dart';
 import 'package:surveycam/features/overlay/domain/overlay_model.dart';
+import 'package:surveycam/features/overlay/domain/overlay_render_snapshot.dart';
 import 'package:surveycam/features/overlay/domain/overlay_settings.dart';
+import 'package:surveycam/features/overlay/domain/WatermarkPosition.dart';
 import 'package:surveycam/features/overlay/domain/video_overlay_sample.dart';
+import 'package:surveycam/features/overlay/presentation/overlay_layout_engine.dart';
 
 class VideoDimensions {
   final int width;
@@ -27,6 +29,91 @@ class VideoDimensions {
     required this.width,
     required this.height,
   });
+}
+
+/// Strict stream identity used to decide whether MP4 segments can be joined
+/// with `-c copy` without decoding/re-encoding frames.
+class VideoStreamSignature {
+  final String videoCodec;
+  final String profile;
+  final String pixelFormat;
+  final String codecTag;
+  final String videoTimeBase;
+  final int width;
+  final int height;
+  final int level;
+  final double frameRate;
+  final int rotationDegrees;
+  final bool hasAudio;
+  final String audioCodec;
+  final String audioProfile;
+  final String audioTimeBase;
+  final int sampleRate;
+  final int channels;
+  final String channelLayout;
+
+  const VideoStreamSignature({
+    required this.videoCodec,
+    required this.profile,
+    required this.pixelFormat,
+    required this.codecTag,
+    required this.videoTimeBase,
+    required this.width,
+    required this.height,
+    required this.level,
+    required this.frameRate,
+    required this.rotationDegrees,
+    required this.hasAudio,
+    this.audioCodec = '',
+    this.audioProfile = '',
+    this.audioTimeBase = '',
+    this.sampleRate = 0,
+    this.channels = 0,
+    this.channelLayout = '',
+  });
+
+  bool get isDefinitiveForStreamCopy {
+    if (videoCodec.isEmpty ||
+        pixelFormat.isEmpty ||
+        videoTimeBase.isEmpty ||
+        width <= 0 ||
+        height <= 0 ||
+        frameRate <= 0) {
+      return false;
+    }
+    if (!hasAudio) return true;
+    return audioCodec.isNotEmpty &&
+        audioTimeBase.isNotEmpty &&
+        sampleRate > 0 &&
+        channels > 0;
+  }
+
+  bool isStreamCopyCompatibleWith(VideoStreamSignature other) {
+    if (!isDefinitiveForStreamCopy || !other.isDefinitiveForStreamCopy) {
+      return false;
+    }
+    if (videoCodec != other.videoCodec ||
+        profile != other.profile ||
+        pixelFormat != other.pixelFormat ||
+        codecTag != other.codecTag ||
+        videoTimeBase != other.videoTimeBase ||
+        width != other.width ||
+        height != other.height ||
+        level != other.level ||
+        rotationDegrees != other.rotationDegrees ||
+        (frameRate - other.frameRate).abs() > 0.01 ||
+        hasAudio != other.hasAudio) {
+      return false;
+    }
+
+    if (!hasAudio) return true;
+    return audioCodec == other.audioCodec &&
+        audioProfile == other.audioProfile &&
+        audioTimeBase == other.audioTimeBase &&
+        sampleRate == other.sampleRate &&
+        channels == other.channels &&
+        channelLayout == other.channelLayout;
+  }
 }
 
 class VideoWatermarkProcessor {
@@ -41,6 +128,9 @@ class VideoWatermarkProcessor {
     width: 1080,
     height: 1920,
   );
+  static PictureInfo? _realtimePictureInfo;
+  static String? _realtimeCustomLogoPath;
+  static ui.Image? _realtimeCustomLogo;
 
   static DeviceOrientation? preferredOrientationForSamples(
     List<VideoOverlaySample> samples,
@@ -53,35 +143,20 @@ class VideoWatermarkProcessor {
     required Size frameSize,
     required DeviceOrientation orientation,
   }) {
-    final frameIsLandscape = frameSize.width > frameSize.height;
-    final overlayIsLandscape = orientation == DeviceOrientation.landscapeLeft ||
-        orientation == DeviceOrientation.landscapeRight;
-    return frameIsLandscape != overlayIsLandscape;
+    return OverlayFrameGeometry.shouldRotateForFrame(
+      frameSize: frameSize,
+      orientation: orientation,
+    );
   }
 
   static DeviceOrientation overlayPaintOrientationForFrame({
     required Size frameSize,
     required DeviceOrientation orientation,
   }) {
-    final isFrameLandscape = frameSize.width > frameSize.height;
-
-    if (isFrameLandscape) {
-      // If the video frame itself is landscape (e.g. 1920x1080),
-      // we need to translate the device's sensor orientation into a logical
-      // orientation relative to that landscape canvas.
-      switch (orientation) {
-        case DeviceOrientation.landscapeLeft:
-          return DeviceOrientation.portraitUp;
-        case DeviceOrientation.landscapeRight:
-          return DeviceOrientation.portraitUp;
-        case DeviceOrientation.portraitUp:
-          return DeviceOrientation.landscapeLeft;
-        case DeviceOrientation.portraitDown:
-          return DeviceOrientation.landscapeRight;
-      }
-    }
-
-    return orientation;
+    return OverlayFrameGeometry.orientationForEncodedFrame(
+      frameSize: frameSize,
+      orientation: orientation,
+    );
   }
 
   static Future<int> _createNativeSession(
@@ -214,6 +289,140 @@ class VideoWatermarkProcessor {
   static double _normalizedRotationDegrees(double rotationDegrees) {
     final normalized = rotationDegrees % 360;
     return normalized < 0 ? normalized + 360 : normalized;
+  }
+
+  static double _parseFrameRate(Object? value) {
+    if (value is num) return value.toDouble();
+    if (value is! String || value.isEmpty) return 0;
+    final parts = value.split('/');
+    if (parts.length == 2) {
+      final numerator = double.tryParse(parts[0]);
+      final denominator = double.tryParse(parts[1]);
+      if (numerator != null && denominator != null && denominator != 0) {
+        return numerator / denominator;
+      }
+    }
+    return double.tryParse(value) ?? 0;
+  }
+
+  static int _parseInt(Object? value) {
+    if (value is num) return value.toInt();
+    if (value is String) return int.tryParse(value) ?? 0;
+    return 0;
+  }
+
+  static String _stringValue(Object? value) => value?.toString() ?? '';
+
+  static Future<VideoStreamSignature?> getVideoStreamSignature(
+    String videoPath,
+  ) async {
+    try {
+      final mediaInfo = await _getNativeMediaInformation(videoPath);
+      final streams = mediaInfo?['streams'] as List? ?? const [];
+      Map<dynamic, dynamic>? video;
+      Map<dynamic, dynamic>? audio;
+
+      for (final rawStream in streams) {
+        final stream = Map<dynamic, dynamic>.from(
+          rawStream as Map? ?? const {},
+        );
+        if (stream['codec_type'] == 'video' && video == null) {
+          video = stream;
+        } else if (stream['codec_type'] == 'audio' && audio == null) {
+          audio = stream;
+        }
+      }
+      if (video == null) return null;
+
+      final frameRate = _parseFrameRate(
+        video['avg_frame_rate'] ?? video['r_frame_rate'],
+      );
+      final rotation =
+          _normalizedRotationDegrees(_rotationDegreesForStream(video)).round() %
+              360;
+
+      return VideoStreamSignature(
+        videoCodec: _stringValue(video['codec_name']),
+        profile: _stringValue(video['profile']),
+        pixelFormat: _stringValue(video['pix_fmt']),
+        codecTag: _stringValue(video['codec_tag_string']),
+        videoTimeBase: _stringValue(video['time_base']),
+        width: _parseInt(video['width']),
+        height: _parseInt(video['height']),
+        level: _parseInt(video['level']),
+        frameRate: frameRate,
+        rotationDegrees: rotation,
+        hasAudio: audio != null,
+        audioCodec: _stringValue(audio?['codec_name']),
+        audioProfile: _stringValue(audio?['profile']),
+        audioTimeBase: _stringValue(audio?['time_base']),
+        sampleRate: _parseInt(audio?['sample_rate']),
+        channels: _parseInt(audio?['channels']),
+        channelLayout: _stringValue(audio?['channel_layout']),
+      );
+    } catch (error) {
+      debugPrint('Video stream signature probe failed: $error');
+      return null;
+    }
+  }
+
+  static Future<bool> canFastConcat(List<String> paths) async {
+    if (paths.length < 2) return false;
+    final signatures = await Future.wait(
+      paths.map(getVideoStreamSignature),
+    );
+    if (signatures.any((signature) => signature == null)) return false;
+
+    final first = signatures.first!;
+    if (!first.isDefinitiveForStreamCopy) return false;
+    return signatures
+        .skip(1)
+        .cast<VideoStreamSignature>()
+        .every(first.isStreamCopyCompatibleWith);
+  }
+
+  static String _escapeFfconcatPath(String path) {
+    // ffconcat uses single-quoted paths. Preserve Windows/Android backslashes
+    // and escape embedded apostrophes using the concat-demuxer convention.
+    return path.replaceAll('\\', '\\\\').replaceAll("'", r"'\''");
+  }
+
+  static Future<String?> _fastConcatVideos(
+    List<String> paths,
+    String outputPath,
+  ) async {
+    final tempDir = await getTemporaryDirectory();
+    final listFile = File(
+      p.join(
+        tempDir.path,
+        'concat_${DateTime.now().microsecondsSinceEpoch}.txt',
+      ),
+    );
+
+    try {
+      final lines =
+          paths.map((path) => "file '${_escapeFfconcatPath(path)}'").join('\n');
+      await listFile.writeAsString('$lines\n', flush: true);
+
+      final command = '-f concat -safe 0 -i "${listFile.path}" '
+          '-map 0:v:0 -map 0:a? -c copy -movflags +faststart '
+          '-avoid_negative_ts make_zero -y "$outputPath"';
+      final returnCode = await _executeFfmpegCommand(command);
+      if (returnCode == 0) {
+        final outputFile = File(outputPath);
+        if (await outputFile.exists() && await outputFile.length() > 0) {
+          return outputPath;
+        }
+        debugPrint('Fast stream-copy concat produced an empty output file.');
+        return null;
+      }
+      debugPrint('Fast stream-copy concat failed with code $returnCode.');
+      return null;
+    } finally {
+      try {
+        if (await listFile.exists()) await listFile.delete();
+      } catch (_) {}
+    }
   }
 
   static bool shouldApplyFrontCameraPortraitCorrection({
@@ -550,6 +759,8 @@ class VideoWatermarkProcessor {
     required OverlaySettings settings,
     ui.Image? customLogo,
     bool useLandscapeLeftMarkedArea = false,
+    bool displayOriented = false,
+    WatermarkPosition? overlayPosition,
   }) {
     final double baseSize = min(size.width, size.height);
     const double margin = 15.0;
@@ -586,12 +797,93 @@ class VideoWatermarkProcessor {
 
     if (boxWidth <= 0 || boxHeight <= 0) return;
 
+    // Realtime-video branding uses the same logical HUD coordinate system as
+    // the information card: card at the selected bottom corner, branding at the
+    // TOP of the same horizontal side. For a physical phone turn Flutter
+    // re-authors this transparent HUD in fixed encoder coordinates; native GL
+    // only alpha-blends it and never rotates/crops the camera texture.
+    if (overlayPosition != null && displayOriented) {
+      canvas.save();
+      final targetX = overlayPosition == WatermarkPosition.bottomLeft
+          ? margin
+          : size.width - margin - boxWidth;
+      final targetY = margin;
+      canvas.translate(targetX, targetY);
+      if (hasLogo) {
+        _paintBrandLogo(
+          canvas: canvas,
+          offset: Offset.zero,
+          size: logoSize,
+          defaultLogo: pictureInfo,
+          customLogo: customLogo,
+        );
+      }
+      if (hasText) {
+        textPainter.paint(canvas, Offset(logoSize + spacing, 0));
+      }
+      canvas.restore();
+      return;
+    }
+
+    // Retain the previous transformed placement for non-display-oriented
+    // callers. Current realtime video uses the branch above; legacy still/
+    // FFmpeg paths remain untouched when [overlayPosition] is null.
+    if (overlayPosition != null) {
+      canvas.save();
+      OverlayFrameGeometry.applyOrientationTransform(canvas, size, orientation);
+      final logicalSize = OverlayFrameGeometry.logicalSizeForOrientation(
+        size,
+        orientation,
+      );
+      final targetX = overlayPosition == WatermarkPosition.bottomLeft
+          ? logicalSize.width - margin - boxWidth
+          : margin;
+      final targetY = logicalSize.height - margin - boxHeight;
+      canvas.translate(targetX, targetY);
+      if (hasLogo) {
+        _paintBrandLogo(
+          canvas: canvas,
+          offset: Offset.zero,
+          size: logoSize,
+          defaultLogo: pictureInfo,
+          customLogo: customLogo,
+        );
+      }
+      if (hasText) {
+        textPainter.paint(canvas, Offset(logoSize + spacing, 0));
+      }
+      canvas.restore();
+      return;
+    }
+
     canvas.save();
 
-    final bool isLandscape = orientation == DeviceOrientation.landscapeLeft ||
-        orientation == DeviceOrientation.landscapeRight;
+    final bool isLandscape = displayOriented
+        ? size.width > size.height
+        : orientation == DeviceOrientation.landscapeLeft ||
+            orientation == DeviceOrientation.landscapeRight;
 
-    // Swap positions in landscape: Watermark moves to Bottom-Left
+    if (displayOriented) {
+      final targetX = isLandscape ? margin : size.width - margin - boxWidth;
+      final targetY = isLandscape ? size.height - margin - boxHeight : margin;
+      canvas.translate(targetX, targetY);
+      if (hasLogo) {
+        _paintBrandLogo(
+          canvas: canvas,
+          offset: Offset.zero,
+          size: logoSize,
+          defaultLogo: pictureInfo,
+          customLogo: customLogo,
+        );
+      }
+      if (hasText) {
+        textPainter.paint(canvas, Offset(logoSize + spacing, 0));
+      }
+      canvas.restore();
+      return;
+    }
+
+    // Legacy encoded-frame placement keeps the original orientation contract.
     final double targetX;
     final double targetY;
     if (useLandscapeLeftMarkedArea) {
@@ -605,11 +897,8 @@ class VideoWatermarkProcessor {
       targetY = margin;
     }
 
-    canvas.save();
-    // Translate to the target corner
     canvas.translate(targetX, targetY);
 
-    // Rotate content based on orientation
     switch (orientation) {
       case DeviceOrientation.portraitDown:
         canvas.rotate(pi);
@@ -709,164 +998,20 @@ class VideoWatermarkProcessor {
     bool showWatermark = true,
     OverlaySettings settings = const OverlaySettings(),
     bool useLandscapeLeftMarkedArea = false,
+    bool displayOriented = false,
+    bool anchorWatermarkToOverlaySide = false,
   }) {
     if (showOverlay) {
-      canvas.save();
-
-      final double baseSize = min(size.width, size.height);
-      final List<TextSpan> spans = [];
-      final textStyle = TextStyle(
-        color: settings.textColor,
-        fontSize: baseSize * 0.032,
-        fontWeight: FontWeight.w600,
+      OverlayCardRenderer.paint(
+        canvas: canvas,
+        size: size,
+        snapshot: OverlayRenderSnapshot(
+          data: data,
+          settings: settings,
+          orientation:
+              displayOriented ? DeviceOrientation.portraitUp : orientation,
+        ),
       );
-      final noteStyle = textStyle.copyWith(fontStyle: FontStyle.italic);
-      final noteLines = settings.showNote && data.note.trim().isNotEmpty
-          ? data.note.trim().split(RegExp(r'\r?\n'))
-          : const <String>[];
-      final placeLine = noteLines.isEmpty ? '' : noteLines.first.trim();
-      final extraNote =
-          noteLines.length <= 1 ? '' : noteLines.skip(1).join('\n').trim();
-
-      if (placeLine.isNotEmpty) {
-        spans.add(TextSpan(text: "$placeLine\n", style: noteStyle));
-      }
-      if (settings.showDateTime && data.dateTime.isNotEmpty) {
-        spans.add(TextSpan(text: "${data.dateTime}\n", style: textStyle));
-      }
-      if (settings.showCoordinates) {
-        if (data.locationWarning != null) {
-          spans.add(TextSpan(
-              text: "${data.locationWarning}\n",
-              style: textStyle.copyWith(color: Colors.redAccent)));
-        } else {
-          final latLabel = OverlayUtils.getLabel('latitude', settings.language);
-          final lonLabel =
-              OverlayUtils.getLabel('longitude', settings.language);
-          final latitude = OverlayUtils.formatCoordinate(
-            data.latitude,
-            true,
-            settings.coordinateFormat,
-          );
-          final longitude = OverlayUtils.formatCoordinate(
-            data.longitude,
-            false,
-            settings.coordinateFormat,
-          );
-          spans.add(TextSpan(
-            text: '$latLabel: $latitude\n$lonLabel: $longitude\n',
-            style: textStyle,
-          ));
-        }
-      }
-
-      var altitudeDirection = '';
-      if (settings.showAltitude) {
-        final label = OverlayUtils.getLabel('altitude', settings.language);
-        altitudeDirection += '$label: ${data.altitude.toStringAsFixed(1)}m  ';
-      }
-      if (settings.showDirection) {
-        final label = OverlayUtils.getLabel('direction', settings.language);
-        altitudeDirection +=
-            '$label: ${data.direction} ${data.heading.toStringAsFixed(0)}°';
-      }
-      if (altitudeDirection.isNotEmpty) {
-        spans.add(TextSpan(text: '$altitudeDirection\n', style: textStyle));
-      }
-      if (settings.showWeather && data.weather != null) {
-        final label = OverlayUtils.getLabel('weather', settings.language);
-        spans
-            .add(TextSpan(text: '$label: ${data.weather}\n', style: textStyle));
-      }
-      if (settings.showHumidity && data.humidity != null) {
-        final label = OverlayUtils.getLabel('humidity', settings.language);
-        spans.add(
-            TextSpan(text: '$label: ${data.humidity}\n', style: textStyle));
-      }
-      if (settings.showPressure && data.pressure != null) {
-        final label = OverlayUtils.getLabel('pressure', settings.language);
-        spans.add(
-            TextSpan(text: '$label: ${data.pressure}\n', style: textStyle));
-      }
-      if (settings.showAir && data.air != null) {
-        final label = OverlayUtils.getLabel('air', settings.language);
-        spans.add(TextSpan(text: '$label: ${data.air}\n', style: textStyle));
-      }
-      if (extraNote.isNotEmpty) {
-        spans.add(TextSpan(text: extraNote, style: noteStyle));
-      }
-      if (spans.isEmpty) {
-        canvas.restore();
-      } else {
-        final textPainter = TextPainter(
-          text: TextSpan(children: spans),
-          textDirection: TextDirection.ltr,
-          maxLines: 14,
-          ellipsis: '...',
-        )..layout(maxWidth: baseSize * 0.75);
-
-        final paddingH = baseSize * 0.03;
-        final paddingV = baseSize * 0.02;
-        final boxWidth = textPainter.width + (paddingH * 2);
-        final boxHeight = textPainter.height + (paddingV * 2);
-        const double margin = 15.0;
-
-        final bool isLandscape =
-            orientation == DeviceOrientation.landscapeLeft ||
-                orientation == DeviceOrientation.landscapeRight;
-
-        // Swap positions in landscape: Overlay moves to Top-Right
-        final double targetX;
-        final double targetY;
-        if (useLandscapeLeftMarkedArea) {
-          targetX = size.width - margin;
-          targetY = margin + boxHeight;
-        } else if (isLandscape) {
-          targetX = size.width - margin;
-          targetY = margin;
-        } else {
-          targetX = margin;
-          targetY = size.height - margin;
-        }
-
-        canvas.translate(targetX, targetY);
-
-        switch (orientation) {
-          case DeviceOrientation.portraitDown:
-            canvas.rotate(pi);
-            canvas.translate(-boxWidth, 0);
-            break;
-          case DeviceOrientation.landscapeLeft:
-            canvas.rotate(-pi / 2);
-            canvas.translate(-boxWidth, -boxHeight);
-            break;
-          case DeviceOrientation.landscapeRight:
-            canvas.rotate(pi / 2);
-            break;
-          default:
-            if (useLandscapeLeftMarkedArea) {
-              canvas.rotate(pi);
-              break;
-            }
-            // portraitUp
-            canvas.translate(0, -boxHeight);
-            break;
-        }
-
-        // Draw Background
-        final rect = Rect.fromLTWH(0, 0, boxWidth, boxHeight);
-        canvas.drawRRect(
-          RRect.fromRectAndRadius(rect, const Radius.circular(8)),
-          Paint()
-            ..color = settings.backgroundColor
-                .withValues(alpha: settings.backgroundOpacity),
-        );
-
-        // Draw Text
-        textPainter.paint(canvas, Offset(paddingH, paddingV));
-
-        canvas.restore();
-      }
     }
 
     if (showWatermark) {
@@ -878,7 +1023,141 @@ class VideoWatermarkProcessor {
         settings: settings,
         customLogo: customLogo,
         useLandscapeLeftMarkedArea: useLandscapeLeftMarkedArea,
+        displayOriented: displayOriented,
+        overlayPosition: anchorWatermarkToOverlaySide ? data.position : null,
       );
+    }
+  }
+
+  static Future<PictureInfo> _realtimeDefaultLogo() async {
+    final cached = _realtimePictureInfo;
+    if (cached != null) return cached;
+    final svgString = await rootBundle.loadString(assetName);
+    final loaded = await svg.vg.loadPicture(
+      svg.SvgStringLoader(svgString),
+      null,
+    );
+    _realtimePictureInfo = loaded;
+    return loaded;
+  }
+
+  static Future<ui.Image?> _realtimeLogoForSettings(
+    OverlaySettings settings,
+  ) async {
+    final path = settings.activeWatermarkLogoPath;
+    if (path == _realtimeCustomLogoPath) return _realtimeCustomLogo;
+
+    _realtimeCustomLogo?.dispose();
+    _realtimeCustomLogo = null;
+    _realtimeCustomLogoPath = path;
+    if (path == null || path.isEmpty) return null;
+    _realtimeCustomLogo = await _loadCustomLogo(path);
+    return _realtimeCustomLogo;
+  }
+
+  /// Renders the app-owned overlay layer consumed by the recording-only
+  /// CameraX VideoCapture compositor. Preview/ImageCapture do not use this
+  /// method.
+  ///
+  /// [snapshot.orientation] is relative to the orientation at which the fixed
+  /// encoder canvas was created (portraitUp means "same as recording start").
+  /// The canvas itself never changes size during a clip. Instead, the logical
+  /// overlay viewport is rotated inside that fixed canvas using the exact same
+  /// orientation geometry as PHOTO/preview. Camera pixels are not transformed
+  /// here or by the realtime overlay path.
+  static Rect _centeredViewportForAspectRatio(
+    Size frameSize,
+    double? targetAspectRatio,
+  ) {
+    if (targetAspectRatio == null ||
+        !targetAspectRatio.isFinite ||
+        targetAspectRatio <= 0 ||
+        frameSize.width <= 0 ||
+        frameSize.height <= 0) {
+      return Offset.zero & frameSize;
+    }
+
+    final frameAspect = frameSize.width / frameSize.height;
+    if ((frameAspect - targetAspectRatio).abs() < 0.0001) {
+      return Offset.zero & frameSize;
+    }
+
+    if (frameAspect > targetAspectRatio) {
+      final viewportWidth = frameSize.height * targetAspectRatio;
+      return Rect.fromLTWH(
+        (frameSize.width - viewportWidth) / 2,
+        0,
+        viewportWidth,
+        frameSize.height,
+      );
+    }
+
+    final viewportHeight = frameSize.width / targetAspectRatio;
+    return Rect.fromLTWH(
+      0,
+      (frameSize.height - viewportHeight) / 2,
+      frameSize.width,
+      viewportHeight,
+    );
+  }
+
+  static Future<Uint8List?> generateRealtimeOverlayPng({
+    required OverlayRenderSnapshot snapshot,
+    required int width,
+    required int height,
+    double? viewportAspectRatio,
+  }) async {
+    if (width <= 0 || height <= 0) return null;
+
+    final pictureInfo = await _realtimeDefaultLogo();
+    final customLogo = await _realtimeLogoForSettings(snapshot.settings);
+    final recorder = ui.PictureRecorder();
+    final canvas = Canvas(recorder);
+    final frameSize = Size(width.toDouble(), height.toDouble());
+
+    // Keep the encoded video canvas fixed while giving the overlay a logical
+    // portrait/landscape canvas that follows the physical phone orientation.
+    // This is equivalent to rotating a transparent HUD sheet over an untouched
+    // camera recording: no camera zoom, crop, stretch, or letterbox is needed.
+    canvas.save();
+    OverlayFrameGeometry.applyOrientationTransform(
+      canvas,
+      frameSize,
+      snapshot.orientation,
+    );
+    final logicalFrameSize = OverlayFrameGeometry.logicalSizeForOrientation(
+      frameSize,
+      snapshot.orientation,
+    );
+    final viewport = _centeredViewportForAspectRatio(
+      logicalFrameSize,
+      viewportAspectRatio,
+    );
+    canvas.translate(viewport.left, viewport.top);
+    _paintFrameContent(
+      canvas: canvas,
+      size: viewport.size,
+      data: snapshot.data,
+      orientation: DeviceOrientation.portraitUp,
+      pictureInfo: pictureInfo,
+      customLogo: customLogo,
+      settings: snapshot.settings,
+      displayOriented: true,
+      anchorWatermarkToOverlaySide: true,
+    );
+    canvas.restore();
+
+    final picture = recorder.endRecording();
+    try {
+      final image = await picture.toImage(width, height);
+      try {
+        final byteData = await image.toByteData(format: ui.ImageByteFormat.png);
+        return byteData?.buffer.asUint8List();
+      } finally {
+        image.dispose();
+      }
+    } finally {
+      picture.dispose();
     }
   }
 
@@ -1097,6 +1376,20 @@ class VideoWatermarkProcessor {
         tempDir.path,
         'merged_video_${DateTime.now().millisecondsSinceEpoch}.mp4',
       );
+
+      final hasMirrorTransform = mirrorMap?.any((value) => value) ?? false;
+      final hasPortraitCorrection =
+          frontCameraPortraitCorrectionMap?.any((value) => value) ?? false;
+      if (paths.length > 1 &&
+          !hasMirrorTransform &&
+          !hasPortraitCorrection &&
+          await canFastConcat(paths)) {
+        final fastPath = await _fastConcatVideos(paths, outputPath);
+        if (fastPath != null) {
+          debugPrint('Video segments finalized with stream-copy concat.');
+          return fastPath;
+        }
+      }
 
       if (paths.length == 1) {
         final encoderSettings = _encoderSettings();

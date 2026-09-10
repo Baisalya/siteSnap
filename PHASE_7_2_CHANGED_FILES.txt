@@ -1,0 +1,15 @@
+PHASE_7_2_SINGLE_STREAM_DYNAMIC_ROTATION_GPU_COMPOSITOR.md
+android/app/src/main/kotlin/com/baishalya/sitesnap/MainActivity.kt
+android/camerax_patch/ProcessCameraProviderProxyApi.java
+android/camerax_patch/SiteSnapDynamicVideoEffect.java
+android/camerax_patch/SiteSnapDynamicVideoSurfaceProcessor.java
+android/camerax_patch/SiteSnapRealtimeOverlayController.java
+lib/features/camera/data/camera_repository_video_recording_backend.dart
+lib/features/camera/data/realtime_video_overlay_bridge.dart
+lib/features/camera/domain/video_capture_orientation.dart
+lib/features/camera/domain/video_recording_backend.dart
+lib/features/camera/presentation/camera_viewmodel.dart
+lib/features/overlay/presentation/video_watermark_processor.dart
+test/realtime_video_overlay_bridge_test.dart
+test/video_capture_orientation_test.dart
+tool/phase7_2_release_gate.ps1

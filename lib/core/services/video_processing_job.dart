@@ -10,34 +10,55 @@ class VideoProcessingSegment {
   final String path;
   final CameraLensType lens;
   final bool mirror;
+  final bool realtimeOverlayApplied;
+  final bool realtimeOverlayHealthy;
+  final bool containsCameraSwitches;
 
   const VideoProcessingSegment({
     required this.path,
     required this.lens,
     this.mirror = false,
-  });
+    this.realtimeOverlayApplied = false,
+    bool? realtimeOverlayHealthy,
+    this.containsCameraSwitches = false,
+  }) : realtimeOverlayHealthy =
+            realtimeOverlayHealthy ?? realtimeOverlayApplied;
 
   VideoProcessingSegment copyWith({
     String? path,
     CameraLensType? lens,
     bool? mirror,
+    bool? realtimeOverlayApplied,
+    bool? realtimeOverlayHealthy,
+    bool? containsCameraSwitches,
   }) {
     return VideoProcessingSegment(
       path: path ?? this.path,
       lens: lens ?? this.lens,
       mirror: mirror ?? this.mirror,
+      realtimeOverlayApplied:
+          realtimeOverlayApplied ?? this.realtimeOverlayApplied,
+      realtimeOverlayHealthy:
+          realtimeOverlayHealthy ?? this.realtimeOverlayHealthy,
+      containsCameraSwitches:
+          containsCameraSwitches ?? this.containsCameraSwitches,
     );
   }
 
   factory VideoProcessingSegment.fromJson(Map<String, dynamic> json) {
     final lens = CameraLensType.values[
         (json['lens'] as int? ?? CameraLensType.normal.index)
-            .clamp(0, CameraLensType.values.length - 1)];
+            .clamp(0, CameraLensType.values.length - 1)
+            .toInt()];
 
     return VideoProcessingSegment(
       path: json['path'] as String? ?? '',
       lens: lens,
       mirror: json['mirror'] as bool? ?? lens == CameraLensType.front,
+      realtimeOverlayApplied: json['realtimeOverlayApplied'] as bool? ?? false,
+      realtimeOverlayHealthy: json['realtimeOverlayHealthy'] as bool? ??
+          (json['realtimeOverlayApplied'] as bool? ?? false),
+      containsCameraSwitches: json['containsCameraSwitches'] as bool? ?? false,
     );
   }
 
@@ -46,6 +67,9 @@ class VideoProcessingSegment {
       'path': path,
       'lens': lens.index,
       'mirror': mirror,
+      'realtimeOverlayApplied': realtimeOverlayApplied,
+      'realtimeOverlayHealthy': realtimeOverlayHealthy,
+      'containsCameraSwitches': containsCameraSwitches,
     };
   }
 }

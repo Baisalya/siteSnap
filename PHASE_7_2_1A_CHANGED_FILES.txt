@@ -1,0 +1,6 @@
+PHASE_7_2_1A_CERTIFICATION_HOTFIX.md
+lib/features/camera/data/realtime_video_overlay_bridge.dart
+test/realtime_video_overlay_bridge_test.dart
+test/realtime_video_overlay_layout_test.dart
+tool/phase7_2_1_release_gate.ps1
+PHASE_7_2_1A_CHANGED_FILES.txt

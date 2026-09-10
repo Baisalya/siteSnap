@@ -325,22 +325,49 @@ class VideoProcessingTaskHandler extends TaskHandler {
       String? sourcePath =
           job.segments.length == 1 ? job.segments.single.path : null;
       String? mergedPath;
-      var canProcessOverlay = job.history.isNotEmpty;
+      final anyRealtimeOverlayApplied =
+          job.segments.any((segment) => segment.realtimeOverlayApplied);
+      final overlayAlreadyApplied = job.segments.isNotEmpty &&
+          job.segments.every((segment) => segment.realtimeOverlayApplied);
+      final realtimeOverlayHealthDegraded = job.segments.any(
+        (segment) =>
+            segment.realtimeOverlayApplied && !segment.realtimeOverlayHealthy,
+      );
+      if (realtimeOverlayHealthDegraded) {
+        await MediaAuditService.recordFailure(
+          event: 'realtime_overlay_health_degraded',
+          error:
+              'Realtime overlay was applied but failed strict instant-save verification',
+          details: {
+            'jobId': job.id,
+            'segmentCount': job.segments.length,
+          },
+        );
+      }
+      final mixedRealtimeOverlayState =
+          anyRealtimeOverlayApplied && !overlayAlreadyApplied;
+      // Never burn the overlay over a segment that already contains it. A rare
+      // mixed success/fallback job is saved with a warning instead of creating
+      // visibly doubled watermark regions.
+      var canProcessOverlay =
+          job.history.isNotEmpty && !anyRealtimeOverlayApplied;
       final needsMirror = job.segments.any((segment) => segment.mirror);
       final recordingOrientation =
           VideoWatermarkProcessor.preferredOrientationForSamples(job.history);
       final frontCameraPortraitCorrectionMap = job.segments
           .map(
-            (segment) => VideoWatermarkProcessor
-                .shouldApplyFrontCameraPortraitCorrection(
-              lens: segment.lens,
-              recordingOrientation: recordingOrientation,
-              mirrored: segment.mirror,
-            ),
+            (segment) => segment.containsCameraSwitches
+                ? false
+                : VideoWatermarkProcessor
+                    .shouldApplyFrontCameraPortraitCorrection(
+                    lens: segment.lens,
+                    recordingOrientation: recordingOrientation,
+                    mirrored: segment.mirror,
+                  ),
           )
           .toList(growable: false);
       if (job.segments.length > 1 || needsMirror) {
-        await _progress(0.10, 'Merging video segments... 10%');
+        await _progress(0.10, 'Finalizing video segments... 10%');
         mergedPath = await VideoWatermarkProcessor.mergeVideos(
           job.segments.map((segment) => segment.path).toList(),
           mirrorMap: job.segments.map((segment) => segment.mirror).toList(),
@@ -413,8 +440,11 @@ class VideoProcessingTaskHandler extends TaskHandler {
       final List<String> savedPaths = [];
       var savedWithoutOverlay = false;
 
-      if (processedPath != null) {
-        final savedPath = await GallerySaver.saveVideo(processedPath);
+      if (processedPath != null ||
+          (overlayAlreadyApplied && sourcePath != null)) {
+        final outputPath = processedPath ?? sourcePath!;
+        await _ensureReadableVideoOutput(outputPath);
+        final savedPath = await GallerySaver.saveVideo(outputPath);
         await ProjectStorage().assignFilePath(
           filePath: savedPath,
           projectId: job.projectId,
@@ -431,7 +461,8 @@ class VideoProcessingTaskHandler extends TaskHandler {
         await ThumbnailUtils.generateVideoThumbnail(savedPath);
         savedPaths.add(savedPath);
       } else {
-        savedWithoutOverlay = true;
+        savedWithoutOverlay =
+            !overlayAlreadyApplied || mixedRealtimeOverlayState;
         final rawPaths = VideoProcessingFallback.rawSavePaths(
           segments: job.segments,
           mergedPath: mergedPath,
@@ -442,9 +473,12 @@ class VideoProcessingTaskHandler extends TaskHandler {
 
         await _progress(
           0.95,
-          'Saving original video without overlay...',
+          overlayAlreadyApplied
+              ? 'Saving realtime-overlay video...'
+              : 'Saving original video without overlay...',
         );
         for (final rawPath in rawPaths) {
+          await _ensureReadableVideoOutput(rawPath);
           final savedPath = await GallerySaver.saveVideo(rawPath);
           await ProjectStorage().assignFilePath(
             filePath: savedPath,
@@ -458,7 +492,7 @@ class VideoProcessingTaskHandler extends TaskHandler {
                 job.history.map((sample) => sample.toJson()).toList(),
             durationMs: job.durationMs,
             jobId: job.id,
-            savedWithoutOverlay: true,
+            savedWithoutOverlay: savedWithoutOverlay,
           );
           await ThumbnailUtils.generateVideoThumbnail(savedPath);
           savedPaths.add(savedPath);
@@ -681,6 +715,17 @@ class VideoProcessingTaskHandler extends TaskHandler {
     });
     _notificationQueue = update;
     return update;
+  }
+
+  Future<void> _ensureReadableVideoOutput(String path) async {
+    final file = File(path);
+    if (!await file.exists()) {
+      throw Exception('Final video output was not found: $path');
+    }
+    final length = await file.length();
+    if (length <= 0) {
+      throw Exception('Final video output is empty: $path');
+    }
   }
 
   Future<void> _imageProgress(String message) {

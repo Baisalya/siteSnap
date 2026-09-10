@@ -285,7 +285,10 @@ class CameraRepositoryImpl implements CameraRepository {
         return;
       }
       try {
-        await controller.startVideoRecording();
+        // Persistent recording lets CameraX switch CameraDescription without
+        // finalizing the active Recorder/file. This is the Phase 6 primary
+        // multi-camera path on Android.
+        await controller.startVideoRecording(enablePersistentRecording: true);
         _lastVideoRecordingStartedAt = DateTime.now();
       } catch (e) {
         debugPrint("Error starting video recording: $e");
@@ -311,6 +314,45 @@ class CameraRepositoryImpl implements CameraRepository {
       } catch (e) {
         debugPrint("Error stopping video recording: $e");
         rethrow;
+      }
+    });
+  }
+
+  @override
+  Future<bool> switchLensWhileRecording(CameraLensType type) {
+    return runExclusive(() async {
+      // Phase 6 persistent switching is intentionally CameraX/Android-only.
+      // Other platforms retain the proven segmented fallback path.
+      if (kIsWeb || defaultTargetPlatform != TargetPlatform.android) {
+        return false;
+      }
+
+      final controller = _controller;
+      if (controller == null ||
+          !controller.value.isInitialized ||
+          !controller.value.isRecordingVideo ||
+          type == _currentLens) {
+        return type == _currentLens &&
+            controller != null &&
+            controller.value.isRecordingVideo;
+      }
+
+      final description = _cameraMap[type];
+      if (description == null) return false;
+
+      try {
+        await controller.setDescription(description);
+        if (!controller.value.isRecordingVideo) {
+          debugPrint(
+            'Persistent camera switch stopped the recorder; using segmented fallback.',
+          );
+          return false;
+        }
+        _currentLens = type;
+        return true;
+      } catch (e) {
+        debugPrint('Persistent camera switch unavailable: $e');
+        return false;
       }
     });
   }

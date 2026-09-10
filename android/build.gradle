@@ -45,6 +45,27 @@ subprojects {
     }
 }
 
+
+// SiteSnap Phase 3-7: keep camera_android_camerax pinned at 0.7.1+2 / CameraX
+// 1.5.3. Replace only the provider-binding and VideoCapture-builder seams so
+// OverlayEffect and capture-time front mirroring can be configured without
+// mutating Flutter's pub cache or upgrading the CameraX stack.
+subprojects { cameraProject ->
+    if (cameraProject.name == 'camera_android_camerax') {
+        cameraProject.pluginManager.withPlugin('com.android.library') {
+            cameraProject.android.sourceSets.main.java {
+                exclude 'io/flutter/plugins/camerax/ProcessCameraProviderProxyApi.java'
+                exclude 'io/flutter/plugins/camerax/VideoCaptureProxyApi.java'
+                srcDir rootProject.file('camerax_patch')
+            }
+            cameraProject.dependencies.add(
+                'implementation',
+                'androidx.camera:camera-effects:1.5.3'
+            )
+        }
+    }
+}
+
 tasks.register("clean", Delete) {
     delete rootProject.layout.buildDirectory
 }

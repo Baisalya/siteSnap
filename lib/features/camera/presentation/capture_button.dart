@@ -93,6 +93,7 @@ class _CaptureButtonState extends State<CaptureButton>
       height: 90,
       width: 90,
       child: GestureDetector(
+        behavior: HitTestBehavior.opaque,
         onTap: _handleTap,
         child: AnimatedBuilder(
           animation: _controller!,

@@ -90,10 +90,12 @@ class OverlaySettings {
       watermarkShowLogo2: json['watermarkShowLogo2'] as bool? ?? true,
       coordinateFormat: CoordinateFormat.values[
           (json['coordinateFormat'] as int? ?? CoordinateFormat.decimal.index)
-              .clamp(0, CoordinateFormat.values.length - 1)],
+              .clamp(0, CoordinateFormat.values.length - 1)
+              .toInt()],
       language: AppLanguage.values[
           (json['language'] as int? ?? AppLanguage.auto.index)
-              .clamp(0, AppLanguage.values.length - 1)],
+              .clamp(0, AppLanguage.values.length - 1)
+              .toInt()],
       use24HourTime: json['use24HourTime'] as bool? ?? true,
     );
   }

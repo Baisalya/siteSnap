@@ -1,0 +1,17 @@
+Phase 7.1 changed/added files
+===============================
+
+1. android/app/src/main/kotlin/com/baishalya/sitesnap/MainActivity.kt
+2. android/camerax_patch/ProcessCameraProviderProxyApi.java
+3. android/camerax_patch/SiteSnapRealtimeOverlayController.java
+4. lib/features/camera/data/realtime_video_overlay_bridge.dart
+5. lib/features/camera/domain/video_recording_backend.dart
+6. lib/features/camera/presentation/camera_screen.dart
+7. lib/features/camera/presentation/camera_viewmodel.dart
+8. test/realtime_video_overlay_bridge_test.dart
+9. tool/phase7_1_realtime_overlay_gate.ps1
+10. PHASE_7_1_CAMERAX_GEOMETRY_HANDSHAKE.md
+11. PHASE_7_1_CHANGED_FILES.txt
+
+No dependency version upgrades were made. CameraX remains pinned to the existing
+camera_android_camerax 0.7.1+2 / CameraX 1.5.3 architecture from Phase 3-7.

@@ -8,6 +8,26 @@ final deviceOrientationProvider =
   return DeviceOrientationNotifier();
 });
 
+/// Legacy UI/photo orientation contract.
+///
+/// Do not reuse this mapping as CameraX VideoCapture target rotation. The photo
+/// and preview pipeline relied on these labels before realtime-video work and
+/// must remain stable. Video uses `toVideoCaptureOrientation` instead.
+DeviceOrientation? uiPhotoOrientationFromAccelerometer({
+  required double x,
+  required double y,
+  double threshold = 6.0,
+}) {
+  if (x.abs() > y.abs()) {
+    if (x > threshold) return DeviceOrientation.landscapeRight;
+    if (x < -threshold) return DeviceOrientation.landscapeLeft;
+    return null;
+  }
+  if (y > threshold) return DeviceOrientation.portraitUp;
+  if (y < -threshold) return DeviceOrientation.portraitDown;
+  return null;
+}
+
 class DeviceOrientationNotifier extends StateNotifier<DeviceOrientation> {
   DeviceOrientationNotifier() : super(DeviceOrientation.portraitUp) {
     _startListening();

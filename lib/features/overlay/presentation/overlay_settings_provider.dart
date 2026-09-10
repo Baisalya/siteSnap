@@ -73,10 +73,11 @@ class OverlaySettingsNotifier extends StateNotifier<OverlaySettings> {
       watermarkText2: watermarkText2,
       watermarkLogoPath2: watermarkLogoPath2,
       watermarkShowLogo2: watermarkShowLogo2,
-      coordinateFormat: CoordinateFormat.values[
-          coordinateFormatIndex.clamp(0, CoordinateFormat.values.length - 1)],
-      language: AppLanguage
-          .values[languageIndex.clamp(0, AppLanguage.values.length - 1)],
+      coordinateFormat: CoordinateFormat.values[coordinateFormatIndex
+          .clamp(0, CoordinateFormat.values.length - 1)
+          .toInt()],
+      language: AppLanguage.values[
+          languageIndex.clamp(0, AppLanguage.values.length - 1).toInt()],
       use24HourTime: use24HourTime,
     );
     if (mounted) {
