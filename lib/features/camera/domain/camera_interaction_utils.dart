@@ -7,6 +7,25 @@ double zoomForGesture({
   return (startZoom * scale).clamp(minZoom, maxZoom).toDouble();
 }
 
+double zoomForScaleDelta({
+  required double currentZoom,
+  required double previousScale,
+  required double currentScale,
+  required double minZoom,
+  required double maxZoom,
+}) {
+  if (!currentZoom.isFinite ||
+      !previousScale.isFinite ||
+      !currentScale.isFinite ||
+      previousScale <= 0 ||
+      currentScale <= 0) {
+    return currentZoom.clamp(minZoom, maxZoom).toDouble();
+  }
+
+  final scaleDelta = currentScale / previousScale;
+  return (currentZoom * scaleDelta).clamp(minZoom, maxZoom).toDouble();
+}
+
 String formatRecordingDuration(Duration elapsed) {
   final totalSeconds = elapsed.inSeconds.clamp(0, 359999);
   final hours = totalSeconds ~/ 3600;

@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:io';
 import 'package:camera/camera.dart' hide CameraLensType;
 import 'package:flutter/material.dart';
+import 'package:flutter/scheduler.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_riverpod/legacy.dart';
@@ -45,7 +46,6 @@ final cameraViewModelProvider =
 
 const Duration _photoCaptureTimeout = Duration(seconds: 12);
 const Duration _flashExposureSettleDelay = Duration(milliseconds: 60);
-const Duration _captureDependencySoftWait = Duration(milliseconds: 80);
 
 class CameraViewModel extends StateNotifier<CameraState>
     with WidgetsBindingObserver {
@@ -64,17 +64,19 @@ class CameraViewModel extends StateNotifier<CameraState>
   bool _stopRecordingInFlight = false;
   bool _nativeRecordingStarted = false;
   int _realtimeActivationToken = 0;
-  bool _captureDependenciesWarmed = false;
-  bool _zoomCommandInFlight = false;
+  CameraController? _zoomController;
+  double? _lastSubmittedZoom;
+  double? _pendingZoom;
+  int? _zoomFrameCallbackId;
+  int _zoomDriveGeneration = 0;
   bool _currentRecordingUsesNativeFrontMirror = false;
   // Frozen for the whole logical recording. PHOTO/preview orientation remains
   // owned by the existing deviceOrientationProvider and is never rewritten by
   // video code. Locking the encoded axis prevents portrait/landscape segment
   // churn, frame squashing, and CameraX restart races mid-recording.
   DeviceOrientation? _recordingCaptureOrientation;
-  double? _pendingZoom;
+  bool _zoomGestureActive = false;
   int _zoomAnimationGeneration = 0;
-  late final Future<void> _captureDependenciesReady;
 
   // App lifecycle events can arrive as inactive -> paused -> resumed in quick
   // succession. Keep them serialized so CameraPreview never receives a
@@ -93,9 +95,7 @@ class CameraViewModel extends StateNotifier<CameraState>
     WidgetsBinding.instance.addObserver(this);
     // Start plugin/preferences initialization while CameraX is opening so the
     // first shutter press does not pay these one-time costs.
-    _captureDependenciesReady = _warmCaptureDependencies().whenComplete(() {
-      _captureDependenciesWarmed = true;
-    });
+    unawaited(_warmCaptureDependencies());
     ref.listen<OverlayData>(
       overlayPreviewProvider,
       (_, __) => _recordCurrentVideoOverlaySample(),
@@ -129,18 +129,6 @@ class CameraViewModel extends StateNotifier<CameraState>
       // Capture can still continue with provider defaults. Individual save
       // paths retain their own error handling and persistence fallbacks.
       debugPrint('Photo dependency warm-up skipped: $e');
-    }
-  }
-
-  Future<void> _waitBrieflyForCaptureDependencies() async {
-    if (_captureDependenciesWarmed) return;
-    try {
-      await _captureDependenciesReady.timeout(_captureDependencySoftWait);
-    } on TimeoutException {
-      // The native shutter must not wait on preferences or storage warm-up.
-      // The original future keeps running and normal save-time fallbacks still
-      // protect the capture if a dependency is unusually slow.
-      debugPrint('Capture dependency warm-up is continuing in background');
     }
   }
 
@@ -310,6 +298,7 @@ class CameraViewModel extends StateNotifier<CameraState>
 
   Future<void> initialize() async {
     if (_isInitializing || _isDisposing) return;
+    ref.read(locationTrackingActiveProvider.notifier).state = true;
     _isInitializing = true;
 
     // If an old controller is still in state, hide the preview before the
@@ -473,7 +462,7 @@ class CameraViewModel extends StateNotifier<CameraState>
 
   Future<void> _warmUpAfterCameraReady() async {
     try {
-      await Future.delayed(const Duration(milliseconds: 600));
+      await Future.delayed(const Duration(milliseconds: 200));
       if (!mounted) return;
       await PermissionService.requestLocationIfNeeded();
       if (mounted) {
@@ -549,6 +538,14 @@ class CameraViewModel extends StateNotifier<CameraState>
     _latestLifecycleState = appState;
     final generation = ++_lifecycleGeneration;
     debugPrint("AppLifecycleState: $appState");
+
+    if (appState == AppLifecycleState.paused ||
+        appState == AppLifecycleState.hidden ||
+        appState == AppLifecycleState.detached) {
+      ref.read(locationTrackingActiveProvider.notifier).state = false;
+    } else if (appState == AppLifecycleState.resumed) {
+      ref.read(locationTrackingActiveProvider.notifier).state = true;
+    }
 
     _lifecycleQueue = _lifecycleQueue.catchError((Object error) {
       debugPrint('Previous lifecycle camera operation failed: $error');
@@ -745,9 +742,48 @@ class CameraViewModel extends StateNotifier<CameraState>
 
   // ================= ZOOM =================
 
+  /// One-off zoom change used by non-gesture UI. Pinch zoom uses a separate
+  /// frame-synchronised driver below so it is never blocked behind unrelated
+  /// camera operations or by completion of an older CameraX zoom request.
   Future<void> setZoom(double zoom) async {
     _zoomAnimationGeneration++;
-    await _queueZoom(zoom);
+    _cancelScheduledZoomFrame();
+    _zoomDriveGeneration++;
+    _zoomGestureActive = false;
+    await _commitFinalZoom(zoom);
+  }
+
+  /// Starts direct-manipulation zoom. CameraX explicitly supports a newer
+  /// zoom-ratio request superseding an older one, so gesture traffic must not
+  /// be serialised through the repository-wide camera-operation queue.
+  /// Instead we submit at most the newest target once per Flutter frame.
+  void beginZoomGesture() {
+    _zoomAnimationGeneration++;
+    _cancelScheduledZoomFrame();
+    _zoomDriveGeneration++;
+    _zoomGestureActive = true;
+    _pendingZoom = null;
+    _prepareZoomController();
+  }
+
+  void updateZoomGesture(double zoom) {
+    if (!_zoomGestureActive) {
+      beginZoomGesture();
+    }
+
+    final controller = state.controller;
+    if (controller == null || !controller.value.isInitialized) return;
+    _prepareZoomController();
+    _pendingZoom = zoom.clamp(state.minZoom, state.maxZoom).toDouble();
+    _scheduleZoomFrame(controller, _zoomDriveGeneration);
+  }
+
+  Future<void> endZoomGesture(double zoom) async {
+    _zoomGestureActive = false;
+    _cancelScheduledZoomFrame();
+    _pendingZoom = null;
+    _zoomDriveGeneration++;
+    await _commitFinalZoom(zoom);
   }
 
   Future<void> animateZoomTo(
@@ -757,68 +793,162 @@ class CameraViewModel extends StateNotifier<CameraState>
     final controller = state.controller;
     if (controller == null || !controller.value.isInitialized) return;
 
-    final startZoom = state.zoom;
+    _zoomGestureActive = false;
+    _cancelScheduledZoomFrame();
+    _prepareZoomController();
+    final driveGeneration = ++_zoomDriveGeneration;
+    final generation = ++_zoomAnimationGeneration;
+
+    final startZoom = (_lastSubmittedZoom ?? state.zoom)
+        .clamp(state.minZoom, state.maxZoom)
+        .toDouble();
     final targetZoom = zoom.clamp(state.minZoom, state.maxZoom).toDouble();
-    if ((targetZoom - startZoom).abs() < 0.01) {
-      await _queueZoom(targetZoom);
+    if (duration <= Duration.zero || (targetZoom - startZoom).abs() < 0.005) {
+      await _commitFinalZoom(targetZoom);
       return;
     }
 
-    final generation = ++_zoomAnimationGeneration;
-    const steps = 9;
-    final stepDelay = Duration(
-      microseconds: duration.inMicroseconds ~/ steps,
-    );
-
-    for (var step = 1; step <= steps; step++) {
-      if (!mounted || generation != _zoomAnimationGeneration) return;
-      final progress = step / steps;
+    // Drive programmatic zoom on display-frame cadence. Do not await each
+    // intermediate CameraX request: CameraX treats a newer zoom ratio as the
+    // authoritative value and cancels the obsolete future by design.
+    final stopwatch = Stopwatch()..start();
+    while (mounted &&
+        generation == _zoomAnimationGeneration &&
+        driveGeneration == _zoomDriveGeneration) {
+      final progress = (stopwatch.elapsedMicroseconds / duration.inMicroseconds)
+          .clamp(0.0, 1.0)
+          .toDouble();
       final eased = Curves.easeOutCubic.transform(progress);
-      await _queueZoom(startZoom + ((targetZoom - startZoom) * eased));
-      if (step < steps) {
-        await Future<void>.delayed(stepDelay);
+      final value = startZoom + ((targetZoom - startZoom) * eased);
+      _submitGestureZoom(controller, value, driveGeneration);
+      if (progress >= 1) break;
+      await SchedulerBinding.instance.endOfFrame;
+    }
+    stopwatch.stop();
+
+    if (!mounted ||
+        generation != _zoomAnimationGeneration ||
+        driveGeneration != _zoomDriveGeneration) {
+      return;
+    }
+    await _commitFinalZoom(targetZoom);
+  }
+
+  void _prepareZoomController() {
+    final controller = state.controller;
+    if (controller == null || !controller.value.isInitialized) return;
+    if (identical(_zoomController, controller)) return;
+
+    _zoomController = controller;
+    _lastSubmittedZoom = state.zoom;
+    _pendingZoom = null;
+    _cancelScheduledZoomFrame();
+    _zoomDriveGeneration++;
+  }
+
+  void _scheduleZoomFrame(CameraController controller, int generation) {
+    if (_zoomFrameCallbackId != null) return;
+
+    _zoomFrameCallbackId = SchedulerBinding.instance.scheduleFrameCallback((_) {
+      _zoomFrameCallbackId = null;
+      if (!mounted ||
+          !_zoomGestureActive ||
+          generation != _zoomDriveGeneration ||
+          !_isActiveController(controller)) {
+        return;
+      }
+
+      final target = _pendingZoom;
+      _pendingZoom = null;
+      if (target != null) {
+        _submitGestureZoom(controller, target, generation);
+      }
+
+      // An input event may have landed while this callback was running. Keep
+      // only that newest value for the next display frame.
+      if (_pendingZoom != null &&
+          _zoomGestureActive &&
+          generation == _zoomDriveGeneration) {
+        _scheduleZoomFrame(controller, generation);
+      }
+    });
+  }
+
+  void _submitGestureZoom(
+    CameraController controller,
+    double zoom,
+    int generation,
+  ) {
+    if (!mounted ||
+        generation != _zoomDriveGeneration ||
+        !_isActiveController(controller)) {
+      return;
+    }
+
+    final target = zoom.clamp(state.minZoom, state.maxZoom).toDouble();
+    final previous = _lastSubmittedZoom;
+    if (previous != null && (target - previous).abs() < 0.0005) return;
+
+    // Publish the requested target before the asynchronous CameraX result.
+    // During a pinch the HUD owns visual feedback; CameraState publication is
+    // intentionally deferred until gesture end to avoid rebuilding preview.
+    _lastSubmittedZoom = target;
+    unawaited(_applySupersedingZoom(controller, target, generation));
+  }
+
+  Future<void> _applySupersedingZoom(
+    CameraController controller,
+    double target,
+    int generation,
+  ) async {
+    try {
+      await controller.setZoomLevel(target);
+    } catch (error) {
+      // A newer CameraX zoom request can cancel the older future. The pinned
+      // camera_android_camerax plugin normalises that cancellation to success;
+      // lifecycle/unsupported failures still arrive here and are non-fatal.
+      if (mounted &&
+          generation == _zoomDriveGeneration &&
+          _isActiveController(controller)) {
+        debugPrint('Zoom update skipped: $error');
       }
     }
   }
 
-  Future<void> _queueZoom(double zoom) async {
+  Future<void> _commitFinalZoom(double zoom) async {
     final controller = state.controller;
     if (controller == null || !controller.value.isInitialized) return;
+    _prepareZoomController();
 
-    final clampedZoom = zoom.clamp(state.minZoom, state.maxZoom).toDouble();
-    _pendingZoom = clampedZoom;
-    if ((state.zoom - clampedZoom).abs() >= 0.001) {
-      state = state.copyWith(zoom: clampedZoom);
-    }
-
-    // Pinch events arrive faster than CameraX can apply native commands.
-    // Keep only the newest requested level so the shared camera queue is not
-    // blocked by a long tail of obsolete zoom updates.
-    if (_zoomCommandInFlight) return;
-    _zoomCommandInFlight = true;
+    final generation = _zoomDriveGeneration;
+    final target = zoom.clamp(state.minZoom, state.maxZoom).toDouble();
+    _lastSubmittedZoom = target;
     try {
-      while (mounted && _pendingZoom != null) {
-        final target = _pendingZoom!;
-        _pendingZoom = null;
-        if (!_isActiveController(controller)) return;
-        await _safeCameraCommand(
-          controller,
-          'zoom level',
-          () => controller.setZoomLevel(target),
-        );
+      await controller.setZoomLevel(target);
+    } catch (error) {
+      if (mounted &&
+          generation == _zoomDriveGeneration &&
+          _isActiveController(controller)) {
+        debugPrint('Final zoom commit failed: $error');
       }
-    } catch (e) {
-      debugPrint('Zoom error: $e');
-    } finally {
-      _zoomCommandInFlight = false;
+      return;
     }
 
-    // A controller switch can finish an old zoom command after the new camera
-    // has already received a gesture. Restart the pump for that newest value.
-    final pendingZoom = _pendingZoom;
-    if (pendingZoom != null && mounted) {
-      _pendingZoom = null;
-      unawaited(_queueZoom(pendingZoom));
+    if (!mounted ||
+        generation != _zoomDriveGeneration ||
+        !_isActiveController(controller)) {
+      return;
+    }
+    if ((state.zoom - target).abs() >= 0.001) {
+      state = state.copyWith(zoom: target);
+    }
+  }
+
+  void _cancelScheduledZoomFrame() {
+    final callbackId = _zoomFrameCallbackId;
+    _zoomFrameCallbackId = null;
+    if (callbackId != null) {
+      SchedulerBinding.instance.cancelFrameCallbackWithId(callbackId);
     }
   }
 
@@ -1307,21 +1437,12 @@ class CameraViewModel extends StateNotifier<CameraState>
     );
 
     try {
-      await _waitBrieflyForCaptureDependencies();
       if (!_isActiveController(controller)) return null;
 
       final overlayData = ref.read(overlayPreviewProvider);
       ref.read(capturedOverlayProvider.notifier).state = overlayData;
 
       final repo = ref.read(cameraRepositoryProvider);
-
-      // 🔥 SPEED OPTIMIZATION: Skip redundant exposure preparation if we are already in
-      // a standard auto state with Flash OFF. This avoids re-triggering AE/AF scans.
-      if (state.isManualFocus ||
-          state.flashMode != FlashMode.off ||
-          _currentExposure != 0.0) {
-        await _prepareSmartPhotoExposure(controller);
-      }
 
       if (state.flashMode == FlashMode.always) {
         if (state.currentLens == CameraLensType.front) {
@@ -1354,7 +1475,7 @@ class CameraViewModel extends StateNotifier<CameraState>
       }
       return null;
     } finally {
-      // Restore under the camera queue. Do not leave flash/focus cleanup running
+      // Restore under the camera queue. Do not leave flash/preview cleanup running
       // unawaited after a capture because it can race a fast back/resume/dispose.
       _captureInFlight = false;
       await _restoreCameraState(controller);
@@ -1426,47 +1547,6 @@ class CameraViewModel extends StateNotifier<CameraState>
     }
   }
 
-  Future<void> _prepareSmartPhotoExposure(CameraController controller) async {
-    try {
-      if (!_isActiveController(controller)) return;
-
-      if (!state.isManualFocus) {
-        await _safeCameraCommand(
-          controller,
-          'photo exposure auto',
-          () => controller.setExposureMode(ExposureMode.auto),
-        );
-        await _safeCameraCommand(
-          controller,
-          'photo focus auto',
-          () => controller.setFocusMode(FocusMode.auto),
-        );
-        await _safeCameraCommand(
-          controller,
-          'photo exposure point',
-          () => controller.setExposurePoint(const Offset(0.5, 0.5)),
-        );
-        await _safeCameraCommand(
-          controller,
-          'photo focus point',
-          () => controller.setFocusPoint(const Offset(0.5, 0.5)),
-        );
-      }
-
-      if (_currentExposure != 0.0) {
-        await _safeCameraCommand(
-          controller,
-          'photo exposure offset',
-          () => controller.setExposureOffset(
-            _currentExposure.clamp(_minExposure, _maxExposure),
-          ),
-        );
-      }
-    } catch (e) {
-      debugPrint("Smart exposure preparation skipped: $e");
-    }
-  }
-
   Future<void> _restoreCameraState(CameraController? controller) async {
     try {
       if (controller == null || !_isActiveController(controller)) return;
@@ -1477,37 +1557,6 @@ class CameraViewModel extends StateNotifier<CameraState>
           controller,
           'restore flash off',
           () => controller.setFlashMode(FlashMode.off),
-        );
-      }
-
-      if (state.isManualFocus) {
-        await _safeCameraCommand(
-          controller,
-          'restore focus auto',
-          () => controller.setFocusMode(FocusMode.auto),
-        );
-        await _safeCameraCommand(
-          controller,
-          'restore exposure auto',
-          () => controller.setExposureMode(ExposureMode.auto),
-        );
-        await _safeCameraCommand(
-          controller,
-          'restore focus point',
-          () => controller.setFocusPoint(null),
-        );
-        await _safeCameraCommand(
-          controller,
-          'restore exposure point',
-          () => controller.setExposurePoint(null),
-        );
-      }
-
-      if (_currentExposure != 0.0) {
-        await _safeCameraCommand(
-          controller,
-          'restore exposure offset',
-          () => controller.setExposureOffset(_currentExposure),
         );
       }
 
@@ -2098,6 +2147,8 @@ class CameraViewModel extends StateNotifier<CameraState>
 
   @override
   void dispose() {
+    _cancelScheduledZoomFrame();
+    _zoomDriveGeneration++;
     WidgetsBinding.instance.removeObserver(this);
     _recordingSession.abort();
     _recordingCaptureOrientation = null;

@@ -3,6 +3,7 @@ import '../../features/camera/data/camera_repository_impl.dart';
 import '../../features/camera/data/camera_repository_video_recording_backend.dart';
 import '../../features/camera/domain/video_recording_backend.dart';
 import '../../features/location/data/location_repository_impl.dart';
+import '../../features/location/domain/location_repository.dart';
 
 final cameraRepositoryProvider = Provider<CameraRepositoryImpl>((ref) {
   return CameraRepositoryImpl();
@@ -14,6 +15,6 @@ final videoRecordingBackendProvider = Provider<VideoRecordingBackend>((ref) {
   );
 });
 
-final locationRepositoryProvider = Provider<LocationRepositoryImpl>((ref) {
+final locationRepositoryProvider = Provider<LocationRepository>((ref) {
   return LocationRepositoryImpl();
 });

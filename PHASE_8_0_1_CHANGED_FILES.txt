@@ -1,0 +1,14 @@
+Phase 8.0.1 changed/new files relative to Phase 8:
+
+1. test/location_stream_bootstrap_test.dart
+   - Keep an actual Riverpod listener alive while awaiting the first value from the auto-dispose stream provider.
+   - Mirrors production `ref.listen` lifecycle.
+
+2. PHASE_8_0_1_LOCATION_BOOTSTRAP_TEST_LIFECYCLE_HOTFIX.md
+   - Hotfix rationale and Windows validation instructions.
+
+3. PHASE_8_0_1_CHANGED_FILES.txt
+   - This manifest.
+
+4. PHASE_8_0_1_LOCAL_VALIDATION.txt
+   - Packaging/static validation record.

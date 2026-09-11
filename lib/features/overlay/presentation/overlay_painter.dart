@@ -67,6 +67,14 @@ class WatermarkProcessor {
     }
   }
 
+  static Future<PictureInfo> _loadDefaultLogoPicture() async {
+    _cachedSvgString ??= await rootBundle.loadString(assetName);
+    return svg.vg.loadPicture(
+      svg.SvgStringLoader(_cachedSvgString!),
+      null,
+    );
+  }
+
   static Future<Uint8List> drawOverlay(
     File file,
     OverlayData data,
@@ -84,12 +92,19 @@ class WatermarkProcessor {
     uiImage = frame.image;
     codec.dispose();
 
-    _cachedSvgString ??= await rootBundle.loadString(assetName);
-    final PictureInfo pictureInfo = await svg.vg.loadPicture(
-      svg.SvgStringLoader(_cachedSvgString!),
-      null,
-    );
-    final customLogo = await _loadCustomLogo(settings.activeWatermarkLogoPath);
+    // Never cache a PictureInfo/ui.Picture across photo jobs. A Picture becomes
+    // unusable after dispose(), and concurrent foreground/background saves can
+    // otherwise reuse a disposed native handle ("non-genuine Picture"). Keep
+    // only the SVG source text cached and create an owned Picture per render.
+    final bool wantsBrandLogo =
+        showWatermark && settings.activeWatermarkShowLogo;
+    final PictureInfo? pictureInfo =
+        wantsBrandLogo && settings.watermarkPresetIndex == 0
+            ? await _loadDefaultLogoPicture()
+            : null;
+    final customLogo = wantsBrandLogo && settings.watermarkPresetIndex != 0
+        ? await _loadCustomLogo(settings.activeWatermarkLogoPath)
+        : null;
 
     final double srcW = uiImage.width.toDouble();
     final double srcH = uiImage.height.toDouble();
@@ -130,7 +145,7 @@ class WatermarkProcessor {
     // Processing massive photos (e.g. 50MP-108MP) in pure Dart is too slow.
     // Capping at ~4000px ensures consistent, near-instant watermarking across all devices
     // while maintaining extreme detail (4000px is still ~12 megapixels).
-    const double maxProcDimension = 4032.0;
+    const double maxProcDimension = 4096.0;
     double scale = 1.0;
     if (dstW > maxProcDimension || dstH > maxProcDimension) {
       scale = maxProcDimension / max(dstW, dstH);
@@ -236,6 +251,7 @@ class WatermarkProcessor {
 
     final picture = recorder.endRecording();
     final finalImage = await picture.toImage(dstW.toInt(), dstH.toInt());
+    picture.dispose();
     final finalWidth = finalImage.width;
     final finalHeight = finalImage.height;
 
@@ -246,7 +262,7 @@ class WatermarkProcessor {
     uiImage.dispose();
     finalImage.dispose();
     customLogo?.dispose();
-    pictureInfo.picture.dispose();
+    pictureInfo?.picture.dispose();
 
     if (byteData == null) return Uint8List(0);
 
@@ -299,7 +315,7 @@ class WatermarkProcessor {
     required Canvas canvas,
     required Offset offset,
     required double size,
-    required PictureInfo defaultLogo,
+    PictureInfo? defaultLogo,
     ui.Image? customLogo,
   }) {
     canvas.save();
@@ -317,7 +333,7 @@ class WatermarkProcessor {
         Rect.fromLTWH(0, 0, size, size),
         Paint()..filterQuality = ui.FilterQuality.high,
       );
-    } else {
+    } else if (defaultLogo != null) {
       final double scale = size / defaultLogo.size.height;
       canvas.scale(scale, scale);
       canvas.drawPicture(defaultLogo.picture);
@@ -342,7 +358,8 @@ class WatermarkProcessor {
     return Uint8List.fromList(
       img.encodeJpg(
         processedImage,
-        quality: 95, // 🔥 95 is standard high quality and much faster than 100
+        quality:
+            97, // High detail without the CPU/file-size cost of quality 100
         chroma: img
             .JpegChroma.yuv420, // 🔥 yuv420 is significantly faster than yuv444
       ),

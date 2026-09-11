@@ -37,6 +37,62 @@ void main() {
     });
   });
 
+  group('zoomForScaleDelta', () {
+    test('applies only the incremental scale change', () {
+      expect(
+        zoomForScaleDelta(
+          currentZoom: 2,
+          previousScale: 1.2,
+          currentScale: 1.5,
+          minZoom: 1,
+          maxZoom: 8,
+        ),
+        closeTo(2.5, 0.000001),
+      );
+    });
+
+    test('reversing scale direction reverses zoom without a base jump', () {
+      final zoomedIn = zoomForScaleDelta(
+        currentZoom: 2,
+        previousScale: 1.0,
+        currentScale: 1.25,
+        minZoom: 1,
+        maxZoom: 8,
+      );
+      final zoomedBack = zoomForScaleDelta(
+        currentZoom: zoomedIn,
+        previousScale: 1.25,
+        currentScale: 1.0,
+        minZoom: 1,
+        maxZoom: 8,
+      );
+      expect(zoomedBack, closeTo(2, 0.000001));
+    });
+
+    test('guards invalid recognizer scales and camera limits', () {
+      expect(
+        zoomForScaleDelta(
+          currentZoom: 3,
+          previousScale: 0,
+          currentScale: 2,
+          minZoom: 1,
+          maxZoom: 8,
+        ),
+        3,
+      );
+      expect(
+        zoomForScaleDelta(
+          currentZoom: 7,
+          previousScale: 1,
+          currentScale: 2,
+          minZoom: 1,
+          maxZoom: 8,
+        ),
+        8,
+      );
+    });
+  });
+
   group('formatRecordingDuration', () {
     test('formats short recordings as minutes and seconds', () {
       expect(formatRecordingDuration(const Duration(seconds: 7)), '00:07');

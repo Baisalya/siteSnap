@@ -15,6 +15,7 @@ import 'package:surveycam/core/utils/focus_point_provider.dart';
 import 'package:surveycam/features/compass/presentation/compass_provider.dart';
 import 'package:surveycam/features/gallery/data/gallery_folder_screen.dart';
 import 'package:surveycam/features/gallery/presentation/last_image_provider.dart';
+import 'package:surveycam/features/location/domain/location_fix.dart';
 import 'package:surveycam/features/location/presentation/location_viewmodel.dart';
 import 'package:surveycam/features/overlay/presentation/live_overlay_painter.dart';
 import 'package:surveycam/features/overlay/presentation/overlay_preview_state.dart';
@@ -23,11 +24,13 @@ import 'package:surveycam/features/overlay/presentation/overlay_settings_provide
 import 'package:surveycam/features/projects/presentation/project_picker_sheet.dart';
 import 'package:surveycam/features/projects/presentation/project_provider.dart';
 import 'package:surveycam/privacypolicy/privacyProvider.dart';
+import '../../overlay/domain/overlay_settings.dart';
 import '../domain/camera_lens_type.dart';
 
 import 'package:surveycam/features/camera/data/CameraState.dart';
 import 'package:surveycam/features/camera/domain/camera_interaction_utils.dart';
 import 'camera_settings_provider.dart';
+import 'camera_zoom_hud.dart';
 import 'camera_viewmodel.dart';
 import 'capture_button.dart';
 import 'note_input_sheet.dart';
@@ -49,8 +52,14 @@ class _CameraScreenState extends ConsumerState<CameraScreen> {
   Timer? _processingBubbleIdleTimer;
   Duration _recordingElapsed = Duration.zero;
   DateTime? _recordingStartedAt;
-  double _zoomAtGestureStart = 1.0;
+  double _zoomGestureTarget = 1.0;
+  double _lastZoomGestureScale = 1.0;
+  int _zoomPointerCount = 0;
+  bool _zoomScalePrimed = false;
+  final ValueNotifier<double> _zoomHudValue = ValueNotifier<double>(1.0);
   bool _zoomGestureActive = false;
+  bool _zoomGestureSettling = false;
+  int _zoomGestureEpoch = 0;
   bool _showZoomIndicator = false;
   bool _isCapturing = false;
   bool _showShutterFeedback = false;
@@ -62,7 +71,8 @@ class _CameraScreenState extends ConsumerState<CameraScreen> {
   Position? _lastAddressFetchPosition;
   DateTime? _lastWeatherFetchAt;
   DateTime? _lastAddressFetchAt;
-  int _locationFetchSerial = 0;
+  int _weatherFetchSerial = 0;
+  int _addressFetchSerial = 0;
 
   static const Duration _weatherFetchInterval = Duration(minutes: 1);
   static const Duration _addressFetchInterval = Duration(seconds: 30);
@@ -140,6 +150,20 @@ class _CameraScreenState extends ConsumerState<CameraScreen> {
     });
   }
 
+  void _updateZoomHud(double zoom) {
+    final previous = _zoomHudValue.value;
+    _zoomHudValue.value = zoom;
+    const feedbackMarks = <double>[1, 2, 3, 5, 10];
+    for (final mark in feedbackMarks) {
+      final crossed = (previous < mark && zoom >= mark) ||
+          (previous > mark && zoom <= mark);
+      if (crossed) {
+        unawaited(HapticFeedback.selectionClick());
+        break;
+      }
+    }
+  }
+
   String _mergeLocationWithExistingExtraNote({
     required String location,
     required String currentNote,
@@ -168,6 +192,171 @@ class _CameraScreenState extends ConsumerState<CameraScreen> {
       current.longitude,
     );
     return distance >= minDistanceMeters;
+  }
+
+  void _handleLocationFix(LocationFix fix) {
+    final current = ref.read(overlayPreviewProvider);
+
+    switch (fix.status) {
+      case LocationFixStatus.serviceDisabled:
+        ref.read(overlayPreviewProvider.notifier).state = current.copyWith(
+          latitude: 0,
+          longitude: 0,
+          altitude: 0,
+          locationWarning: 'GPS turned off',
+          clearWeather: true,
+          clearHumidity: true,
+          clearAir: true,
+          clearPressure: true,
+        );
+        return;
+      case LocationFixStatus.permissionDenied:
+        ref.read(overlayPreviewProvider.notifier).state = current.copyWith(
+          latitude: 0,
+          longitude: 0,
+          altitude: 0,
+          locationWarning: 'Give location permission',
+          clearWeather: true,
+          clearHumidity: true,
+          clearAir: true,
+          clearPressure: true,
+        );
+        return;
+      case LocationFixStatus.fetching:
+        // Do not erase a still-valid coordinate while the fused provider is
+        // recovering. This avoids the visible 0/0 -> GPS jump on resume.
+        if (current.latitude == 0 && current.longitude == 0) {
+          ref.read(overlayPreviewProvider.notifier).state = current.copyWith(
+            locationWarning: 'Fetching location...',
+          );
+        }
+        return;
+      case LocationFixStatus.ready:
+        final position = fix.position;
+        if (position == null) {
+          return;
+        }
+
+        // Publish coordinates before any network/reverse-geocoding work. The
+        // overlay and the shutter therefore see the best available fix
+        // immediately, while address/weather enrichment remains asynchronous.
+        ref.read(overlayPreviewProvider.notifier).state = current.copyWith(
+          latitude: position.latitude,
+          longitude: position.longitude,
+          altitude: position.altitude,
+          clearLocationWarning: true,
+        );
+        _scheduleLocationEnrichment(position);
+    }
+  }
+
+  void _scheduleLocationEnrichment(Position position) {
+    final overlaySettingsForLocation = ref.read(overlaySettingsProvider);
+    final wantsWeatherData = overlaySettingsForLocation.showWeather ||
+        overlaySettingsForLocation.showHumidity ||
+        overlaySettingsForLocation.showAir ||
+        overlaySettingsForLocation.showPressure;
+
+    if (wantsWeatherData &&
+        _shouldRefreshLocationBackedData(
+          current: position,
+          previous: _lastWeatherFetchPosition,
+          lastFetchAt: _lastWeatherFetchAt,
+          minInterval: _weatherFetchInterval,
+          minDistanceMeters: _weatherFetchDistanceMeters,
+        )) {
+      _lastWeatherFetchPosition = position;
+      _lastWeatherFetchAt = DateTime.now();
+      final serial = ++_weatherFetchSerial;
+      unawaited(_refreshWeather(position, serial));
+    } else if (!wantsWeatherData) {
+      final current = ref.read(overlayPreviewProvider);
+      if (current.weather != null ||
+          current.humidity != null ||
+          current.air != null ||
+          current.pressure != null) {
+        ref.read(overlayPreviewProvider.notifier).state = current.copyWith(
+          clearWeather: true,
+          clearHumidity: true,
+          clearAir: true,
+          clearPressure: true,
+        );
+      }
+    }
+
+    final settings = ref.read(cameraSettingsProvider);
+    if (settings.autoFetchLocation &&
+        _shouldRefreshLocationBackedData(
+          current: position,
+          previous: _lastAddressFetchPosition,
+          lastFetchAt: _lastAddressFetchAt,
+          minInterval: _addressFetchInterval,
+          minDistanceMeters: _addressFetchDistanceMeters,
+        )) {
+      _lastAddressFetchPosition = position;
+      _lastAddressFetchAt = DateTime.now();
+      final serial = ++_addressFetchSerial;
+      unawaited(
+        _refreshAddress(
+          position,
+          overlaySettingsForLocation,
+          serial,
+        ),
+      );
+    }
+  }
+
+  Future<void> _refreshWeather(Position position, int serial) async {
+    try {
+      final weatherData = await WeatherService.fetchWeather(
+        position.latitude,
+        position.longitude,
+      );
+      if (!mounted || serial != _weatherFetchSerial) {
+        return;
+      }
+
+      ref.read(overlayPreviewProvider.notifier).state =
+          ref.read(overlayPreviewProvider).copyWith(
+                weather: weatherData?.temp,
+                clearWeather: weatherData?.temp == null,
+                humidity: weatherData?.humidity,
+                clearHumidity: weatherData?.humidity == null,
+                air: weatherData?.airQuality,
+                clearAir: weatherData?.airQuality == null,
+                pressure: weatherData?.pressure,
+                clearPressure: weatherData?.pressure == null,
+              );
+    } catch (error) {
+      debugPrint('Weather enrichment skipped: $error');
+    }
+  }
+
+  Future<void> _refreshAddress(
+    Position position,
+    OverlaySettings overlaySettingsForLocation,
+    int serial,
+  ) async {
+    try {
+      final name = await LocationService.getLocationName(
+        position.latitude,
+        position.longitude,
+        language: overlaySettingsForLocation.language,
+      );
+      if (name == null || !mounted || serial != _addressFetchSerial) {
+        return;
+      }
+
+      final current = ref.read(overlayPreviewProvider);
+      ref.read(overlayPreviewProvider.notifier).state = current.copyWith(
+        note: _mergeLocationWithExistingExtraNote(
+          location: name,
+          currentNote: current.note,
+        ),
+      );
+    } catch (error) {
+      debugPrint('Address enrichment skipped: $error');
+    }
   }
 
   void _startPhotoCapture() {
@@ -276,6 +465,7 @@ class _CameraScreenState extends ConsumerState<CameraScreen> {
     _focusTimer?.cancel();
     _recordingTimer?.cancel();
     _zoomIndicatorTimer?.cancel();
+    _zoomHudValue.dispose();
     _shutterFeedbackTimer?.cancel();
     _processingBubbleIdleTimer?.cancel();
     super.dispose();
@@ -320,8 +510,19 @@ class _CameraScreenState extends ConsumerState<CameraScreen> {
       screenSize,
       _processingBubbleExpanded,
     );
-    final shouldShowZoomIndicator =
-        _showZoomIndicator || (cameraState.zoom - 1).abs() >= 0.02;
+    final shouldShowZoomIndicator = _zoomGestureActive ||
+        _zoomGestureSettling ||
+        _showZoomIndicator ||
+        (cameraState.zoom - 1).abs() >= 0.02;
+    if (!_zoomGestureActive &&
+        !_zoomGestureSettling &&
+        (_zoomHudValue.value - cameraState.zoom).abs() >= 0.001) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted && !_zoomGestureActive && !_zoomGestureSettling) {
+          _zoomHudValue.value = cameraState.zoom;
+        }
+      });
+    }
 
     if (hasProcessingBubble && _processingBubbleIdleTimer == null) {
       WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -346,143 +547,8 @@ class _CameraScreenState extends ConsumerState<CameraScreen> {
     /// ===============================
 
     if (privacyAccepted == true) {
-      ref.listen(locationStreamProvider, (_, next) async {
-        next.whenData((position) async {
-          final current = ref.read(overlayPreviewProvider);
-
-          final serviceEnabled = await Geolocator.isLocationServiceEnabled();
-
-          final permission = await Geolocator.checkPermission();
-
-          if (!serviceEnabled) {
-            ref.read(overlayPreviewProvider.notifier).state = current.copyWith(
-              latitude: 0,
-              longitude: 0,
-              altitude: 0,
-              locationWarning: "GPS turned off",
-              clearWeather: true,
-              clearHumidity: true,
-              clearAir: true,
-              clearPressure: true,
-            );
-            return;
-          }
-
-          if (permission == LocationPermission.denied ||
-              permission == LocationPermission.deniedForever) {
-            ref.read(overlayPreviewProvider.notifier).state = current.copyWith(
-              latitude: 0,
-              longitude: 0,
-              altitude: 0,
-              locationWarning: "Give location permission",
-              clearWeather: true,
-              clearHumidity: true,
-              clearAir: true,
-              clearPressure: true,
-            );
-            return;
-          }
-
-          if (position == null) {
-            ref.read(overlayPreviewProvider.notifier).state = current.copyWith(
-              latitude: 0,
-              longitude: 0,
-              altitude: 0,
-              locationWarning: "Fetching location...",
-              clearWeather: true,
-              clearHumidity: true,
-              clearAir: true,
-              clearPressure: true,
-            );
-            return;
-          }
-
-          ref.read(overlayPreviewProvider.notifier).state = current.copyWith(
-            latitude: position.latitude,
-            longitude: position.longitude,
-            altitude: position.altitude,
-            clearLocationWarning: true,
-          );
-
-          final fetchSerial = ++_locationFetchSerial;
-          final overlaySettingsForLocation = ref.read(overlaySettingsProvider);
-          final wantsWeatherData = overlaySettingsForLocation.showWeather ||
-              overlaySettingsForLocation.showHumidity ||
-              overlaySettingsForLocation.showAir ||
-              overlaySettingsForLocation.showPressure;
-
-          if (wantsWeatherData &&
-              _shouldRefreshLocationBackedData(
-                current: position,
-                previous: _lastWeatherFetchPosition,
-                lastFetchAt: _lastWeatherFetchAt,
-                minInterval: _weatherFetchInterval,
-                minDistanceMeters: _weatherFetchDistanceMeters,
-              )) {
-            _lastWeatherFetchPosition = position;
-            _lastWeatherFetchAt = DateTime.now();
-
-            final weatherData = await WeatherService.fetchWeather(
-              position.latitude,
-              position.longitude,
-            );
-            if (mounted && fetchSerial == _locationFetchSerial) {
-              ref.read(overlayPreviewProvider.notifier).state =
-                  ref.read(overlayPreviewProvider.notifier).state.copyWith(
-                        weather: weatherData?.temp,
-                        clearWeather: weatherData?.temp == null,
-                        humidity: weatherData?.humidity,
-                        clearHumidity: weatherData?.humidity == null,
-                        air: weatherData?.airQuality,
-                        clearAir: weatherData?.airQuality == null,
-                        pressure: weatherData?.pressure,
-                        clearPressure: weatherData?.pressure == null,
-                      );
-            }
-          } else if (!wantsWeatherData &&
-              (current.weather != null ||
-                  current.humidity != null ||
-                  current.air != null ||
-                  current.pressure != null)) {
-            ref.read(overlayPreviewProvider.notifier).state =
-                ref.read(overlayPreviewProvider).copyWith(
-                      clearWeather: true,
-                      clearHumidity: true,
-                      clearAir: true,
-                      clearPressure: true,
-                    );
-          }
-
-          final settings = ref.read(cameraSettingsProvider);
-          if (settings.autoFetchLocation &&
-              _shouldRefreshLocationBackedData(
-                current: position,
-                previous: _lastAddressFetchPosition,
-                lastFetchAt: _lastAddressFetchAt,
-                minInterval: _addressFetchInterval,
-                minDistanceMeters: _addressFetchDistanceMeters,
-              )) {
-            _lastAddressFetchPosition = position;
-            _lastAddressFetchAt = DateTime.now();
-            final name = await LocationService.getLocationName(
-              position.latitude,
-              position.longitude,
-              language: overlaySettingsForLocation.language,
-            );
-            if (name != null &&
-                mounted &&
-                fetchSerial == _locationFetchSerial) {
-              final currentNote = ref.read(overlayPreviewProvider).note;
-              ref.read(overlayPreviewProvider.notifier).state =
-                  ref.read(overlayPreviewProvider.notifier).state.copyWith(
-                        note: _mergeLocationWithExistingExtraNote(
-                          location: name,
-                          currentNote: currentNote,
-                        ),
-                      );
-            }
-          }
-        });
+      ref.listen(locationStreamProvider, (_, next) {
+        next.whenData(_handleLocationFix);
       });
     }
     ref.listen(compassHeadingProvider, (_, next) {
@@ -596,10 +662,20 @@ class _CameraScreenState extends ConsumerState<CameraScreen> {
                               });
                             },
                             onScaleStart: (details) {
-                              _zoomAtGestureStart = cameraState.zoom;
+                              _zoomGestureTarget = _zoomHudValue.value
+                                  .clamp(
+                                      cameraState.minZoom, cameraState.maxZoom)
+                                  .toDouble();
+                              _lastZoomGestureScale = 1.0;
+                              _zoomPointerCount = details.pointerCount;
+                              _zoomScalePrimed = details.pointerCount >= 2;
                               _zoomGestureActive = details.pointerCount >= 2;
-                              if (details.pointerCount >= 2) {
-                                _showZoomTemporarily();
+                              if (_zoomGestureActive) {
+                                _zoomIndicatorTimer?.cancel();
+                                _zoomGestureSettling = false;
+                                _zoomGestureEpoch++;
+                                cameraVM.beginZoomGesture();
+                                setState(() {});
                               }
                             },
                             onScaleUpdate: (details) {
@@ -608,15 +684,57 @@ class _CameraScreenState extends ConsumerState<CameraScreen> {
                                 return;
                               }
                               if (details.pointerCount >= 2) {
-                                _zoomGestureActive = true;
-                                _showZoomTemporarily();
-                                unawaited(cameraVM.setZoom(zoomForGesture(
-                                  startZoom: _zoomAtGestureStart,
-                                  scale: details.scale,
+                                if (!_zoomGestureActive) {
+                                  // A second finger can join after Flutter has
+                                  // already started a one-finger scale gesture.
+                                  // Rebase at that exact frame so the first
+                                  // two-finger update cannot jump the zoom.
+                                  _zoomGestureActive = true;
+                                  _zoomGestureSettling = false;
+                                  _zoomGestureEpoch++;
+                                  _zoomGestureTarget = _zoomHudValue.value
+                                      .clamp(
+                                        cameraState.minZoom,
+                                        cameraState.maxZoom,
+                                      )
+                                      .toDouble();
+                                  _lastZoomGestureScale = details.scale;
+                                  _zoomPointerCount = details.pointerCount;
+                                  _zoomScalePrimed = true;
+                                  cameraVM.beginZoomGesture();
+                                  setState(() {});
+                                  return;
+                                }
+
+                                if (details.pointerCount != _zoomPointerCount) {
+                                  // Rebase when a third finger joins/leaves.
+                                  // Flutter's cumulative scale origin changes
+                                  // with the pointer set; applying that jump as
+                                  // zoom is the classic rubber-band glitch.
+                                  _zoomPointerCount = details.pointerCount;
+                                  _lastZoomGestureScale = details.scale;
+                                  _zoomScalePrimed = true;
+                                  return;
+                                }
+
+                                if (!_zoomScalePrimed) {
+                                  _lastZoomGestureScale = details.scale;
+                                  _zoomScalePrimed = true;
+                                  return;
+                                }
+
+                                final targetZoom = zoomForScaleDelta(
+                                  currentZoom: _zoomGestureTarget,
+                                  previousScale: _lastZoomGestureScale,
+                                  currentScale: details.scale,
                                   minZoom: cameraState.minZoom,
                                   maxZoom: cameraState.maxZoom,
-                                )));
-                              } else {
+                                );
+                                _lastZoomGestureScale = details.scale;
+                                _zoomGestureTarget = targetZoom;
+                                _updateZoomHud(targetZoom);
+                                cameraVM.updateZoomGesture(targetZoom);
+                              } else if (!_zoomGestureActive) {
                                 final delta =
                                     -details.focalPointDelta.dy * 0.02;
                                 if (delta != 0) {
@@ -630,8 +748,33 @@ class _CameraScreenState extends ConsumerState<CameraScreen> {
                             onScaleEnd: (_) {
                               if (_zoomGestureActive) {
                                 _showZoomTemporarily();
+                                _zoomGestureActive = false;
+                                _zoomScalePrimed = false;
+                                _zoomPointerCount = 0;
+                                _lastZoomGestureScale = 1.0;
+                                _zoomGestureSettling = true;
+                                final gestureEpoch = _zoomGestureEpoch;
+                                final finalZoom = _zoomGestureTarget;
+                                setState(() {});
+                                unawaited(
+                                  cameraVM
+                                      .endZoomGesture(finalZoom)
+                                      .whenComplete(
+                                    () {
+                                      if (!mounted ||
+                                          gestureEpoch != _zoomGestureEpoch ||
+                                          _zoomGestureActive) {
+                                        return;
+                                      }
+                                      _zoomGestureSettling = false;
+                                      _zoomHudValue.value = ref
+                                          .read(cameraViewModelProvider)
+                                          .zoom;
+                                      setState(() {});
+                                    },
+                                  ),
+                                );
                               }
-                              _zoomGestureActive = false;
                             },
                             child: Stack(
                               children: [
@@ -763,43 +906,22 @@ class _CameraScreenState extends ConsumerState<CameraScreen> {
                                   opacity: shouldShowZoomIndicator ? 1 : 0,
                                   duration: const Duration(milliseconds: 160),
                                   child: Center(
-                                    child: Semantics(
-                                      button: true,
-                                      label:
-                                          'Zoom ${cameraState.zoom.toStringAsFixed(1)} times. Tap to reset.',
-                                      child: GestureDetector(
-                                        onTap: () {
-                                          _showZoomTemporarily();
-                                          unawaited(cameraVM.animateZoomTo(1));
-                                        },
-                                        child: AnimatedContainer(
-                                          duration:
-                                              const Duration(milliseconds: 140),
-                                          curve: Curves.easeOut,
-                                          padding: const EdgeInsets.symmetric(
-                                            horizontal: 14,
-                                            vertical: 7,
-                                          ),
-                                          decoration: BoxDecoration(
-                                            color: Colors.black
-                                                .withValues(alpha: 0.68),
-                                            borderRadius:
-                                                BorderRadius.circular(999),
-                                            border: Border.all(
-                                              color: Colors.white
-                                                  .withValues(alpha: 0.7),
-                                            ),
-                                          ),
-                                          child: Text(
-                                            '${cameraState.zoom.toStringAsFixed(1)}x',
-                                            style: const TextStyle(
-                                              color: Colors.white,
-                                              fontSize: 14,
-                                              fontWeight: FontWeight.w800,
-                                            ),
-                                          ),
-                                        ),
-                                      ),
+                                    child: ValueListenableBuilder<double>(
+                                      valueListenable: _zoomHudValue,
+                                      builder: (context, displayZoom, _) {
+                                        return CameraZoomHud(
+                                          zoom: displayZoom,
+                                          minZoom: cameraState.minZoom,
+                                          maxZoom: cameraState.maxZoom,
+                                          isGestureActive: _zoomGestureActive,
+                                          onReset: () {
+                                            _showZoomTemporarily();
+                                            _zoomGestureTarget = 1;
+                                            unawaited(
+                                                cameraVM.animateZoomTo(1));
+                                          },
+                                        );
+                                      },
                                     ),
                                   ),
                                 ),

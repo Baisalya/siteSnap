@@ -1,0 +1,10 @@
+PHASE_8_1_PHOTO_OVERLAY_CAPTURE_ZOOM_RUNTIME_HOTFIX.md
+android/camerax_patch/ImageCaptureProxyApi.java
+lib/features/camera/presentation/camera_viewmodel.dart
+lib/features/overlay/presentation/overlay_painter.dart
+test/camera_zoom_pipeline_source_contract_test.dart
+test/photo_overlay_runtime_regression_test.dart
+test/professional_photo_source_contract_test.dart
+tool/phase8_1_release_gate.ps1
+PHASE_8_1_CHANGED_FILES.txt
+PHASE_8_1_LOCAL_VALIDATION.txt
