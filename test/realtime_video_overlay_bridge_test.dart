@@ -986,4 +986,143 @@ void main() {
       debugDefaultTargetPlatformOverride = null;
     }
   });
+
+  test(
+      'front video portrait-to-landscape update half-turns HUD without changing portrait',
+      () async {
+    debugDefaultTargetPlatformOverride = TargetPlatform.android;
+    const channel = MethodChannel('surveycam/realtime_video_overlay');
+    final rasterOrientations = <DeviceOrientation>[];
+    final uploadedOrientations = <String>[];
+    var generation = 0;
+    var enabled = false;
+    var recordingStarted = false;
+
+    TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+        .setMockMethodCallHandler(channel, (call) async {
+      switch (call.method) {
+        case 'isSupported':
+        case 'arm':
+        case 'beginHandshake':
+          return true;
+        case 'getFrameGeometry':
+          return <String, Object?>{
+            'width': 1080,
+            'height': 1920,
+            'rotationDegrees': 0,
+            'mirrored': true,
+          };
+        case 'setOverlayPng':
+          generation++;
+          uploadedOrientations.add(
+            (call.arguments as Map)['orientation'] as String,
+          );
+          return true;
+        case 'consumeLastError':
+          return null;
+        case 'setEnabled':
+          enabled = (call.arguments as Map?)?['enabled'] == true;
+          return enabled;
+        case 'markRecordingStarted':
+          recordingStarted = true;
+          return null;
+        case 'getStatus':
+          return <String, Object?>{
+            'armed': true,
+            'enabled': enabled,
+            'renderedFrames': recordingStarted ? 2 : 0,
+            'errorSinceEnable': false,
+            'overlayGeneration': generation,
+            'uploadedOverlayGeneration': generation,
+            'renderedOverlayGeneration': recordingStarted ? generation : 0,
+            'overlayLayoutOrientation':
+                uploadedOrientations.isEmpty ? null : uploadedOrientations.last,
+            'uploadedOverlayLayoutOrientation':
+                uploadedOrientations.isEmpty ? null : uploadedOrientations.last,
+            'cameraTransformMode': 'cameraxBasePassThrough',
+            'dynamicScaleMode': 'none',
+          };
+        case 'clear':
+        case 'disarm':
+        case 'cancelHandshake':
+          return null;
+      }
+      return null;
+    });
+
+    const portrait = OverlayRenderSnapshot(
+      data: OverlayData(
+        dateTime: '2026-09-11 22:33:31',
+        latitude: 20.685613,
+        longitude: 86.647966,
+        altitude: -52.1,
+        heading: 0,
+        direction: 'N',
+        note: 'Front landscape regression',
+      ),
+      settings: OverlaySettings(),
+      orientation: DeviceOrientation.portraitUp,
+    );
+    final landscapeLeft = OverlayRenderSnapshot(
+      data: portrait.data,
+      settings: portrait.settings,
+      orientation: DeviceOrientation.landscapeLeft,
+    );
+
+    try {
+      final bridge = RealtimeVideoOverlayBridge(
+        rasterizer: ({
+          required OverlayRenderSnapshot snapshot,
+          required int width,
+          required int height,
+          double? viewportAspectRatio,
+        }) async {
+          rasterOrientations.add(snapshot.orientation);
+          return Uint8List.fromList(<int>[1, 2, 3]);
+        },
+      );
+
+      expect(
+        await bridge.prepare(
+          portrait,
+          viewportAspectRatio: 9 / 16,
+          captureOrientation: DeviceOrientation.portraitUp,
+          isFrontCamera: true,
+        ),
+        isTrue,
+      );
+      expect(await bridge.activate(), isTrue);
+
+      bridge.update(
+        landscapeLeft,
+        viewportAspectRatio: 16 / 9,
+        isFrontCamera: true,
+      );
+      await Future<void>.delayed(const Duration(milliseconds: 60));
+
+      expect(
+        rasterOrientations,
+        containsAllInOrder(<DeviceOrientation>[
+          DeviceOrientation.portraitUp,
+          DeviceOrientation.landscapeRight,
+        ]),
+      );
+      expect(uploadedOrientations.first, 'portraitUp');
+      expect(uploadedOrientations.last, 'landscapeRight');
+
+      bridge.update(
+        portrait,
+        viewportAspectRatio: 9 / 16,
+        isFrontCamera: true,
+      );
+      await Future<void>.delayed(const Duration(milliseconds: 60));
+      expect(rasterOrientations.last, DeviceOrientation.portraitUp);
+      expect(uploadedOrientations.last, 'portraitUp');
+    } finally {
+      TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+          .setMockMethodCallHandler(channel, null);
+      debugDefaultTargetPlatformOverride = null;
+    }
+  });
+
 }

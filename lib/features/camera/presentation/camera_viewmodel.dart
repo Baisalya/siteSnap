@@ -526,6 +526,7 @@ class CameraViewModel extends StateNotifier<CameraState>
       ref.read(videoRecordingBackendProvider).updateRealtimeOverlay(
             snapshot,
             viewportAspectRatio: _recordingViewportAspectRatio(),
+            isFrontCamera: state.currentLens == CameraLensType.front,
           );
     }
   }
@@ -1133,6 +1134,7 @@ class CameraViewModel extends StateNotifier<CameraState>
         recordingSnapshot,
         viewportAspectRatio: _recordingViewportAspectRatio(),
         captureOrientation: _recordingCaptureOrientation,
+        isFrontCamera: nextLens == CameraLensType.front,
       );
     }
 
@@ -1370,6 +1372,7 @@ class CameraViewModel extends StateNotifier<CameraState>
           recordingSnapshot,
           viewportAspectRatio: _recordingViewportAspectRatio(),
           captureOrientation: _recordingCaptureOrientation,
+          isFrontCamera: state.currentLens == CameraLensType.front,
         );
       }
 
@@ -1690,6 +1693,7 @@ class CameraViewModel extends StateNotifier<CameraState>
         initialRecordingSnapshot,
         viewportAspectRatio: _recordingViewportAspectRatio(),
         captureOrientation: _recordingCaptureOrientation,
+        isFrontCamera: state.currentLens == CameraLensType.front,
       );
 
       // Phase 7.1 prepareRealtimeOverlay() pre-binds VideoCapture and enables

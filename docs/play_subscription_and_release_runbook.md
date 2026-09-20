@@ -29,6 +29,12 @@ Production subscription builds require an HTTPS endpoint passed as
 Developer API on the server; a Play service-account credential must never be
 included in the APK/AAB.
 
+Current production verifier:
+
+```text
+https://baisalya-entitlement-api.baishalya1999.workers.dev/v1/google-play/verify
+```
+
 Request body:
 
 ```json
@@ -65,7 +71,7 @@ offline grace period.
 |---|---|---|
 | Current safe production rollout | Normal `flutter build appbundle --release` | Free-launch mode remains enabled; all prepared Pro features continue working. |
 | Internal Play license test only | Add `--dart-define=SURVEYCAM_FREE_LAUNCH_MODE=false --dart-define=SURVEYCAM_ALLOW_LOCAL_PLAY_VERIFICATION=true` | Tests checkout/restore without a backend. Never promote this artifact to production. |
-| Secure production subscription | Add `--dart-define=SURVEYCAM_FREE_LAUNCH_MODE=false --dart-define=SURVEYCAM_PURCHASE_VERIFICATION_URL=https://your-domain.example/play/verify` | Pro gates use verified Google Play entitlement. |
+| Secure closed test and production | Run `tool/build_play_subscription_release.ps1` | Pro gates use the deployed verifier and local verification remains disabled. |
 
 Other optional defines are:
 
@@ -77,6 +83,58 @@ SURVEYCAM_REQUIRED_UPDATE_GAP=2
 SURVEYCAM_REQUIRED_UPDATE_PRIORITY=4
 SURVEYCAM_REQUIRED_UPDATE_STALENESS_DAYS=14
 ```
+
+## Generate the paid Play release
+
+Play Console production releases use an Android App Bundle (`.aab`), not a
+sideload APK. Increment the `+buildNumber` in `pubspec.yaml`, then run:
+
+```powershell
+.\tool\build_play_subscription_release.ps1
+```
+
+The script runs analysis and tests before creating:
+
+```text
+build/app/outputs/bundle/release/app-release.aab
+```
+
+Equivalent command:
+
+```powershell
+flutter build appbundle --release `
+  --dart-define=SURVEYCAM_FREE_LAUNCH_MODE=false `
+  --dart-define=SURVEYCAM_ALLOW_LOCAL_PLAY_VERIFICATION=false `
+  --dart-define=SURVEYCAM_PURCHASE_VERIFICATION_URL=https://baisalya-entitlement-api.baishalya1999.workers.dev/v1/google-play/verify `
+  --dart-define=SURVEYCAM_PRO_PRODUCT_ID=surveycam_pro `
+  --dart-define=SURVEYCAM_PRO_BASE_PLAN_ID=annual199 `
+  --dart-define=SURVEYCAM_PRO_OFFER_ID=launch-1y-free `
+  --dart-define=SURVEYCAM_PRO_LAUNCH_OFFER_ENDS_AT=2027-02-11T23:59:59+05:30
+```
+
+Never include the Google service-account JSON or private key in this command,
+repository, APK, or AAB. The app bundle contains only the public HTTPS verifier
+URL.
+
+## Closed test to production without losing monetization
+
+1. Upload the secure AAB to **Closed testing → Alpha** and send it for review.
+2. Install through the closed-test Play link with a license tester.
+3. Verify purchase, cancellation, pending payment, restore, reinstall, expiry,
+   grace period, and an offline/server-error retry.
+4. Keep subscription `surveycam_pro`, base plan `annual199`, and offer
+   `launch-1y-free` active.
+5. From the tested Alpha release choose **Promote release → Production**. Promote
+   the same artifact; do not rebuild it with different defines.
+6. Review production countries and rollout, then send the production promotion
+   for review. With Managed publishing on, publish after approval.
+
+Promotion preserves the compiled paid configuration. Eligible new customers
+see Google Play's one-year free trial at checkout, authorize the ₹0 initial
+charge and the future yearly renewal, and are charged automatically by Google
+after the trial unless they cancel. Ineligible customers see the Store-provided
+paid price. SurveyCam opens checkout when the user selects a locked Pro feature;
+it does not force a purchase dialog at app launch.
 
 ## Safe rollout order
 

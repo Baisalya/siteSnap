@@ -45,11 +45,13 @@ class CameraRepositoryVideoRecordingBackend implements VideoRecordingBackend {
     OverlayRenderSnapshot snapshot, {
     double? viewportAspectRatio,
     DeviceOrientation? captureOrientation,
+    bool isFrontCamera = false,
   }) =>
       realtimeOverlayBridge.prepare(
         snapshot,
         viewportAspectRatio: viewportAspectRatio,
         captureOrientation: captureOrientation,
+        isFrontCamera: isFrontCamera,
       );
 
   @override
@@ -59,10 +61,12 @@ class CameraRepositoryVideoRecordingBackend implements VideoRecordingBackend {
   void updateRealtimeOverlay(
     OverlayRenderSnapshot snapshot, {
     double? viewportAspectRatio,
+    bool? isFrontCamera,
   }) {
     realtimeOverlayBridge.update(
       snapshot,
       viewportAspectRatio: viewportAspectRatio,
+      isFrontCamera: isFrontCamera,
     );
   }
 

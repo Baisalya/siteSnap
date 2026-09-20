@@ -68,6 +68,58 @@ void main() {
     );
   });
 
+  test('front camera video half-turn is landscape-current only', () {
+    // Portrait-start -> landscape-left.
+    expect(
+      frontCameraLandscapeVideoOverlayOrientation(
+        relativeOrientation: DeviceOrientation.landscapeLeft,
+        physicalOrientation: DeviceOrientation.landscapeLeft,
+        isFrontCamera: true,
+      ),
+      DeviceOrientation.landscapeRight,
+    );
+
+    // Portrait-start -> landscape-right.
+    expect(
+      frontCameraLandscapeVideoOverlayOrientation(
+        relativeOrientation: DeviceOrientation.landscapeRight,
+        physicalOrientation: DeviceOrientation.landscapeRight,
+        isFrontCamera: true,
+      ),
+      DeviceOrientation.landscapeLeft,
+    );
+
+    // Recording that starts in landscape also needs the same half-turn.
+    expect(
+      frontCameraLandscapeVideoOverlayOrientation(
+        relativeOrientation: DeviceOrientation.portraitUp,
+        physicalOrientation: DeviceOrientation.landscapeLeft,
+        isFrontCamera: true,
+      ),
+      DeviceOrientation.portraitDown,
+    );
+
+    // Front portrait VIDEO is already correct.
+    expect(
+      frontCameraLandscapeVideoOverlayOrientation(
+        relativeOrientation: DeviceOrientation.portraitUp,
+        physicalOrientation: DeviceOrientation.portraitUp,
+        isFrontCamera: true,
+      ),
+      DeviceOrientation.portraitUp,
+    );
+
+    // Back-camera VIDEO is already correct in landscape.
+    expect(
+      frontCameraLandscapeVideoOverlayOrientation(
+        relativeOrientation: DeviceOrientation.landscapeLeft,
+        physicalOrientation: DeviceOrientation.landscapeLeft,
+        isFrontCamera: false,
+      ),
+      DeviceOrientation.landscapeLeft,
+    );
+  });
+
   test('relative HUD delta is normalized to quarter turns', () {
     expect(
       dynamicVideoRotationDeltaDegrees(

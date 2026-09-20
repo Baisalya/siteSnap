@@ -71,3 +71,35 @@ DeviceOrientation relativeRecordingOverlayOrientation(
       return DeviceOrientation.portraitUp;
   }
 }
+
+/// Applies the front-camera VIDEO-only HUD correction observed on Android
+/// when the phone is physically in either landscape orientation. CameraX
+/// already presents the front-camera pixels with its own SurfaceOutput
+/// transform, but the app-owned transparent HUD is composited in output
+/// coordinates. On this path the two coordinate spaces differ by 180 degrees.
+///
+/// Keep the correction keyed to the *current physical orientation*, not the
+/// recording-start orientation. That preserves the already-correct portrait
+/// VIDEO path and also fixes portrait -> landscape transitions inside one
+/// recording. PHOTO/preview never call this helper.
+DeviceOrientation frontCameraLandscapeVideoOverlayOrientation({
+  required DeviceOrientation relativeOrientation,
+  required DeviceOrientation physicalOrientation,
+  required bool isFrontCamera,
+}) {
+  final isPhysicalLandscape =
+      physicalOrientation == DeviceOrientation.landscapeLeft ||
+          physicalOrientation == DeviceOrientation.landscapeRight;
+  if (!isFrontCamera || !isPhysicalLandscape) return relativeOrientation;
+
+  switch (relativeOrientation) {
+    case DeviceOrientation.portraitUp:
+      return DeviceOrientation.portraitDown;
+    case DeviceOrientation.landscapeLeft:
+      return DeviceOrientation.landscapeRight;
+    case DeviceOrientation.portraitDown:
+      return DeviceOrientation.portraitUp;
+    case DeviceOrientation.landscapeRight:
+      return DeviceOrientation.landscapeLeft;
+  }
+}

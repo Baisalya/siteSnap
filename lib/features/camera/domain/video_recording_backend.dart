@@ -39,6 +39,7 @@ abstract class VideoRecordingBackend {
     OverlayRenderSnapshot snapshot, {
     double? viewportAspectRatio,
     DeviceOrientation? captureOrientation,
+    bool isFrontCamera = false,
   }) async =>
       false;
 
@@ -50,6 +51,7 @@ abstract class VideoRecordingBackend {
   void updateRealtimeOverlay(
     OverlayRenderSnapshot snapshot, {
     double? viewportAspectRatio,
+    bool? isFrontCamera,
   }) {}
 
   /// Compatibility hook for a physical orientation event. Production uses the

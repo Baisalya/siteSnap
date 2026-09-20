@@ -156,6 +156,7 @@ class RealtimeVideoOverlayBridge {
   OverlayRenderSnapshot? _lastRasterSnapshot;
   double? _lastRasterViewportAspectRatio;
   DeviceOrientation? _recordingStartPhysicalOrientation;
+  bool _recordingIsFrontCamera = false;
   DeviceOrientation? _desiredRasterOrientation;
   double? _recordingStartViewportAspectRatio;
   final RealtimeOverlayRasterizer _rasterizer;
@@ -227,6 +228,7 @@ class RealtimeVideoOverlayBridge {
     OverlayRenderSnapshot snapshot, {
     double? viewportAspectRatio,
     DeviceOrientation? captureOrientation,
+    bool isFrontCamera = false,
   }) async {
     if (!await arm()) return false;
 
@@ -240,6 +242,7 @@ class RealtimeVideoOverlayBridge {
       // contracts. The former is frozen for the MP4; the latter remains live
       // and is expressed relative to this start orientation when rasterized.
       _recordingStartPhysicalOrientation = snapshot.orientation;
+      _recordingIsFrontCamera = isFrontCamera;
       _desiredRasterOrientation = snapshot.orientation;
       _recordingStartViewportAspectRatio = viewportAspectRatio;
       final targetOrientation = captureOrientation ?? snapshot.orientation;
@@ -459,25 +462,36 @@ class RealtimeVideoOverlayBridge {
   void update(
     OverlayRenderSnapshot snapshot, {
     double? viewportAspectRatio,
+    bool? isFrontCamera,
   }) {
     if (!_active || _updatesFrozenForStop) return;
-    if (_sameRasterContent(snapshot, viewportAspectRatio)) return;
+
+    final frontCameraChanged = isFrontCamera != null &&
+        isFrontCamera != _recordingIsFrontCamera;
+    if (isFrontCamera != null) {
+      _recordingIsFrontCamera = isFrontCamera;
+    }
+    if (!frontCameraChanged &&
+        _sameRasterContent(snapshot, viewportAspectRatio)) {
+      return;
+    }
 
     final orientationChanged = _desiredRasterOrientation != null &&
         _desiredRasterOrientation != snapshot.orientation;
     _desiredRasterOrientation = snapshot.orientation;
+    final urgentGeometryChange = orientationChanged || frontCameraChanged;
 
-    if (orientationChanged) {
+    if (urgentGeometryChange) {
       // Invalidate any sleeping/rasterizing data-only update. The drain checks
       // this epoch at <=16 ms intervals while throttled and immediately picks
-      // up the newest urgent orientation request.
+      // up the newest urgent orientation/lens request.
       _updateEpoch++;
     }
 
     _pendingUpdate = _PendingRealtimeOverlayUpdate(
       snapshot,
       viewportAspectRatio,
-      urgent: orientationChanged,
+      urgent: urgentGeometryChange,
     );
     if (_draining) return;
     _startDrain();
@@ -676,9 +690,13 @@ class RealtimeVideoOverlayBridge {
       final expectedLayoutOrientation =
           startOrientation == null || desiredPhysicalOrientation == null
               ? null
-              : relativeRecordingOverlayOrientation(
-                  startOrientation,
-                  desiredPhysicalOrientation,
+              : frontCameraLandscapeVideoOverlayOrientation(
+                  relativeOrientation: relativeRecordingOverlayOrientation(
+                    startOrientation,
+                    desiredPhysicalOrientation,
+                  ),
+                  physicalOrientation: desiredPhysicalOrientation,
+                  isFrontCamera: _recordingIsFrontCamera,
                 ).name;
       final latestLayoutUploaded = expectedLayoutOrientation == null ||
           status.uploadedOverlayLayoutOrientation == null ||
@@ -821,6 +839,7 @@ class RealtimeVideoOverlayBridge {
     _lastRasterSnapshot = null;
     _lastRasterViewportAspectRatio = null;
     _recordingStartPhysicalOrientation = null;
+    _recordingIsFrontCamera = false;
     _desiredRasterOrientation = null;
     _recordingStartViewportAspectRatio = null;
   }
@@ -906,10 +925,15 @@ class RealtimeVideoOverlayBridge {
       start,
       snapshot.orientation,
     );
+    final hudOrientation = frontCameraLandscapeVideoOverlayOrientation(
+      relativeOrientation: relative,
+      physicalOrientation: snapshot.orientation,
+      isFrontCamera: _recordingIsFrontCamera,
+    );
     return OverlayRenderSnapshot(
       data: snapshot.data,
       settings: snapshot.settings,
-      orientation: relative,
+      orientation: hudOrientation,
     );
   }
 

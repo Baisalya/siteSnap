@@ -59,8 +59,15 @@ For production, omit the local-verification flag and provide:
 
 ```text
 --dart-define=SURVEYCAM_FREE_LAUNCH_MODE=false
---dart-define=SURVEYCAM_PURCHASE_VERIFICATION_URL=https://YOUR-HTTPS-ENDPOINT
+--dart-define=SURVEYCAM_ALLOW_LOCAL_PLAY_VERIFICATION=false
+--dart-define=SURVEYCAM_PURCHASE_VERIFICATION_URL=https://baisalya-entitlement-api.baishalya1999.workers.dev/v1/google-play/verify
 ```
+
+Use `tool/build_play_subscription_release.ps1` so the closed-test and promoted
+production artifact use the same paid configuration. After closed-track billing
+QA passes, use **Promote release → Production** on that Alpha release instead of
+building a different AAB. The promoted app will keep asking for Google-verified
+Pro entitlement whenever a locked Pro feature is opened.
 
 ## Closed-test billing checklist
 
