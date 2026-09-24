@@ -1,3 +1,0 @@
-test/realtime_video_overlay_bridge_test.dart
-PHASE_7_2_3A_CERTIFICATION_LINT_HOTFIX.md
-PHASE_7_2_3A_CHANGED_FILES.txt

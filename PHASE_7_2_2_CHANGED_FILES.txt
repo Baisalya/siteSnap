@@ -1,9 +1,0 @@
-PHASE_7_2_2_LIVE_OVERLAY_FIT_CENTER.md
-PHASE_7_2_2_CHANGED_FILES.txt
-android/camerax_patch/SiteSnapDynamicVideoSurfaceProcessor.java
-android/camerax_patch/SiteSnapRealtimeOverlayController.java
-lib/features/camera/data/realtime_video_overlay_bridge.dart
-lib/features/camera/presentation/camera_viewmodel.dart
-lib/features/overlay/presentation/video_watermark_processor.dart
-test/dynamic_video_gpu_source_contract_test.dart
-tool/phase7_2_2_release_gate.ps1

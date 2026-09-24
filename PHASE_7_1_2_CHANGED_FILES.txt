@@ -1,9 +1,0 @@
-PHASE_7_1_2_LANDSCAPE_TARGET_ROTATION_HOTFIX.md
-PHASE_7_1_2_CHANGED_FILES.txt
-android/app/src/main/kotlin/com/baishalya/sitesnap/MainActivity.kt
-android/camerax_patch/SiteSnapRealtimeOverlayController.java
-lib/features/camera/data/camera_repository_video_recording_backend.dart
-lib/features/camera/data/realtime_video_overlay_bridge.dart
-lib/features/camera/domain/video_recording_backend.dart
-lib/features/camera/presentation/camera_viewmodel.dart
-test/realtime_video_overlay_bridge_test.dart
