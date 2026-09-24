@@ -6,6 +6,8 @@ final privacyProvider = StateNotifierProvider<PrivacyNotifier, bool?>((ref) {
 });
 
 class PrivacyNotifier extends StateNotifier<bool?> {
+  static const int currentPolicyVersion = 2;
+
   PrivacyNotifier() : super(null) {
     _loadStatus();
   }
@@ -15,9 +17,10 @@ class PrivacyNotifier extends StateNotifier<bool?> {
       final prefs = await SharedPreferences.getInstance();
 
       final accepted = prefs.getBool('privacyAccepted') ?? false;
+      final acceptedVersion = prefs.getInt('privacyPolicyVersion') ?? 0;
 
       if (mounted) {
-        state = accepted;
+        state = accepted && acceptedVersion == currentPolicyVersion;
       }
     } catch (e) {
       if (mounted) {
@@ -31,6 +34,7 @@ class PrivacyNotifier extends StateNotifier<bool?> {
       final prefs = await SharedPreferences.getInstance();
 
       await prefs.setBool('privacyAccepted', true);
+      await prefs.setInt('privacyPolicyVersion', currentPolicyVersion);
 
       if (mounted) {
         state = true;
@@ -47,6 +51,7 @@ class PrivacyNotifier extends StateNotifier<bool?> {
       final prefs = await SharedPreferences.getInstance();
 
       await prefs.remove('privacyAccepted');
+      await prefs.remove('privacyPolicyVersion');
 
       if (mounted) {
         state = false;

@@ -7,8 +7,8 @@ import 'package:image_picker/image_picker.dart';
 import 'package:path/path.dart' as p;
 import 'package:path_provider/path_provider.dart';
 import 'package:surveycam/core/monetization/premium_feature.dart';
+import 'package:surveycam/core/monetization/premium_access_gate.dart';
 import 'package:surveycam/core/monetization/premium_policy.dart';
-import 'package:surveycam/core/monetization/pro_upgrade_screen.dart';
 import 'package:surveycam/core/services/weather_service.dart';
 import 'package:surveycam/features/overlay/domain/overlay_settings.dart';
 import 'package:surveycam/features/overlay/presentation/overlay_settings_provider.dart';
@@ -221,13 +221,17 @@ class _OverlayConfigurationScreenState
           const SizedBox(width: 10),
           const Expanded(
             child: Text(
-              'Custom logos, colors, and branding require SurveyCam Pro.',
+              'Unlock custom branding with a rewarded ad or SurveyCam Pro.',
               style: TextStyle(color: Colors.white70, fontSize: 12),
             ),
           ),
           TextButton(
-            onPressed: () => showProUpgrade(context),
-            child: const Text('View Pro'),
+            onPressed: () => requestPremiumFeatureAccess(
+              context: context,
+              ref: ref,
+              feature: PremiumFeature.customBranding,
+            ),
+            child: const Text('Unlock'),
           ),
         ],
       ),
@@ -871,9 +875,14 @@ class _OverlayConfigurationScreenState
       selected: isSelected,
       label: isLocked ? 'SurveyCam Pro overlay color' : 'Overlay color',
       child: GestureDetector(
-        onTap: () {
+        onTap: () async {
           if (isLocked) {
-            showProUpgrade(context);
+            final unlocked = await requestPremiumFeatureAccess(
+              context: context,
+              ref: ref,
+              feature: PremiumFeature.overlayColors,
+            );
+            if (unlocked && mounted) onTap(color);
             return;
           }
           onTap(color);

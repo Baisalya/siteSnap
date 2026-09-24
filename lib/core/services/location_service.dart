@@ -4,6 +4,18 @@ import 'package:surveycam/features/overlay/domain/overlay_settings.dart';
 import 'package:surveycam/core/utils/overlay_utils.dart';
 
 class LocationService {
+  static Future<String?> getCountryCode(double lat, double lng) async {
+    try {
+      final placemarks = await placemarkFromCoordinates(lat, lng);
+      if (placemarks.isEmpty) return null;
+      final countryCode = placemarks.first.isoCountryCode?.trim().toUpperCase();
+      return countryCode == null || countryCode.isEmpty ? null : countryCode;
+    } catch (error) {
+      debugPrint('Error fetching country code: $error');
+      return null;
+    }
+  }
+
   static Future<String?> getLocationName(double lat, double lng,
       {AppLanguage? language}) async {
     try {

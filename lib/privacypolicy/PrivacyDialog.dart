@@ -49,17 +49,19 @@ class PrivacyDialog extends ConsumerWidget {
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: const [
                       _SectionTitle("Effective Date"),
-                      _BodyText("30 March 2026"),
+                      _BodyText("24 September 2026"),
                       SizedBox(height: 12),
                       _SectionTitle("Overview"),
                       _BodyText(
-                          "SurveyCam respects your privacy and is committed to protecting your personal data. This app is designed to function without collecting or storing user data externally."),
+                          "SurveyCam keeps your photos, videos, projects, and templates on your device. Optional advertising and subscription services may process limited data as described below."),
                       SizedBox(height: 12),
                       _SectionTitle("1. Information We Access"),
                       _Bullet("Camera – Capture photos and videos"),
                       _Bullet("Location (GPS) – Add geo-tagging"),
                       _Bullet("Storage – Save media locally"),
                       _Bullet("Notifications – Processing status updates"),
+                      _Bullet(
+                          "Approximate country from your current GPS location – Decide whether rewarded-ad access is available in India"),
                       _Bullet(
                           "Background Service – Ensure media processing completes"),
                       SizedBox(height: 12),
@@ -70,15 +72,15 @@ class PrivacyDialog extends ConsumerWidget {
                       _Bullet(
                           "Process watermarks in the background for reliability"),
                       _BodyText(
-                          "We do NOT use your data for advertising, tracking, or analytics."),
+                          "Your captured media is not used for advertising. If you choose to watch a rewarded ad, Google Mobile Ads may process device identifiers, IP address, ad interactions, diagnostics, and consent choices to provide and measure ads."),
                       SizedBox(height: 12),
                       _SectionTitle("3. Data Sharing"),
                       _BodyText(
-                          "We do NOT share, sell, or transfer your data. All data remains on your device unless you choose to share it."),
+                          "We do not sell your captured media. Photos and videos remain on your device unless you choose to share them. Limited advertising data may be processed by Google AdMob, and purchase information may be processed by Google Play and SurveyCam's entitlement verification service."),
                       SizedBox(height: 12),
                       _SectionTitle("4. Data Security"),
                       _BodyText(
-                          "We do not store any data on external servers. Your data stays securely on your device."),
+                          "Captured media stays on your device. Subscription verification sends a Google Play purchase token to SurveyCam's secure verification service; it does not upload your photos or videos."),
                       SizedBox(height: 12),
                       _SectionTitle("5. Permissions"),
                       _Bullet("Camera access"),
@@ -88,7 +90,11 @@ class PrivacyDialog extends ConsumerWidget {
                       _Bullet("Foreground Service access"),
                       SizedBox(height: 12),
                       _SectionTitle("6. Third-Party Services"),
-                      _BodyText("No third-party services are used."),
+                      _Bullet("Google AdMob – Optional rewarded advertising"),
+                      _Bullet(
+                          "Google User Messaging Platform – Advertising consent choices"),
+                      _Bullet(
+                          "Google Play Billing – Subscription purchase and restore"),
                       SizedBox(height: 12),
                       _SectionTitle("7. Children's Privacy"),
                       _BodyText(
@@ -97,6 +103,8 @@ class PrivacyDialog extends ConsumerWidget {
                       _SectionTitle("8. Your Control"),
                       _Bullet("You can deny permissions anytime"),
                       _Bullet("You can delete stored data anytime"),
+                      _Bullet(
+                          "You can decline a rewarded ad and choose SurveyCam Pro instead"),
                       SizedBox(height: 12),
                       _SectionTitle("9. Changes"),
                       _BodyText(

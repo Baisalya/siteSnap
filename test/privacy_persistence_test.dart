@@ -45,10 +45,17 @@ void main() {
 
       final prefs = await SharedPreferences.getInstance();
       expect(prefs.getBool('privacyAccepted'), true);
+      expect(
+        prefs.getInt('privacyPolicyVersion'),
+        PrivacyNotifier.currentPolicyVersion,
+      );
     });
 
     test('State loads true if already accepted in SharedPreferences', () async {
-      SharedPreferences.setMockInitialValues({'privacyAccepted': true});
+      SharedPreferences.setMockInitialValues({
+        'privacyAccepted': true,
+        'privacyPolicyVersion': PrivacyNotifier.currentPolicyVersion,
+      });
 
       final newContainer = ProviderContainer();
       addTearDown(newContainer.dispose);
@@ -59,8 +66,26 @@ void main() {
       expect(newContainer.read(privacyProvider), true);
     });
 
+    test('older accepted policy is shown again after a policy update',
+        () async {
+      SharedPreferences.setMockInitialValues({
+        'privacyAccepted': true,
+        'privacyPolicyVersion': PrivacyNotifier.currentPolicyVersion - 1,
+      });
+
+      final newContainer = ProviderContainer();
+      addTearDown(newContainer.dispose);
+      newContainer.read(privacyProvider.notifier);
+      await pumpEventQueue();
+
+      expect(newContainer.read(privacyProvider), false);
+    });
+
     test('resetPolicy removes value and sets state to false', () async {
-      SharedPreferences.setMockInitialValues({'privacyAccepted': true});
+      SharedPreferences.setMockInitialValues({
+        'privacyAccepted': true,
+        'privacyPolicyVersion': PrivacyNotifier.currentPolicyVersion,
+      });
       final newContainer = ProviderContainer();
       addTearDown(newContainer.dispose);
 
@@ -74,6 +99,7 @@ void main() {
 
       final prefs = await SharedPreferences.getInstance();
       expect(prefs.getBool('privacyAccepted'), null);
+      expect(prefs.getInt('privacyPolicyVersion'), null);
     });
   });
 

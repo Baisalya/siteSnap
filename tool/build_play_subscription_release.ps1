@@ -39,7 +39,8 @@ try {
         '--dart-define=SURVEYCAM_PRO_PRODUCT_ID=surveycam_pro',
         '--dart-define=SURVEYCAM_PRO_BASE_PLAN_ID=annual199',
         '--dart-define=SURVEYCAM_PRO_OFFER_ID=launch-1y-free',
-        '--dart-define=SURVEYCAM_PRO_LAUNCH_OFFER_ENDS_AT=2027-02-11T23:59:59+05:30'
+        '--dart-define=SURVEYCAM_PRO_LAUNCH_OFFER_ENDS_AT=2027-02-11T23:59:59+05:30',
+        '--dart-define=SURVEYCAM_ADMOB_REWARDED_ID=ca-app-pub-1529558529658186/7575240208'
     )
 
     $bundlePath = (Resolve-Path -LiteralPath $bundleRelativePath).Path

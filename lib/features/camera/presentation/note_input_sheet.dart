@@ -1,8 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:surveycam/core/monetization/premium_feature.dart';
+import 'package:surveycam/core/monetization/premium_access_gate.dart';
 import 'package:surveycam/core/monetization/premium_policy.dart';
-import 'package:surveycam/core/monetization/pro_upgrade_screen.dart';
 import 'package:surveycam/core/services/location_service.dart';
 import 'package:surveycam/features/camera/presentation/camera_settings_provider.dart';
 import 'package:surveycam/features/overlay/domain/WatermarkPosition.dart';
@@ -755,13 +755,17 @@ class _NoteInputSheetState extends ConsumerState<NoteInputSheet> {
           const SizedBox(width: 10),
           const Expanded(
             child: Text(
-              'Saved note templates are included with SurveyCam Pro.',
+              'Unlock saved templates with a rewarded ad or SurveyCam Pro.',
               style: TextStyle(color: Colors.white70, fontSize: 12),
             ),
           ),
           TextButton(
-            onPressed: () => showProUpgrade(context),
-            child: const Text('View Pro'),
+            onPressed: () => requestPremiumFeatureAccess(
+              context: context,
+              ref: ref,
+              feature: PremiumFeature.savedTemplates,
+            ),
+            child: const Text('Unlock'),
           ),
         ],
       ),

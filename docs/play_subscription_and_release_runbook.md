@@ -49,6 +49,30 @@ flutter test --no-pub
 The app reads the title, trial phase, renewal price, and currency directly from
 Google Play. Do not hardcode the displayed worldwide price.
 
+## India rewarded ads
+
+SurveyCam uses an explicit rewarded-ad choice for non-Pro users whose current
+GPS country resolves to India. Other countries remain subscription-only. If
+country or ad consent cannot be verified, the app fails closed to the Pro
+option. Never replace this flow with surprise interstitials on camera launch,
+the shutter, or navigation.
+
+| Item | Required value |
+|---|---|
+| AdMob Android app ID | `ca-app-pub-1529558529658186~9917498367` |
+| Rewarded ad unit | `ca-app-pub-1529558529658186/7575240208` |
+| Debug ad unit | Google's rewarded test unit, selected automatically in debug builds |
+
+Before Closed testing, complete these console items:
+
+1. In AdMob **Privacy & messaging**, publish the required consent message.
+2. In Play Console **App content → Ads**, declare that the app contains ads.
+3. Update Play Console **Data safety** for Google Mobile Ads data handling.
+4. Test reward earned, early dismissal, no-fill/offline, consent, Pro ad bypass,
+   and India/non-India behavior on Play-installed accounts.
+5. Once the production Play listing is searchable, link the SurveyCam AdMob app
+   to that listing and complete AdMob app readiness review.
+
 ## Secure purchase verification
 
 Production subscription builds require an HTTPS endpoint passed as
@@ -106,6 +130,7 @@ Other optional defines are:
 SURVEYCAM_PRO_PRODUCT_ID=surveycam_pro
 SURVEYCAM_PRO_BASE_PLAN_ID=annual199
 SURVEYCAM_PRO_OFFER_ID=launch-1y-free
+SURVEYCAM_ADMOB_REWARDED_ID=ca-app-pub-1529558529658186/7575240208
 SURVEYCAM_REQUIRED_UPDATE_GAP=2
 SURVEYCAM_REQUIRED_UPDATE_PRIORITY=4
 SURVEYCAM_REQUIRED_UPDATE_STALENESS_DAYS=14
@@ -144,7 +169,8 @@ flutter build appbundle --release `
   --dart-define=SURVEYCAM_PRO_PRODUCT_ID=surveycam_pro `
   --dart-define=SURVEYCAM_PRO_BASE_PLAN_ID=annual199 `
   --dart-define=SURVEYCAM_PRO_OFFER_ID=launch-1y-free `
-  --dart-define=SURVEYCAM_PRO_LAUNCH_OFFER_ENDS_AT=2027-02-11T23:59:59+05:30
+  --dart-define=SURVEYCAM_PRO_LAUNCH_OFFER_ENDS_AT=2027-02-11T23:59:59+05:30 `
+  --dart-define=SURVEYCAM_ADMOB_REWARDED_ID=ca-app-pub-1529558529658186/7575240208
 ```
 
 Never include the Google service-account JSON or private key in this command,
@@ -156,7 +182,8 @@ URL.
 1. Upload the secure AAB to **Closed testing → Alpha** and send it for review.
 2. Install through the closed-test Play link with a license tester.
 3. Verify purchase, cancellation, pending payment, restore, reinstall, expiry,
-   grace period, and an offline/server-error retry.
+   grace period, an offline/server-error retry, rewarded access, early ad
+   dismissal, no-fill, Pro ad bypass, and India/non-India behavior.
 4. Keep subscription `surveycam_pro`, base plan `annual199`, and offer
    `launch-1y-free` active.
 5. From the tested Alpha release choose **Promote release → Production**. Promote

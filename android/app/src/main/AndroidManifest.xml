@@ -35,6 +35,10 @@
         android:requestLegacyExternalStorage="true"
         >
 
+        <meta-data
+            android:name="com.google.android.gms.ads.APPLICATION_ID"
+            android:value="ca-app-pub-1529558529658186~9917498367" />
+
         <activity
             android:name=".MainActivity"
             android:exported="true"

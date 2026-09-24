@@ -4,8 +4,8 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import 'package:surveycam/core/monetization/premium_feature.dart';
+import 'package:surveycam/core/monetization/premium_access_gate.dart';
 import 'package:surveycam/core/monetization/premium_policy.dart';
-import 'package:surveycam/core/monetization/pro_upgrade_screen.dart';
 import 'project_provider.dart';
 
 Future<void> showProjectPickerSheet(BuildContext context) {
@@ -472,11 +472,11 @@ class _ProjectAssignmentSheetState
   }
 }
 
-class _ProjectsProGate extends StatelessWidget {
+class _ProjectsProGate extends ConsumerWidget {
   const _ProjectsProGate();
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
     return Container(
       padding: const EdgeInsets.fromLTRB(14, 10, 8, 10),
       decoration: BoxDecoration(
@@ -493,13 +493,17 @@ class _ProjectsProGate extends StatelessWidget {
           const SizedBox(width: 10),
           const Expanded(
             child: Text(
-              'Project folders are included with SurveyCam Pro.',
+              'Unlock project folders with a rewarded ad or SurveyCam Pro.',
               style: TextStyle(color: Colors.white70, fontSize: 12),
             ),
           ),
           TextButton(
-            onPressed: () => showProUpgrade(context),
-            child: const Text('View Pro'),
+            onPressed: () => requestPremiumFeatureAccess(
+              context: context,
+              ref: ref,
+              feature: PremiumFeature.projectFolders,
+            ),
+            child: const Text('Unlock'),
           ),
         ],
       ),

@@ -4,8 +4,9 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_riverpod/legacy.dart';
 import 'package:share_plus/share_plus.dart';
 import 'package:surveycam/core/monetization/premium_feature.dart';
+import 'package:surveycam/core/monetization/premium_access_gate.dart';
 import 'package:surveycam/core/monetization/premium_policy.dart';
-import 'package:surveycam/core/monetization/pro_upgrade_screen.dart';
+import 'package:surveycam/core/monetization/rewarded_feature_access.dart';
 import 'package:surveycam/core/permissions/permission_service.dart';
 import 'package:surveycam/core/services/pdf_proof_report_service.dart';
 import 'package:surveycam/core/utils/thumbnail_utils.dart';
@@ -93,8 +94,12 @@ class _GalleryFolderScreenState extends ConsumerState<GalleryFolderScreen>
     final canUsePdfReports =
         ref.read(premiumPolicyProvider).canUse(PremiumFeature.pdfReports);
     if (!canUsePdfReports) {
-      await showProUpgrade(context);
-      return;
+      final unlocked = await requestPremiumFeatureAccess(
+        context: context,
+        ref: ref,
+        feature: PremiumFeature.pdfReports,
+      );
+      if (!unlocked || !mounted) return;
     }
 
     final selectedFiles = selectedImages.toList()
@@ -113,6 +118,7 @@ class _GalleryFolderScreenState extends ConsumerState<GalleryFolderScreen>
 
     if (details != null && mounted) {
       await _exportSelectedPdf(details);
+      consumeRewardedFeature(ref, PremiumFeature.pdfReports);
     }
   }
 
