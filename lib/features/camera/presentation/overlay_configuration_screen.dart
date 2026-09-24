@@ -734,6 +734,8 @@ class _OverlayConfigurationScreenState
         const SizedBox(height: 18),
         _buildAutoFetchToggle(),
         const SizedBox(height: 12),
+        _buildMirrorPhotoToggle(),
+        const SizedBox(height: 12),
         _buildMirrorVideoToggle(),
       ],
     );
@@ -1096,6 +1098,20 @@ class _OverlayConfigurationScreenState
       value: settings.autoFetchLocation,
       activeColor: Colors.blueAccent,
       onChanged: ref.read(cameraSettingsProvider.notifier).setAutoFetchLocation,
+    );
+  }
+
+  Widget _buildMirrorPhotoToggle() {
+    final settings = ref.watch(cameraSettingsProvider);
+
+    return _buildToggleRow(
+      icon: Icons.flip_rounded,
+      iconColor: Colors.cyanAccent,
+      title: "Mirror Front Photo",
+      subtitle: "Save selfies mirrored instead of camera-normal",
+      value: settings.mirrorFrontPhoto,
+      activeColor: Colors.cyanAccent,
+      onChanged: ref.read(cameraSettingsProvider.notifier).setMirrorFrontPhoto,
     );
   }
 

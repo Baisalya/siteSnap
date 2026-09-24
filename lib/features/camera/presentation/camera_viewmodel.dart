@@ -1433,10 +1433,13 @@ class CameraViewModel extends StateNotifier<CameraState>
     unawaited(HapticFeedback.mediumImpact());
 
     final deviceOrientation = ref.read(deviceOrientationProvider);
+    final captureMirror = state.currentLens == CameraLensType.front &&
+        ref.read(cameraSettingsProvider).mirrorFrontPhoto;
     state = state.copyWith(
       isCapturing: true,
       captureOrientation: deviceOrientation,
       captureLens: state.currentLens,
+      captureMirror: captureMirror,
     );
 
     try {
@@ -1508,12 +1511,15 @@ class CameraViewModel extends StateNotifier<CameraState>
     final overlaySettings = ref.read(effectiveOverlaySettingsProvider);
     final deviceOrientation = ref.read(deviceOrientationProvider);
     final captureLens = state.currentLens;
+    final captureMirror = captureLens == CameraLensType.front &&
+        ref.read(cameraSettingsProvider).mirrorFrontPhoto;
     final aspectRatio = state.aspectRatio;
 
     state = state.copyWith(
       isCapturing: true,
       captureOrientation: deviceOrientation,
       captureLens: captureLens,
+      captureMirror: captureMirror,
     );
 
     try {
@@ -1528,7 +1534,7 @@ class CameraViewModel extends StateNotifier<CameraState>
             showOverlay: true,
             showWatermark: true,
             aspectRatio: aspectRatio,
-            mirror: captureLens == CameraLensType.front,
+            mirror: captureMirror,
             settingsOverride: overlaySettings,
           );
 

@@ -5,19 +5,23 @@ import 'package:surveycam/features/overlay/presentation/overlay_preview_state.da
 
 class CameraSettings {
   final bool autoFetchLocation;
+  final bool mirrorFrontPhoto;
   final bool mirrorFrontVideo;
 
   CameraSettings({
     this.autoFetchLocation = true,
+    this.mirrorFrontPhoto = true,
     this.mirrorFrontVideo = false,
   });
 
   CameraSettings copyWith({
     bool? autoFetchLocation,
+    bool? mirrorFrontPhoto,
     bool? mirrorFrontVideo,
   }) {
     return CameraSettings(
       autoFetchLocation: autoFetchLocation ?? this.autoFetchLocation,
+      mirrorFrontPhoto: mirrorFrontPhoto ?? this.mirrorFrontPhoto,
       mirrorFrontVideo: mirrorFrontVideo ?? this.mirrorFrontVideo,
     );
   }
@@ -25,16 +29,22 @@ class CameraSettings {
 
 class CameraSettingsNotifier extends StateNotifier<CameraSettings> {
   final Ref ref;
+  late final Future<void> ready;
+
   CameraSettingsNotifier(this.ref) : super(CameraSettings()) {
-    _loadSettings();
+    ready = _loadSettings();
   }
 
   Future<void> _loadSettings() async {
     final prefs = await SharedPreferences.getInstance();
     final autoFetch = prefs.getBool('auto_fetch_location') ?? true;
+    // Keep the legacy selfie-photo behavior for existing users: front photos
+    // are mirrored unless they explicitly choose a normal/non-mirrored save.
+    final mirrorFrontPhoto = prefs.getBool('mirror_front_photo') ?? true;
     final mirrorFrontVideo = prefs.getBool('mirror_front_video') ?? false;
     state = state.copyWith(
       autoFetchLocation: autoFetch,
+      mirrorFrontPhoto: mirrorFrontPhoto,
       mirrorFrontVideo: mirrorFrontVideo,
     );
   }
@@ -58,6 +68,12 @@ class CameraSettingsNotifier extends StateNotifier<CameraSettings> {
       ref.read(overlayPreviewProvider.notifier).state =
           overlay.copyWith(note: extraNote.isEmpty ? '' : "\n$extraNote");
     }
+  }
+
+  Future<void> setMirrorFrontPhoto(bool value) async {
+    state = state.copyWith(mirrorFrontPhoto: value);
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool('mirror_front_photo', value);
   }
 
   Future<void> setMirrorFrontVideo(bool value) async {

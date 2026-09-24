@@ -11,7 +11,6 @@ import 'package:share_plus/share_plus.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:path/path.dart' as p;
 import 'package:surveycam/features/camera/data/CameraState.dart';
-import 'package:surveycam/features/camera/domain/camera_lens_type.dart';
 import 'package:surveycam/features/overlay/presentation/overlay_settings_provider.dart';
 
 import 'package:surveycam/features/overlay/presentation/captured_overlay_provider.dart';
@@ -62,7 +61,7 @@ class _ImagePreviewScreenState extends ConsumerState<ImagePreviewScreen> {
   PictureInfo? _svgPicture;
   DeviceOrientation? _captureOrientation;
   CameraAspectRatio? _captureAspectRatio;
-  CameraLensType? _captureLens;
+  bool _captureMirror = false;
   Timer? _prepareSaveTimer;
   String? _preparedSaveKey;
   String?
@@ -173,7 +172,7 @@ class _ImagePreviewScreenState extends ConsumerState<ImagePreviewScreen> {
     _captureOrientation =
         cameraState.captureOrientation ?? cameraState.orientation;
     _captureAspectRatio = cameraState.aspectRatio;
-    _captureLens = cameraState.captureLens ?? cameraState.currentLens;
+    _captureMirror = cameraState.captureMirror;
     _aspectRatio = _captureAspectRatio!.forOrientation(_captureOrientation!);
   }
 
@@ -198,8 +197,7 @@ class _ImagePreviewScreenState extends ConsumerState<ImagePreviewScreen> {
         cameraState.captureOrientation ??
         cameraState.orientation;
     final aspectRatio = _captureAspectRatio ?? cameraState.aspectRatio;
-    final mirror =
-        (_captureLens ?? cameraState.captureLens) == CameraLensType.front;
+    final mirror = _captureMirror;
 
     return jsonEncode({
       'path': widget.originalFile.path,
@@ -244,8 +242,7 @@ class _ImagePreviewScreenState extends ConsumerState<ImagePreviewScreen> {
           cameraState.captureOrientation ??
           cameraState.orientation;
       final aspectRatio = _captureAspectRatio ?? cameraState.aspectRatio;
-      final mirror =
-          (_captureLens ?? cameraState.captureLens) == CameraLensType.front;
+      final mirror = _captureMirror;
 
       _preparedSaveKey = signature;
       _preparedSaveFuture = ref
@@ -298,8 +295,7 @@ class _ImagePreviewScreenState extends ConsumerState<ImagePreviewScreen> {
       position: live.position,
     );
 
-    final isMirror =
-        (_captureLens ?? cameraState.captureLens) == CameraLensType.front;
+    final isMirror = _captureMirror;
     final orientation = _captureOrientation ??
         cameraState.captureOrientation ??
         cameraState.orientation;
@@ -395,8 +391,7 @@ class _ImagePreviewScreenState extends ConsumerState<ImagePreviewScreen> {
         position: live.position,
       );
 
-      final isMirror =
-          (_captureLens ?? cameraState.captureLens) == CameraLensType.front;
+      final isMirror = _captureMirror;
       final orientation = _captureOrientation ??
           cameraState.captureOrientation ??
           cameraState.orientation;
@@ -531,9 +526,7 @@ class _ImagePreviewScreenState extends ConsumerState<ImagePreviewScreen> {
                                           cameraState.orientation,
                                       aspectRatio: _captureAspectRatio ??
                                           cameraState.aspectRatio,
-                                      mirror: (_captureLens ??
-                                              cameraState.captureLens) ==
-                                          CameraLensType.front,
+                                      mirror: _captureMirror,
                                       svgPicture: _svgPicture,
                                       customLogo: _customLogoImage,
                                       settings: settings,
