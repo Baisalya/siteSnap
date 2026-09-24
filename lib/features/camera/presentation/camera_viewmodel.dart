@@ -17,6 +17,7 @@ import 'package:surveycam/core/services/recording_storage_guard.dart';
 import 'package:surveycam/core/services/video_processing_job.dart';
 import 'package:surveycam/core/utils/gallery_saver.dart';
 import 'package:surveycam/core/utils/thumbnail_utils.dart';
+import 'package:surveycam/features/camera/application/latest_value_coalescer.dart';
 import 'package:surveycam/features/camera/application/recording_session_coordinator.dart';
 import 'package:surveycam/features/camera/data/CameraState.dart';
 import 'package:surveycam/features/camera/domain/camera_lens_type.dart';
@@ -54,6 +55,10 @@ class CameraViewModel extends StateNotifier<CameraState>
   double _currentExposure = 0.0;
   double _minExposure = 0.0;
   double _maxExposure = 0.0;
+  final LatestValueCoalescer<double> _exposureUpdates =
+      LatestValueCoalescer<double>();
+  CameraController? _exposureController;
+  double? _lastSubmittedExposure;
 
   bool _isCameraStable = false;
   bool _isInitializing = false;
@@ -721,24 +726,84 @@ class CameraViewModel extends StateNotifier<CameraState>
 
   // ================= EXPOSURE =================
 
-  Future<void> changeExposure(double delta) async {
+  void changeExposure(double delta) {
     final controller = state.controller;
-    if (controller == null || !controller.value.isInitialized) return;
+    if (controller == null ||
+        !controller.value.isInitialized ||
+        state.isCapturing) {
+      return;
+    }
+
+    final target =
+        (_currentExposure + delta).clamp(_minExposure, _maxExposure).toDouble();
+    if ((target - _currentExposure).abs() < 0.0005) return;
+
+    _prepareExposureController(controller);
+    _currentExposure = target;
+
+    // Keep the HUD attached to the finger instead of waiting for CameraX.
+    state = state.copyWith(exposure: target);
+
+    // Do not append every drag event to the repository queue. While one native
+    // request is running, this replaces the pending request with the newest
+    // target, so shutter capture can never sit behind a full gesture history.
+    _exposureUpdates.submit(
+      target,
+      (value) => _applyExposureTarget(controller, value),
+    );
+  }
+
+  void _prepareExposureController(CameraController controller) {
+    if (identical(_exposureController, controller)) return;
+
+    _exposureUpdates.cancelPending();
+    _exposureController = controller;
+    _lastSubmittedExposure = state.exposure;
+  }
+
+  Future<void> _applyExposureTarget(
+    CameraController controller,
+    double target,
+  ) async {
+    if (!_isActiveController(controller)) return;
+    if (identical(_exposureController, controller) &&
+        _lastSubmittedExposure != null &&
+        (target - _lastSubmittedExposure!).abs() < 0.0005) {
+      return;
+    }
 
     try {
-      _currentExposure =
-          (_currentExposure + delta).clamp(_minExposure, _maxExposure);
-
-      await _safeCameraCommand(
-        controller,
-        'exposure offset',
-        () => controller.setExposureOffset(_currentExposure),
-      );
-
-      state = state.copyWith(exposure: _currentExposure);
+      await ref.read(cameraRepositoryProvider).runExclusive(() async {
+        if (!_isActiveController(controller)) return;
+        await controller.setExposureOffset(target);
+      });
+      if (_isActiveController(controller) &&
+          identical(_exposureController, controller)) {
+        _lastSubmittedExposure = target;
+      }
     } catch (e) {
-      debugPrint("Exposure error: $e");
+      if (_isActiveController(controller)) {
+        debugPrint('Exposure update skipped: $e');
+      }
     }
+  }
+
+  Future<void> _settleExposureForCapture(
+    CameraController controller,
+  ) async {
+    _prepareExposureController(controller);
+    final target =
+        _currentExposure.clamp(_minExposure, _maxExposure).toDouble();
+    await _exposureUpdates.flush(
+      target,
+      (value) => _applyExposureTarget(controller, value),
+    );
+  }
+
+  void _resetExposurePipeline() {
+    _exposureUpdates.cancelPending();
+    _exposureController = null;
+    _lastSubmittedExposure = null;
   }
 
   // ================= ZOOM =================
@@ -1463,8 +1528,13 @@ class CameraViewModel extends StateNotifier<CameraState>
         }
       }
 
-      // Actual capture - native speed is controlled by the camera plugin/driver
-      final path = await repo.takePicture().timeout(_photoCaptureTimeout);
+      // Collapse any remaining gesture update to one final exposure command,
+      // then capture under the existing end-to-end timeout.
+      final path = await (() async {
+        await _settleExposureForCapture(controller);
+        return repo.takePicture();
+      })()
+          .timeout(_photoCaptureTimeout);
 
       unawaited(HapticFeedback.lightImpact());
       return path;
@@ -1524,7 +1594,11 @@ class CameraViewModel extends StateNotifier<CameraState>
 
     try {
       final repo = ref.read(cameraRepositoryProvider);
-      final path = await repo.takePicture().timeout(_photoCaptureTimeout);
+      final path = await (() async {
+        await _settleExposureForCapture(controller);
+        return repo.takePicture();
+      })()
+          .timeout(_photoCaptureTimeout);
       final originalFile = File(path);
 
       await ref.read(overlayViewModelProvider.notifier).saveCapturedImage(
@@ -2159,6 +2233,7 @@ class CameraViewModel extends StateNotifier<CameraState>
   void dispose() {
     _cancelScheduledZoomFrame();
     _zoomDriveGeneration++;
+    _resetExposurePipeline();
     WidgetsBinding.instance.removeObserver(this);
     _recordingSession.abort();
     _recordingCaptureOrientation = null;
