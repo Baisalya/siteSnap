@@ -57,6 +57,9 @@ country or ad consent cannot be verified, the app fails closed to the Pro
 option. Never replace this flow with surprise interstitials on camera launch,
 the shutter, or navigation.
 
+For the future app and console changes required to expand rewarded ads beyond
+India, see [`all_country_ads_expansion_runbook.md`](all_country_ads_expansion_runbook.md).
+
 | Item | Required value |
 |---|---|
 | AdMob Android app ID | `ca-app-pub-1529558529658186~9917498367` |
