@@ -8,6 +8,33 @@ users.
 For a shorter, non-technical Play Console checklist, see
 [`owner_play_console_guide.md`](owner_play_console_guide.md).
 
+## AI start here: choose one action
+
+Testing, AAB packaging, closed-track upload, and Production promotion are four
+separate actions. If the owner's current request does not already say which one
+is wanted, ask only which action to perform:
+
+1. QA/testing only.
+2. Build a secure subscription AAB only.
+3. Upload an existing AAB to Closed testing.
+4. Promote the exact tested Closed release to Production.
+
+Do not run analysis or the full test suite merely because an AAB is requested.
+When the owner says the current source has already been tested, build with the
+default packaging-only command and record that QA was reused. Run fresh QA only
+when explicitly requested, when source/dependency/build configuration changed
+after the recorded QA, or when no usable QA evidence exists and the owner
+chooses to run it. Upload and promotion reuse the existing artifact and must
+never trigger a rebuild.
+
+QA-only commands:
+
+```powershell
+flutter pub get
+flutter analyze --no-pub
+flutter test --no-pub
+```
+
 ## Play Console subscription
 
 | Item | Required value | Notes |
@@ -93,7 +120,15 @@ sideload APK. Increment the `+buildNumber` in `pubspec.yaml`, then run:
 .\tool\build_play_subscription_release.ps1
 ```
 
-The script runs analysis and tests before creating:
+The default command restores dependencies, builds the AAB, and records its
+size/hash without running the full QA suite. To request fresh QA in the same
+invocation, use:
+
+```powershell
+.\tool\build_play_subscription_release.ps1 -RunQualityChecks
+```
+
+Both commands create:
 
 ```text
 build/app/outputs/bundle/release/app-release.aab
@@ -135,6 +170,10 @@ charge and the future yearly renewal, and are charged automatically by Google
 after the trial unless they cancel. Ineligible customers see the Store-provided
 paid price. SurveyCam opens checkout when the user selects a locked Pro feature;
 it does not force a purchase dialog at app launch.
+
+Production promotion is a Play Console action only. Do not run Flutter tests or
+the AAB build script during promotion; use the exact Alpha artifact and its
+recorded version/hash.
 
 ## Safe rollout order
 

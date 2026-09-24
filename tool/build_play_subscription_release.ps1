@@ -1,3 +1,8 @@
+[CmdletBinding()]
+param(
+    [switch] $RunQualityChecks
+)
+
 $ErrorActionPreference = 'Stop'
 
 $repositoryRoot = (Resolve-Path -LiteralPath (Join-Path $PSScriptRoot '..')).Path
@@ -18,8 +23,12 @@ function Invoke-FlutterReleaseStep {
 Push-Location $repositoryRoot
 try {
     Invoke-FlutterReleaseStep -Arguments @('pub', 'get')
-    Invoke-FlutterReleaseStep -Arguments @('analyze', '--no-pub')
-    Invoke-FlutterReleaseStep -Arguments @('test', '--no-pub')
+    if ($RunQualityChecks) {
+        Invoke-FlutterReleaseStep -Arguments @('analyze', '--no-pub')
+        Invoke-FlutterReleaseStep -Arguments @('test', '--no-pub')
+    } else {
+        Write-Host 'Quality checks skipped. This command is packaging-only; use -RunQualityChecks for fresh analyze/test.' -ForegroundColor Yellow
+    }
     Invoke-FlutterReleaseStep -Arguments @(
         'build',
         'appbundle',
@@ -40,6 +49,7 @@ try {
     Write-Host "Google Play AAB: $bundlePath" -ForegroundColor Green
     Write-Host "Size: $($bundle.Length) bytes"
     Write-Host "SHA-256: $($hash.Hash)"
+    Write-Host "Fresh quality checks: $($RunQualityChecks.IsPresent)"
 } finally {
     Pop-Location
 }
