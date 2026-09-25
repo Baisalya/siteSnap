@@ -10,16 +10,16 @@ For a shorter, non-technical Play Console checklist, see
 
 ## AI start here: choose one action
 
-Testing, AAB packaging, closed-track upload, and Production promotion are four
-separate actions. If the owner's current request does not already say which one
-is wanted, ask only which action to perform:
+If the owner's current request does not already say what to do, ask which of
+these three jobs is wanted:
 
 1. QA/testing only.
-2. Build a secure subscription AAB only.
-3. Upload an existing AAB to Closed testing.
-4. Promote the exact tested Closed release to Production.
+2. Generate the secure subscription AAB only.
+3. Store action only: upload an existing AAB to Closed testing or promote the
+   exact tested Closed release to Production.
 
-Do not run analysis or the full test suite merely because an AAB is requested.
+The AAB command never runs analysis or the test suite, and the QA command never
+generates an AAB.
 When the owner says the current source has already been tested, build with the
 default packaging-only command and record that QA was reused. Run fresh QA only
 when explicitly requested, when source/dependency/build configuration changed
@@ -148,15 +148,11 @@ sideload APK. Increment the `+buildNumber` in `pubspec.yaml`, then run:
 .\tool\build_play_subscription_release.ps1
 ```
 
-The default command restores dependencies, builds the AAB, and records its
-size/hash without running the full QA suite. To request fresh QA in the same
-invocation, use:
+The command restores dependencies, builds the AAB, and records its size/hash.
+It never runs `flutter analyze` or `flutter test`. Run the QA-only commands in
+the earlier section as a separate action when fresh QA is requested.
 
-```powershell
-.\tool\build_play_subscription_release.ps1 -RunQualityChecks
-```
-
-Both commands create:
+The build command creates:
 
 ```text
 build/app/outputs/bundle/release/app-release.aab

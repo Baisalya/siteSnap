@@ -61,9 +61,11 @@ The recommended consent setup for a worldwide launch is:
    every intended country.
 6. Confirm the Play subscription base plan remains active in those countries;
    Pro must stay available as the ad-free option.
-7. Run `flutter analyze`, `flutter test`, and build a new secure AAB with
-   `tool/build_play_subscription_release.ps1 -RunQualityChecks`.
-8. Upload the AAB to Closed testing and test it using Play-installed accounts
+7. If fresh QA is requested, run `flutter analyze` and `flutter test` as a
+   separate QA-only action.
+8. Build a new secure AAB with `tool/build_play_subscription_release.ps1`.
+   This packaging command never runs the test suite.
+9. Upload the AAB to Closed testing and test it using Play-installed accounts
    in representative regions before promoting that exact artifact.
 
 Do not use Google Play Billing's country API for advertising decisions. Keep
@@ -129,4 +131,3 @@ non-regulated comparison market:
    verification, restoration, and conversion metrics.
 6. Pause expansion or remove countries from the remote allowlist if metrics or
    policy compliance regress.
-
