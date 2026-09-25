@@ -84,6 +84,7 @@ class BillingController extends StateNotifier<BillingState> {
       state = state.copyWith(
         isPro: true,
         entitlementSource: EntitlementSource.cached,
+        entitlementExpiresAt: cached?.expiresAt,
       );
     }
 
@@ -340,6 +341,7 @@ class BillingController extends StateNotifier<BillingState> {
               isPro: true,
               purchasePending: false,
               entitlementSource: EntitlementSource.playStore,
+              entitlementExpiresAt: verification.expiresAt,
               message: purchase.status == StorePurchaseStatus.restored
                   ? 'SurveyCam Pro restored.'
                   : 'SurveyCam Pro activated.',
@@ -361,6 +363,7 @@ class BillingController extends StateNotifier<BillingState> {
       state = state.copyWith(
         isPro: false,
         entitlementSource: EntitlementSource.none,
+        clearEntitlementExpiresAt: true,
       );
     }
   }

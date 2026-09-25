@@ -33,6 +33,10 @@ void main() {
 
     expect(controller.state.isPro, isTrue);
     expect(controller.state.entitlementSource, EntitlementSource.playStore);
+    expect(
+      controller.state.entitlementExpiresAt,
+      _now.add(const Duration(days: 365)),
+    );
     expect(client.completed, [purchase]);
     expect(storage.value?.isActive, isTrue);
     expect(storage.value?.verifiedAt, _now);

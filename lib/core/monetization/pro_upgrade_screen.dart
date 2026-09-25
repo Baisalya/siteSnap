@@ -13,7 +13,11 @@ Future<void> showProUpgrade(BuildContext context) {
 }
 
 class ProUpgradeScreen extends ConsumerWidget {
-  const ProUpgradeScreen({super.key});
+  const ProUpgradeScreen({super.key, this.billingOverride});
+
+  /// Allows deterministic previews and widget tests without connecting to
+  /// Google Play. Production callers leave this null.
+  final BillingState? billingOverride;
 
   static final Uri _manageSubscriptionUri = Uri.parse(
     'https://play.google.com/store/account/subscriptions'
@@ -23,10 +27,11 @@ class ProUpgradeScreen extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final billing = PremiumConfig.freeLaunchMode
-        ? const BillingState(isInitializing: false)
-        : ref.watch(billingControllerProvider);
-    final controller = PremiumConfig.freeLaunchMode
+    final BillingState billing = billingOverride ??
+        (PremiumConfig.freeLaunchMode
+            ? const BillingState(isInitializing: false)
+            : ref.watch(billingControllerProvider));
+    final controller = billingOverride != null || PremiumConfig.freeLaunchMode
         ? null
         : ref.read(billingControllerProvider.notifier);
     final product = billing.product;
@@ -68,26 +73,32 @@ class ProUpgradeScreen extends ConsumerWidget {
               trialLabel: trialLabel,
             ),
             const SizedBox(height: 18),
-            if (!billing.isPro && !PremiumConfig.freeLaunchMode)
+            if (billing.isPro)
+              _MembershipDetails(billing: billing, product: product)
+            else if (!PremiumConfig.freeLaunchMode)
               _PriceSummary(
                 product: product,
                 hasTrial: hasTrial,
                 trialLabel: trialLabel,
               ),
-            if (!billing.isPro && !PremiumConfig.freeLaunchMode)
+            if (billing.isPro || !PremiumConfig.freeLaunchMode)
               const SizedBox(height: 22),
-            const Text(
-              'Everything your field proof needs',
-              style: TextStyle(
+            Text(
+              billing.isPro
+                  ? 'Your Pro benefits'
+                  : 'Everything your field proof needs',
+              style: const TextStyle(
                 color: Colors.white,
                 fontSize: 19,
                 fontWeight: FontWeight.w800,
               ),
             ),
             const SizedBox(height: 6),
-            const Text(
-              'The camera and default white/black overlay colors stay free. Pro unlocks the professional workflow.',
-              style: TextStyle(
+            Text(
+              billing.isPro
+                  ? 'Every professional SurveyCam workflow below is unlocked for your account.'
+                  : 'The camera and default white/black overlay colors stay free. Pro unlocks the professional workflow.',
+              style: const TextStyle(
                 color: Color(0xFFAAB7C8),
                 fontSize: 13,
                 height: 1.45,
@@ -292,7 +303,7 @@ class _OfferHero extends StatelessWidget {
                     height: 1.45,
                   ),
                 ),
-                if (isLaunchOffer) ...[
+                if (isLaunchOffer && !billing.isPro) ...[
                   const SizedBox(height: 18),
                   _LaunchDeadline(deadline: PremiumConfig.launchOfferEndsAt),
                 ],
@@ -437,6 +448,215 @@ class _PriceSummary extends StatelessWidget {
                 ),
               ],
             ),
+    );
+  }
+}
+
+class _MembershipDetails extends StatelessWidget {
+  const _MembershipDetails({
+    required this.billing,
+    required this.product,
+  });
+
+  final BillingState billing;
+  final BillingProduct? product;
+
+  @override
+  Widget build(BuildContext context) {
+    final expiresAt = billing.entitlementExpiresAt?.toLocal();
+    final verification = switch (billing.entitlementSource) {
+      EntitlementSource.playStore => (
+          'Google Play verified',
+          'Your purchase was checked securely with Google Play.',
+        ),
+      EntitlementSource.cached => (
+          'Protected offline access',
+          'Using your most recently verified Pro entitlement.',
+        ),
+      EntitlementSource.none => (
+          'Pro access active',
+          'Subscription details are managed securely by Google Play.',
+        ),
+    };
+    final billingDetail = product == null
+        ? 'Pricing and renewal are managed in Google Play.'
+        : '${product!.renewalPrice} ${_renewalLabel(product!.renewalPeriod)}';
+
+    return Container(
+      key: const Key('pro-membership-details'),
+      padding: const EdgeInsets.all(17),
+      decoration: BoxDecoration(
+        color: const Color(0xFF101D2D),
+        borderRadius: BorderRadius.circular(22),
+        border: Border.all(color: const Color(0xFF31577B)),
+        boxShadow: [
+          BoxShadow(
+            color: const Color(0xFF1E8B70).withValues(alpha: 0.12),
+            blurRadius: 24,
+            offset: const Offset(0, 10),
+          ),
+        ],
+      ),
+      child: Column(
+        children: [
+          Row(
+            children: [
+              Container(
+                width: 42,
+                height: 42,
+                decoration: BoxDecoration(
+                  color: const Color(0xFF43D5A3).withValues(alpha: 0.12),
+                  borderRadius: BorderRadius.circular(13),
+                ),
+                child: const Icon(
+                  Icons.verified_rounded,
+                  color: Color(0xFF65E0B8),
+                  size: 24,
+                ),
+              ),
+              const SizedBox(width: 12),
+              const Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      'Membership details',
+                      style: TextStyle(
+                        color: Colors.white,
+                        fontSize: 16,
+                        fontWeight: FontWeight.w900,
+                      ),
+                    ),
+                    SizedBox(height: 2),
+                    Text(
+                      'SurveyCam Pro account',
+                      style: TextStyle(
+                        color: Color(0xFF8FA3BA),
+                        fontSize: 11.5,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              Container(
+                key: const Key('pro-membership-status'),
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                decoration: BoxDecoration(
+                  color: const Color(0xFF43D5A3).withValues(alpha: 0.13),
+                  borderRadius: BorderRadius.circular(99),
+                  border: Border.all(
+                    color: const Color(0xFF43D5A3).withValues(alpha: 0.34),
+                  ),
+                ),
+                child: const Text(
+                  'ACTIVE',
+                  style: TextStyle(
+                    color: Color(0xFF74E7C1),
+                    fontSize: 9.5,
+                    letterSpacing: 0.8,
+                    fontWeight: FontWeight.w900,
+                  ),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 16),
+          _MembershipRow(
+            icon: Icons.workspace_premium_outlined,
+            label: 'Plan',
+            value: _planLabel(product?.renewalPeriod),
+            detail: billingDetail,
+          ),
+          const _MembershipDivider(),
+          _MembershipRow(
+            icon: Icons.security_rounded,
+            label: 'Verification',
+            value: verification.$1,
+            detail: verification.$2,
+          ),
+          const _MembershipDivider(),
+          _MembershipRow(
+            icon: Icons.event_available_rounded,
+            label: expiresAt == null ? 'Access' : 'Current period',
+            value: expiresAt == null
+                ? 'Active on this account'
+                : 'Active through ${_shortDate(expiresAt)}',
+            detail: 'Google Play controls renewal and cancellation.',
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _MembershipDivider extends StatelessWidget {
+  const _MembershipDivider();
+
+  @override
+  Widget build(BuildContext context) {
+    return const Padding(
+      padding: EdgeInsets.symmetric(vertical: 13),
+      child: Divider(height: 1, color: Color(0xFF253B52)),
+    );
+  }
+}
+
+class _MembershipRow extends StatelessWidget {
+  const _MembershipRow({
+    required this.icon,
+    required this.label,
+    required this.value,
+    required this.detail,
+  });
+
+  final IconData icon;
+  final String label;
+  final String value;
+  final String detail;
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Icon(icon, color: const Color(0xFF72A7FF), size: 20),
+        const SizedBox(width: 11),
+        Expanded(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                label.toUpperCase(),
+                style: const TextStyle(
+                  color: Color(0xFF73879E),
+                  fontSize: 9,
+                  letterSpacing: 0.8,
+                  fontWeight: FontWeight.w800,
+                ),
+              ),
+              const SizedBox(height: 3),
+              Text(
+                value,
+                style: const TextStyle(
+                  color: Colors.white,
+                  fontSize: 13.5,
+                  fontWeight: FontWeight.w800,
+                ),
+              ),
+              const SizedBox(height: 2),
+              Text(
+                detail,
+                style: const TextStyle(
+                  color: Color(0xFF8FA3BA),
+                  fontSize: 10.5,
+                  height: 1.3,
+                ),
+              ),
+            ],
+          ),
+        ),
+      ],
     );
   }
 }
@@ -772,6 +992,14 @@ String _trialLabel(String? isoPeriod) {
 String _renewalLabel(String? isoPeriod) {
   final period = _trialLabel(isoPeriod);
   return period == 'limited-time' ? 'per billing period' : 'every $period';
+}
+
+String _planLabel(String? isoPeriod) {
+  return switch (isoPeriod) {
+    'P1Y' => 'SurveyCam Pro · Annual',
+    'P1M' => 'SurveyCam Pro · Monthly',
+    _ => 'SurveyCam Pro',
+  };
 }
 
 String _shortDate(DateTime date) {

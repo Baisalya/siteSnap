@@ -69,6 +69,7 @@ class BillingState {
     this.isPro = false,
     this.verificationConfigured = false,
     this.entitlementSource = EntitlementSource.none,
+    this.entitlementExpiresAt,
     this.product,
     this.message,
     this.error,
@@ -81,6 +82,7 @@ class BillingState {
   final bool isPro;
   final bool verificationConfigured;
   final EntitlementSource entitlementSource;
+  final DateTime? entitlementExpiresAt;
   final BillingProduct? product;
   final String? message;
   final String? error;
@@ -93,6 +95,8 @@ class BillingState {
     bool? isPro,
     bool? verificationConfigured,
     EntitlementSource? entitlementSource,
+    DateTime? entitlementExpiresAt,
+    bool clearEntitlementExpiresAt = false,
     BillingProduct? product,
     bool clearProduct = false,
     String? message,
@@ -109,6 +113,9 @@ class BillingState {
       verificationConfigured:
           verificationConfigured ?? this.verificationConfigured,
       entitlementSource: entitlementSource ?? this.entitlementSource,
+      entitlementExpiresAt: clearEntitlementExpiresAt
+          ? null
+          : entitlementExpiresAt ?? this.entitlementExpiresAt,
       product: clearProduct ? null : product ?? this.product,
       message: clearMessage ? null : message ?? this.message,
       error: clearError ? null : error ?? this.error,
