@@ -8,6 +8,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_riverpod/legacy.dart';
 import 'package:surveycam/core/di/providers.dart';
 import 'package:surveycam/core/permissions/permission_service.dart';
+import 'package:surveycam/core/monetization/rewarded_capture_access.dart';
 import 'package:surveycam/core/utils/device_orientation_provider.dart';
 import 'package:flutter_foreground_task/flutter_foreground_task.dart';
 import 'package:surveycam/core/services/app_exit_info_service.dart';
@@ -52,6 +53,9 @@ class CameraViewModel extends StateNotifier<CameraState>
     with WidgetsBindingObserver {
   final Ref ref;
 
+  bool get photoBlockedByRewardedVideo =>
+      state.isRecording && _recordingUsesRewardedFeatures;
+
   double _currentExposure = 0.0;
   double _minExposure = 0.0;
   double _maxExposure = 0.0;
@@ -65,6 +69,7 @@ class CameraViewModel extends StateNotifier<CameraState>
   bool _isDisposing = false;
   bool _isRestarting = false;
   bool _captureInFlight = false;
+  bool _recordingUsesRewardedFeatures = false;
   bool _startRecordingInFlight = false;
   bool _stopRecordingInFlight = false;
   bool _nativeRecordingStarted = false;
@@ -160,6 +165,9 @@ class CameraViewModel extends StateNotifier<CameraState>
       } else if (message['type'] == 'image_error') {
         final originalPath = message['originalPath'] as String?;
         if (originalPath != null && originalPath.isNotEmpty) {
+          ref.read(rewardedCaptureAccessProvider).failBackgroundImage(
+                originalPath,
+              );
           ref.read(galleryProcessingProvider.notifier).fail(File(originalPath));
         }
       } else if (message['type'] == 'error') {
@@ -169,6 +177,10 @@ class CameraViewModel extends StateNotifier<CameraState>
           videoProcessingError: _friendlyVideoError(message['error']),
         );
       } else if (message['type'] == 'cancelled') {
+        final jobId = message['jobId'] as String?;
+        if (jobId != null) {
+          ref.read(rewardedCaptureAccessProvider).failVideo(jobId);
+        }
         state = state.copyWith(
           clearProcessingProgress: true,
           processingMessage:
@@ -180,6 +192,7 @@ class CameraViewModel extends StateNotifier<CameraState>
   }
 
   Future<void> _syncCompletedVideo(Map<String, dynamic> message) async {
+    final jobId = message['jobId'] as String?;
     final projectId = message['projectId'] as String?;
     final rawPaths = message['paths'];
     final paths = rawPaths is List
@@ -193,16 +206,22 @@ class CameraViewModel extends StateNotifier<CameraState>
       }
     }
 
-    for (final path in paths) {
-      await ref.read(projectProvider.notifier).assignFileToProject(
-            File(path),
-            projectId: projectId,
-          );
+    try {
+      for (final path in paths) {
+        await ref.read(projectProvider.notifier).assignFileToProject(
+              File(path),
+              projectId: projectId,
+            );
+      }
+      if (paths.isEmpty) {
+        await ref.read(projectProvider.notifier).refreshAssignments();
+      }
+      await ref.read(galleryFilesProvider.notifier).refresh();
+    } finally {
+      if (jobId != null) {
+        await ref.read(rewardedCaptureAccessProvider).completeVideo(jobId);
+      }
     }
-    if (paths.isEmpty) {
-      await ref.read(projectProvider.notifier).refreshAssignments();
-    }
-    await ref.read(galleryFilesProvider.notifier).refresh();
   }
 
   Future<void> _syncCompletedImage(Map<String, dynamic> message) async {
@@ -219,11 +238,19 @@ class CameraViewModel extends StateNotifier<CameraState>
     final originalFile = originalPath == null || originalPath.isEmpty
         ? null
         : File(originalPath);
-    await ref.read(projectProvider.notifier).assignFileToProject(
-          savedFile,
-          projectId: projectId,
-          replace: originalFile,
-        );
+    try {
+      await ref.read(projectProvider.notifier).assignFileToProject(
+            savedFile,
+            projectId: projectId,
+            replace: originalFile,
+          );
+    } finally {
+      if (originalPath != null && originalPath.isNotEmpty) {
+        await ref
+            .read(rewardedCaptureAccessProvider)
+            .completeBackgroundImage(originalPath);
+      }
+    }
     ref.read(lastImageProvider.notifier).state = savedFile;
     if (originalFile != null) {
       ref
@@ -1560,6 +1587,9 @@ class CameraViewModel extends StateNotifier<CameraState>
   }
 
   Future<bool> capturePhotoDuringRecording() async {
+    // A video with rewarded premium settings owns those one-use rewards until
+    // it stops; a simultaneous still must not spend the same ads twice.
+    if (_recordingUsesRewardedFeatures) return false;
     final controller = state.controller;
 
     if (!state.isRecording ||
@@ -1579,6 +1609,7 @@ class CameraViewModel extends StateNotifier<CameraState>
     final overlayData = ref.read(overlayPreviewProvider);
     ref.read(capturedOverlayProvider.notifier).state = overlayData;
     final overlaySettings = ref.read(effectiveOverlaySettingsProvider);
+    final projectId = ref.read(effectiveActiveProjectIdProvider);
     final deviceOrientation = ref.read(deviceOrientationProvider);
     final captureLens = state.currentLens;
     final captureMirror = captureLens == CameraLensType.front &&
@@ -1600,17 +1631,24 @@ class CameraViewModel extends StateNotifier<CameraState>
       })()
           .timeout(_photoCaptureTimeout);
       final originalFile = File(path);
-
-      await ref.read(overlayViewModelProvider.notifier).saveCapturedImage(
-            original: originalFile,
-            orientation: deviceOrientation,
-            overlayData: overlayData,
-            showOverlay: true,
-            showWatermark: true,
-            aspectRatio: aspectRatio,
-            mirror: captureMirror,
-            settingsOverride: overlaySettings,
-          );
+      final rewardAccess = ref.read(rewardedCaptureAccessProvider);
+      rewardAccess.reserveBackgroundImage(path);
+      final enqueued =
+          await ref.read(overlayViewModelProvider.notifier).saveCapturedImage(
+                original: originalFile,
+                orientation: deviceOrientation,
+                overlayData: overlayData,
+                showOverlay: true,
+                showWatermark: true,
+                aspectRatio: aspectRatio,
+                mirror: captureMirror,
+                settingsOverride: overlaySettings,
+                projectId: projectId,
+              );
+      if (!enqueued) {
+        rewardAccess.failBackgroundImage(path);
+        return false;
+      }
 
       unawaited(HapticFeedback.lightImpact());
       return true;
@@ -1712,6 +1750,7 @@ class CameraViewModel extends StateNotifier<CameraState>
     }
 
     _startRecordingInFlight = true;
+    _recordingUsesRewardedFeatures = false;
     try {
       state = state.copyWith(
         processingMessage: null,
@@ -1812,6 +1851,8 @@ class CameraViewModel extends StateNotifier<CameraState>
         projectId: ref.read(effectiveActiveProjectIdProvider),
         clearSegments: clearSegments,
       );
+      _recordingUsesRewardedFeatures =
+          ref.read(rewardedCaptureAccessProvider).hasAvailablePhotoRewards;
 
       // IMPORTANT: publish the native recorder state immediately. Realtime
       // overlay verification is a certification step, not a prerequisite for
@@ -1841,6 +1882,7 @@ class CameraViewModel extends StateNotifier<CameraState>
       unawaited(HapticFeedback.heavyImpact());
       return true;
     } catch (e) {
+      _recordingUsesRewardedFeatures = false;
       _recordingSession.abort();
       final backend = ref.read(videoRecordingBackendProvider);
       if (_nativeRecordingStarted) {
@@ -1941,6 +1983,7 @@ class CameraViewModel extends StateNotifier<CameraState>
     unawaited(HapticFeedback.mediumImpact());
 
     var jobQueuedForProcessing = false;
+    String? reservedRewardKey;
     try {
       final backend = ref.read(videoRecordingBackendProvider);
 
@@ -1970,6 +2013,7 @@ class CameraViewModel extends StateNotifier<CameraState>
         ),
         finalSnapshot: finalRecordingSnapshot,
       );
+      _recordingUsesRewardedFeatures = false;
       await backend.finishRealtimeOverlay();
       _currentRecordingUsesNativeFrontMirror = false;
       _recordingCaptureOrientation = null;
@@ -1993,6 +2037,9 @@ class CameraViewModel extends StateNotifier<CameraState>
 
       if (productionDecision.canInstantSave) {
         final now = DateTime.now();
+        final rewardKey = 'realtime_${now.microsecondsSinceEpoch}';
+        reservedRewardKey = rewardKey;
+        ref.read(rewardedCaptureAccessProvider).reserveVideo(rewardKey);
         state = state.copyWith(
           processingMessage: 'Saving recorded video...',
           clearProcessingProgress: true,
@@ -2003,6 +2050,7 @@ class CameraViewModel extends StateNotifier<CameraState>
               savedFile,
               projectId: completedSession.projectId,
             );
+        await ref.read(rewardedCaptureAccessProvider).completeVideo(rewardKey);
         await MediaAuditService.recordVideoSave(
           sourceFiles: completedSession.segments
               .map((segment) => File(segment.path))
@@ -2012,7 +2060,7 @@ class CameraViewModel extends StateNotifier<CameraState>
               .map((sample) => sample.toJson())
               .toList(),
           durationMs: completedSession.durationMs,
-          jobId: 'realtime_${now.microsecondsSinceEpoch}',
+          jobId: rewardKey,
           savedWithoutOverlay: false,
         );
         await ThumbnailUtils.generateVideoThumbnail(savedPath);
@@ -2079,10 +2127,16 @@ class CameraViewModel extends StateNotifier<CameraState>
         projectId: completedSession.projectId,
       );
 
+      reservedRewardKey = job.id;
+      ref.read(rewardedCaptureAccessProvider).reserveVideo(job.id);
       await VideoProcessingTaskHandler.enqueueJob(job);
       jobQueuedForProcessing = true;
       await _startForegroundService();
     } catch (e) {
+      if (!jobQueuedForProcessing && reservedRewardKey != null) {
+        ref.read(rewardedCaptureAccessProvider).failVideo(reservedRewardKey);
+      }
+      _recordingUsesRewardedFeatures = false;
       _nativeRecordingStarted = false;
       await ref.read(videoRecordingBackendProvider).finishRealtimeOverlay();
       _currentRecordingUsesNativeFrontMirror = false;

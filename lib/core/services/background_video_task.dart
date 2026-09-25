@@ -506,6 +506,7 @@ class VideoProcessingTaskHandler extends TaskHandler {
           : 'Video saved successfully!');
       _send({
         'type': 'complete',
+        'jobId': job.id,
         'path': savedPaths.isEmpty ? null : savedPaths.first,
         'paths': savedPaths,
         'projectId': job.projectId,
@@ -520,6 +521,7 @@ class VideoProcessingTaskHandler extends TaskHandler {
       await FlutterForegroundTask.removeData(key: cancelRequestedKey);
       _send({
         'type': 'cancelled',
+        'jobId': job?.id,
         'message': 'Video processing cancelled.',
       });
       await _updateNotification('Video processing cancelled');
@@ -550,6 +552,7 @@ class VideoProcessingTaskHandler extends TaskHandler {
       );
       _send({
         'type': 'error',
+        'jobId': job?.id,
         'error': e.toString(),
       });
       await _updateNotification('Video processing failed. Tap to reopen.');

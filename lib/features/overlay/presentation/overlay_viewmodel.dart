@@ -65,7 +65,7 @@ class OverlayViewModel extends StateNotifier<void> {
     }
   }
 
-  Future<File?> saveCapturedImage({
+  Future<bool> saveCapturedImage({
     required File original,
     required DeviceOrientation orientation,
     required OverlayData overlayData,
@@ -74,7 +74,9 @@ class OverlayViewModel extends StateNotifier<void> {
     CameraAspectRatio? aspectRatio,
     bool mirror = false,
     OverlaySettings? settingsOverride,
+    required String? projectId,
   }) async {
+    var enqueued = false;
     try {
       await ref.read(projectProvider.notifier).ready;
       if (settingsOverride == null) {
@@ -82,8 +84,6 @@ class OverlayViewModel extends StateNotifier<void> {
       }
       final OverlaySettings settings =
           settingsOverride ?? ref.read(effectiveOverlaySettingsProvider);
-      final projectId = ref.read(effectiveActiveProjectIdProvider);
-
       ref.read(lastImageProvider.notifier).state = original;
       ref.read(galleryFilesProvider.notifier).showFileImmediately(original);
       ref.read(galleryProcessingProvider.notifier).start(original);
@@ -107,9 +107,9 @@ class OverlayViewModel extends StateNotifier<void> {
           projectId: projectId,
         ),
       );
+      enqueued = true;
       await _startForegroundImageService();
-
-      return null;
+      return true;
     } catch (e) {
       debugPrint("Background Save Failed: $e");
       await MediaAuditService.recordFailure(
@@ -118,7 +118,7 @@ class OverlayViewModel extends StateNotifier<void> {
         details: {'originalPath': original.path},
       );
       ref.read(galleryProcessingProvider.notifier).fail(original);
-      return null;
+      return enqueued;
     }
   }
 

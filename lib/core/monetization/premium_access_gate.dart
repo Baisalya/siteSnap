@@ -5,6 +5,7 @@ import 'monetization_market.dart';
 import 'premium_feature.dart';
 import 'premium_policy.dart';
 import 'pro_upgrade_screen.dart';
+import 'rewarded_capture_access.dart';
 import 'rewarded_ad_service.dart';
 import 'rewarded_feature_access.dart';
 
@@ -17,6 +18,18 @@ Future<bool> requestPremiumFeatureAccess({
 }) async {
   final policy = ref.read(premiumPolicyProvider);
   if (policy.canUse(feature)) return true;
+
+  if (photoRewardFeatures.contains(feature) &&
+      ref.read(rewardedCaptureAccessProvider).isFeaturePending(feature)) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(
+        content: Text(
+            'Your previous premium capture is still saving. Try again when it finishes.'),
+        behavior: SnackBarBehavior.floating,
+      ),
+    );
+    return false;
+  }
 
   // Re-check on every locked entry so a prior permission/service failure does
   // not permanently hide rewarded access for the rest of the session.
@@ -63,7 +76,11 @@ Future<bool> requestPremiumFeatureAccess({
       grantRewardedFeature(ref, feature);
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text('${feature.accessLabel} unlocked for this session.'),
+          content: Text(
+            photoRewardFeatures.contains(feature)
+                ? '${feature.accessLabel} unlocked for one capture.'
+                : '${feature.accessLabel} unlocked for one use.',
+          ),
           behavior: SnackBarBehavior.floating,
         ),
       );
@@ -122,8 +139,10 @@ class _PremiumAccessSheet extends StatelessWidget {
                   ),
                 ),
                 const SizedBox(height: 8),
-                const Text(
-                  'Watch one rewarded ad to use this premium area during this app session, or get Pro for permanent ad-free access.',
+                Text(
+                  photoRewardFeatures.contains(feature)
+                      ? 'Watch one rewarded ad to use this feature for one photo or video. Saving or sharing that capture ends the unlock. Get Pro for unlimited ad-free access.'
+                      : 'Watch one rewarded ad for one use of this feature, or get Pro for unlimited ad-free access.',
                   textAlign: TextAlign.center,
                   style: TextStyle(color: Colors.white70, height: 1.4),
                 ),

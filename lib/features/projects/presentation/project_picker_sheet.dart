@@ -6,6 +6,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:surveycam/core/monetization/premium_feature.dart';
 import 'package:surveycam/core/monetization/premium_access_gate.dart';
 import 'package:surveycam/core/monetization/premium_policy.dart';
+import 'package:surveycam/core/monetization/rewarded_feature_access.dart';
 import 'project_provider.dart';
 
 Future<void> showProjectPickerSheet(BuildContext context) {
@@ -460,6 +461,12 @@ class _ProjectAssignmentSheetState
       final controller = ref.read(projectProvider.notifier);
       for (final file in widget.files) {
         await controller.assignFileToProject(file, projectId: projectId);
+      }
+      if (ref.read(rewardedFeatureAccessProvider).contains(
+            PremiumFeature.projectFolders,
+          )) {
+        consumeRewardedFeature(ref, PremiumFeature.projectFolders);
+        await controller.setActiveProject(null);
       }
       if (mounted) Navigator.pop(context, true);
     } catch (_) {

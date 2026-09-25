@@ -118,7 +118,6 @@ class _GalleryFolderScreenState extends ConsumerState<GalleryFolderScreen>
 
     if (details != null && mounted) {
       await _exportSelectedPdf(details);
-      consumeRewardedFeature(ref, PremiumFeature.pdfReports);
     }
   }
 
@@ -134,6 +133,9 @@ class _GalleryFolderScreenState extends ConsumerState<GalleryFolderScreen>
         photoDescriptions: details.photoDescriptions,
         template: details.template,
       );
+      // The report has been generated: this one rewarded export is now spent,
+      // even if the user dismisses the Android share sheet.
+      consumeRewardedFeature(ref, PremiumFeature.pdfReports);
 
       if (!mounted) return;
       setState(() => _isExportingPdf = false);

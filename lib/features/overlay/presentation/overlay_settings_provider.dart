@@ -234,6 +234,22 @@ class OverlaySettingsNotifier extends StateNotifier<OverlaySettings> {
     await updateSettings(const OverlaySettings(), persistImmediately: true);
   }
 
+  /// Ends only the photo-only rewarded choices. Keep uploaded logos and brand
+  /// text as reusable presets; do not erase unrelated free camera settings.
+  Future<void> resetRewardedSelections({
+    required bool branding,
+    required bool colors,
+  }) async {
+    await _apply(
+      (current) => current.copyWith(
+        watermarkPresetIndex: branding ? 0 : null,
+        backgroundColor: colors ? Colors.white : null,
+        textColor: colors ? Colors.black : null,
+      ),
+      persistImmediately: true,
+    );
+  }
+
   @override
   void dispose() {
     _persistTimer?.cancel();

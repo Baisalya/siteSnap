@@ -1373,6 +1373,13 @@ class _CameraScreenState extends ConsumerState<CameraScreen> {
                                     }
 
                                     if (cameraState.isRecording) {
+                                      if (cameraVM
+                                          .photoBlockedByRewardedVideo) {
+                                        _showCameraSnack(
+                                          'Finish this premium video before taking a separate photo.',
+                                        );
+                                        return;
+                                      }
                                       _startPhotoCapture();
                                       unawaited(SystemSound.play(
                                           SystemSoundType.click));

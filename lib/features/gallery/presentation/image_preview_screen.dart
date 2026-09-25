@@ -18,6 +18,7 @@ import 'package:surveycam/features/overlay/presentation/overlay_preview_state.da
 import 'package:surveycam/features/overlay/presentation/overlay_viewmodel.dart';
 import 'package:surveycam/features/camera/presentation/camera_viewmodel.dart';
 import 'package:surveycam/features/camera/presentation/note_input_sheet.dart';
+import 'package:surveycam/core/monetization/rewarded_capture_access.dart';
 import 'package:surveycam/features/overlay/presentation/live_overlay_painter.dart';
 import 'package:surveycam/features/overlay/presentation/preview_overlay_painter.dart';
 import 'package:surveycam/core/utils/watermark_support_dialog.dart';
@@ -347,6 +348,8 @@ class _ImagePreviewScreenState extends ConsumerState<ImagePreviewScreen> {
 
       if (!mounted) return;
       if (savedFile != null) {
+        await ref.read(rewardedCaptureAccessProvider).consumeSuccessfulPhoto();
+        if (!mounted) return;
         Navigator.of(context).pop(savedFile);
         return;
       }
@@ -421,12 +424,15 @@ class _ImagePreviewScreenState extends ConsumerState<ImagePreviewScreen> {
       if (!mounted) return;
 
       // Share
-      await SharePlus.instance.share(
+      final shareResult = await SharePlus.instance.share(
         ShareParams(
           files: [XFile(tempPath)],
           text: "Shared from SurveyCam 📷",
         ),
       );
+      if (shareResult.status != ShareResultStatus.dismissed) {
+        await ref.read(rewardedCaptureAccessProvider).consumeSuccessfulPhoto();
+      }
     } catch (e) {
       debugPrint("Share error: $e");
       if (mounted) {
