@@ -27,6 +27,29 @@ OverlayRenderSnapshot _snapshot({
 }
 
 void main() {
+  test(
+      'background during lens switch saves finalized segment without duplication',
+      () {
+    final coordinator = RecordingSessionCoordinator();
+    coordinator.begin(initialSnapshot: _snapshot(), projectId: 'project-a');
+    coordinator.addSegment(const VideoRecordingSegment(
+      path: 'finished-before-switch.mp4',
+      lens: CameraLensType.normal,
+      realtimeOverlayApplied: true,
+    ));
+    final completed = coordinator.complete(finalSnapshot: _snapshot());
+    expect(completed.segments, hasLength(1));
+    expect(completed.segments.single.path, 'finished-before-switch.mp4');
+    expect(completed.projectId, 'project-a');
+    expect(coordinator.isActive, isFalse);
+  });
+
+  test('empty recording cannot be treated as a successful save', () {
+    final coordinator = RecordingSessionCoordinator();
+    coordinator.begin(initialSnapshot: _snapshot(), projectId: null);
+    expect(() => coordinator.complete(finalSnapshot: _snapshot()),
+        throwsStateError);
+  });
   test('recording session owns duration, segments and overlay history', () {
     var now = DateTime(2026, 9, 9, 18, 30);
     final coordinator = RecordingSessionCoordinator(now: () => now);

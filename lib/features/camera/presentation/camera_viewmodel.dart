@@ -19,6 +19,7 @@ import 'package:surveycam/core/services/video_processing_job.dart';
 import 'package:surveycam/core/utils/gallery_saver.dart';
 import 'package:surveycam/core/utils/thumbnail_utils.dart';
 import 'package:surveycam/features/camera/application/latest_value_coalescer.dart';
+import 'package:surveycam/features/camera/application/camera_session_queue.dart';
 import 'package:surveycam/features/camera/application/recording_session_coordinator.dart';
 import 'package:surveycam/features/camera/data/CameraState.dart';
 import 'package:surveycam/features/camera/domain/camera_lens_type.dart';
@@ -72,6 +73,7 @@ class CameraViewModel extends StateNotifier<CameraState>
   bool _recordingUsesRewardedFeatures = false;
   bool _startRecordingInFlight = false;
   bool _stopRecordingInFlight = false;
+  int _pendingStopRequests = 0;
   bool _nativeRecordingStarted = false;
   int _realtimeActivationToken = 0;
   CameraController? _zoomController;
@@ -92,6 +94,7 @@ class CameraViewModel extends StateNotifier<CameraState>
   // succession. Keep them serialized so CameraPreview never receives a
   // controller while the repository is disposing the same native session.
   Future<void> _lifecycleQueue = Future<void>.value();
+  final CameraSessionQueue _sessionQueue = CameraSessionQueue();
   int _lifecycleGeneration = 0;
   AppLifecycleState _latestLifecycleState = AppLifecycleState.resumed;
 
@@ -584,7 +587,8 @@ class CameraViewModel extends StateNotifier<CameraState>
       debugPrint('Previous lifecycle camera operation failed: $error');
     }).then((_) async {
       if (!mounted || generation != _lifecycleGeneration) return;
-      await _handleLifecycleState(appState, generation);
+      await _sessionQueue
+          .run(() => _handleLifecycleState(appState, generation));
     });
   }
 
@@ -620,8 +624,8 @@ class CameraViewModel extends StateNotifier<CameraState>
       await Future<void>.delayed(const Duration(milliseconds: 16));
 
       try {
-        if (controller != null && wasRecording) {
-          await stopVideoRecordingInBackground();
+        if (wasRecording || _nativeRecordingStarted) {
+          await _stopVideoRecordingInternal();
           await Future.delayed(const Duration(milliseconds: 200));
         }
 
@@ -672,8 +676,14 @@ class CameraViewModel extends StateNotifier<CameraState>
 
   // ================= REFRESH =================
 
-  Future<void> refreshCamera() async {
+  Future<void> refreshCamera() => _sessionQueue.run(_refreshCameraInternal);
+
+  Future<void> _refreshCameraInternal() async {
+    if (!mounted) return;
     debugPrint("Refreshing camera manually...");
+    if (state.isRecording || _nativeRecordingStarted) {
+      await _stopVideoRecordingInternal();
+    }
     // Hide preview first, then dispose. This avoids a stale CameraPreview frame
     // calling buildPreview() on a disposed native controller.
     state = state.copyWith(clearController: true, isReady: false, error: null);
@@ -1107,8 +1117,13 @@ class CameraViewModel extends StateNotifier<CameraState>
 
   // ================= CAMERA SWITCH =================
 
-  Future<void> switchCamera() async {
+  Future<void> switchCamera() => _sessionQueue.run(_switchCameraInternal);
+
+  Future<void> _switchCameraInternal() async {
     if (_isInitializing ||
+        _isDisposing ||
+        !mounted ||
+        _latestLifecycleState != AppLifecycleState.resumed ||
         _isRestarting ||
         _startRecordingInFlight ||
         _stopRecordingInFlight) {
@@ -1166,7 +1181,11 @@ class CameraViewModel extends StateNotifier<CameraState>
       await _refreshCapabilitiesAfterLensSwitch(controller);
     } catch (e) {
       debugPrint('Switch camera error: $e');
-      if (state.isRecording) {
+      if (mounted && _recordingSession.isActive) {
+        // A failed next-lens initialization must not discard the segment that
+        // was already finalized successfully before the switch.
+        await _stopVideoRecordingInternal();
+      } else if (mounted && state.isRecording) {
         _recordingSession.abort();
         ++_realtimeActivationToken;
         _nativeRecordingStarted = false;
@@ -1210,8 +1229,15 @@ class CameraViewModel extends StateNotifier<CameraState>
       ),
     );
 
+    // Stop/background may arrive while Finalize is pending. Keep the finished
+    // segment and save it through the stop path, without opening a new recorder
+    // against a stopped Activity lifecycle.
+    if (!await _canContinueRecordingSwitch()) return;
+
     final controller = await _initializeFreshLens(nextLens);
     await _refreshCapabilitiesAfterLensSwitch(controller);
+
+    if (!await _canContinueRecordingSwitch()) return;
 
     final mirrorRequested = ref.read(cameraSettingsProvider).mirrorFrontVideo;
     _currentRecordingUsesNativeFrontMirror =
@@ -1231,8 +1257,10 @@ class CameraViewModel extends StateNotifier<CameraState>
     }
 
     await _restoreRecordingFlashForLens(nextLens);
+    if (!await _canContinueRecordingSwitch()) return;
     await backend.start();
     _nativeRecordingStarted = true;
+    if (!await _canContinueRecordingSwitch()) return;
     state = state.copyWith(
       isRecording: true,
       isRealtimeOverlayActive: false,
@@ -1245,6 +1273,18 @@ class CameraViewModel extends StateNotifier<CameraState>
       ));
     }
     _recordCurrentVideoOverlaySample(force: true);
+  }
+
+  Future<bool> _canContinueRecordingSwitch() async {
+    if (!mounted) return false;
+    if (_latestLifecycleState == AppLifecycleState.resumed &&
+        _pendingStopRequests == 0) {
+      return true;
+    }
+    // Finish inside the current transition. A fast pause/resume can invalidate
+    // the queued pause handler, so merely returning would strand the session.
+    await _stopVideoRecordingInternal();
+    return false;
   }
 
   Future<CameraController> _initializeFreshLens(
@@ -1738,7 +1778,19 @@ class CameraViewModel extends StateNotifier<CameraState>
     }
   }
 
-  Future<bool> startVideoRecording({bool clearSegments = true}) async {
+  Future<bool> startVideoRecording({bool clearSegments = true}) =>
+      _sessionQueue.run(
+        () => _startVideoRecordingInternal(clearSegments: clearSegments),
+      );
+
+  Future<bool> _startVideoRecordingInternal(
+      {required bool clearSegments}) async {
+    if (!mounted ||
+        _isDisposing ||
+        _isRestarting ||
+        _latestLifecycleState != AppLifecycleState.resumed) {
+      return false;
+    }
     final initialController = state.controller;
     if (initialController == null ||
         !initialController.value.isInitialized ||
@@ -1778,7 +1830,9 @@ class CameraViewModel extends StateNotifier<CameraState>
           await _prepareVideoForCurrentController();
 
       final controller = state.controller;
-      if (controller == null || !controller.value.isInitialized) {
+      if (controller == null ||
+          !controller.value.isInitialized ||
+          _latestLifecycleState != AppLifecycleState.resumed) {
         return false;
       }
 
@@ -1814,6 +1868,11 @@ class CameraViewModel extends StateNotifier<CameraState>
         captureOrientation: _recordingCaptureOrientation,
         isFrontCamera: state.currentLens == CameraLensType.front,
       );
+
+      if (!mounted || _latestLifecycleState != AppLifecycleState.resumed) {
+        await backend.finishRealtimeOverlay();
+        return false;
+      }
 
       // Phase 7.1 prepareRealtimeOverlay() pre-binds VideoCapture and enables
       // the first geometry-correct raster before Recorder.start(). Starting the
@@ -1958,10 +2017,20 @@ class CameraViewModel extends StateNotifier<CameraState>
   }
 
   Future<void> _stopVideoRecording({BuildContext? context}) async {
+    _pendingStopRequests++;
+    try {
+      await _sessionQueue.run(
+        () => _stopVideoRecordingInternal(context: context),
+      );
+    } finally {
+      _pendingStopRequests--;
+    }
+  }
+
+  Future<void> _stopVideoRecordingInternal({BuildContext? context}) async {
+    if (!mounted) return;
     final controller = state.controller;
-    if (controller == null ||
-        !controller.value.isInitialized ||
-        (!state.isRecording && !_nativeRecordingStarted) ||
+    if ((!state.isRecording && !_nativeRecordingStarted) ||
         _stopRecordingInFlight) {
       return;
     }
@@ -1996,23 +2065,27 @@ class CameraViewModel extends StateNotifier<CameraState>
       // Stop the actual recorder first. Native overlay status is retained by
       // the bridge until finishRealtimeOverlay(), so certification can happen
       // after the MP4 has stopped without extending the physical recording.
-      final lastSegmentPath = await backend.stop();
-      _nativeRecordingStarted = false;
-      final finalSegmentRealtime =
-          await backend.inspectRealtimeOverlaySegment();
-      final finalRecordingSnapshot = _currentRecordingOverlaySnapshot();
-      final completedSession = _recordingSession.complete(
-        finalSegment: VideoRecordingSegment(
-          path: lastSegmentPath,
+      VideoRecordingSegment? finalSegment;
+      if (_nativeRecordingStarted) {
+        final path = await backend.stop();
+        _nativeRecordingStarted = false;
+        final report = await backend.inspectRealtimeOverlaySegment();
+        finalSegment = VideoRecordingSegment(
+          path: path,
           lens: state.currentLens,
           mirror: _requiresMirrorPostProcess(state.currentLens),
-          realtimeOverlayApplied: finalSegmentRealtime.applied,
-          realtimeOverlayHealthy: finalSegmentRealtime.healthy,
+          realtimeOverlayApplied: report.applied,
+          realtimeOverlayHealthy: report.healthy,
           containsCameraSwitches:
               _recordingSession.takeCurrentSegmentCameraSwitchMarker(),
-        ),
+        );
+      }
+      final finalRecordingSnapshot = _currentRecordingOverlaySnapshot();
+      final completedSession = _recordingSession.complete(
+        finalSegment: finalSegment,
         finalSnapshot: finalRecordingSnapshot,
       );
+      final lastSegmentPath = completedSession.segments.last.path;
       _recordingUsesRewardedFeatures = false;
       await backend.finishRealtimeOverlay();
       _currentRecordingUsesNativeFrontMirror = false;
@@ -2025,7 +2098,9 @@ class CameraViewModel extends StateNotifier<CameraState>
         videoProcessingError: null,
       );
 
-      if (state.flashMode == FlashMode.always) {
+      if (state.flashMode == FlashMode.always &&
+          controller != null &&
+          controller.value.isInitialized) {
         await _softFlashQuench(controller);
       }
 
@@ -2293,7 +2368,8 @@ class CameraViewModel extends StateNotifier<CameraState>
     _recordingCaptureOrientation = null;
     FlutterForegroundTask.removeTaskDataCallback(_onReceiveTaskData);
     state = state.copyWith(clearController: true, isReady: false);
-    unawaited(ref.read(cameraRepositoryProvider).dispose());
+    final repository = ref.read(cameraRepositoryProvider);
+    unawaited(_sessionQueue.run(repository.dispose));
     super.dispose();
   }
 }

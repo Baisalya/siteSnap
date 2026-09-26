@@ -285,9 +285,8 @@ class CameraRepositoryImpl implements CameraRepository {
         return;
       }
       try {
-        // Persistent recording lets CameraX switch CameraDescription without
-        // finalizing the active Recorder/file. This is the Phase 6 primary
-        // multi-camera path on Android.
+        // Keep ownership of Stop across lifecycle changes. Do not use this to
+        // rebind an active Recorder: lens changes use finalized segments below.
         await controller.startVideoRecording(enablePersistentRecording: true);
         _lastVideoRecordingStartedAt = DateTime.now();
       } catch (e) {
@@ -320,41 +319,12 @@ class CameraRepositoryImpl implements CameraRepository {
 
   @override
   Future<bool> switchLensWhileRecording(CameraLensType type) {
-    return runExclusive(() async {
-      // Phase 6 persistent switching is intentionally CameraX/Android-only.
-      // Other platforms retain the proven segmented fallback path.
-      if (kIsWeb || defaultTargetPlatform != TargetPlatform.android) {
-        return false;
-      }
-
-      final controller = _controller;
-      if (controller == null ||
-          !controller.value.isInitialized ||
-          !controller.value.isRecordingVideo ||
-          type == _currentLens) {
-        return type == _currentLens &&
-            controller != null &&
-            controller.value.isRecordingVideo;
-      }
-
-      final description = _cameraMap[type];
-      if (description == null) return false;
-
-      try {
-        await controller.setDescription(description);
-        if (!controller.value.isRecordingVideo) {
-          debugPrint(
-            'Persistent camera switch stopped the recorder; using segmented fallback.',
-          );
-          return false;
-        }
-        _currentLens = type;
-        return true;
-      } catch (e) {
-        debugPrint('Persistent camera switch unavailable: $e');
-        return false;
-      }
-    });
+    // CameraX 1.5.3 can finish configuring a replacement encoder after Stop
+    // enters STOPPING, causing Recorder.onConfigured's native AssertionError.
+    // A delay after setDescription cannot prove configuration has finished.
+    // Use the existing stop -> Finalize -> switch -> start segment path until
+    // the upstream reconfiguration race has a verified fix.
+    return Future<bool>.value(false);
   }
 
   Future<void> switchLens(CameraLensType type) {

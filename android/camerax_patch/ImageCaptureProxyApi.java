@@ -7,6 +7,7 @@ import androidx.camera.core.ImageCapture;
 import androidx.camera.core.ImageCaptureException;
 import androidx.camera.core.ResolutionInfo;
 import androidx.camera.core.resolutionselector.ResolutionSelector;
+import androidx.core.content.ContextCompat;
 import java.io.File;
 import java.io.IOException;
 import java.util.concurrent.ExecutorService;
@@ -141,7 +142,12 @@ class ImageCaptureProxyApi extends PigeonApiImageCapture {
     final ImageCapture.OnImageSavedCallback onImageSavedCallback =
         createOnImageSavedCallback(temporaryCaptureFile, systemServicesManager, callback);
 
-    pigeonInstance.takePicture(outputFileOptions, PHOTO_EXECUTOR, onImageSavedCallback);
+    // CameraX file IO stays on PHOTO_EXECUTOR; Pigeon/Flutter replies and the
+    // engine-detach guard must run on the platform thread, not the IO pool.
+    pigeonInstance.takePicture(
+        outputFileOptions,
+        ContextCompat.getMainExecutor(getPigeonRegistrar().getContext()),
+        onImageSavedCallback);
   }
 
   @Override
@@ -167,11 +173,13 @@ class ImageCaptureProxyApi extends PigeonApiImageCapture {
     return new ImageCapture.OnImageSavedCallback() {
       @Override
       public void onImageSaved(@NonNull ImageCapture.OutputFileResults outputFileResults) {
+        if (getPigeonRegistrar().getIgnoreCallsToDart()) return;
         ResultCompat.success(file.getAbsolutePath(), callback);
       }
 
       @Override
       public void onError(@NonNull ImageCaptureException exception) {
+        if (getPigeonRegistrar().getIgnoreCallsToDart()) return;
         systemServicesManager.onCameraError(
             getImageCaptureExceptionDescription(exception.getImageCaptureError()));
         ResultCompat.failure(exception, callback);

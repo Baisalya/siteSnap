@@ -30,11 +30,15 @@ class MainActivity : FlutterActivity() {
     private var engineAttached = false
     private var methodChannel: MethodChannel? = null
     private var realtimeOverlayChannel: MethodChannel? = null
+    private var backgroundCalls: BackgroundPlatformCalls? = null
 
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
         engineAttached = true
         engineGeneration++
+        backgroundCalls?.close()
+        val ioCalls = BackgroundPlatformCalls()
+        backgroundCalls = ioCalls
         methodChannel = MethodChannel(
             flutterEngine.dartExecutor.binaryMessenger,
             localEnvironmentChannel
@@ -43,9 +47,9 @@ class MainActivity : FlutterActivity() {
                 when (call.method) {
                     "getSensorAvailability" -> result.success(getSensorAvailability())
                     "readEnvironment" -> readEnvironmentSensors(result)
-                    "listSurveyCamMedia" -> result.success(listSurveyCamMedia())
-                    "getLastAppExitInfo" -> result.success(getLastAppExitInfo())
-                    "getUsableStorageBytes" -> result.success(getUsableStorageBytes())
+                    "listSurveyCamMedia" -> ioCalls.submit(result) { listSurveyCamMedia() }
+                    "getLastAppExitInfo" -> ioCalls.submit(result) { getLastAppExitInfo() }
+                    "getUsableStorageBytes" -> ioCalls.submit(result) { getUsableStorageBytes() }
                     else -> result.notImplemented()
                 }
             }
@@ -155,6 +159,8 @@ class MainActivity : FlutterActivity() {
         // reply through a BinaryMessenger after FlutterJNI has detached.
         engineAttached = false
         engineGeneration++
+        backgroundCalls?.close()
+        backgroundCalls = null
         sensorHandler.removeCallbacksAndMessages(null)
 
         val sensorManager = getSystemService(Context.SENSOR_SERVICE) as SensorManager

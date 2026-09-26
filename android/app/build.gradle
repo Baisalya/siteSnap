@@ -101,6 +101,8 @@ flutter {
 }
 
 dependencies {
+    testImplementation 'junit:junit:4.13.2'
+    testImplementation 'org.robolectric:robolectric:4.16'
     // Google Mobile Ads 25.4.0 still declares WorkManager 2.7.0. That old
     // Room/WorkManager stack crashes during AndroidX Startup in minified
     // release builds before Flutter can launch. Keep the supported stable

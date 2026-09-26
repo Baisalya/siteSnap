@@ -119,7 +119,7 @@ class RecordingSessionCoordinator {
   }
 
   CompletedVideoRecordingSession complete({
-    required VideoRecordingSegment finalSegment,
+    VideoRecordingSegment? finalSegment,
     required OverlayRenderSnapshot finalSnapshot,
   }) {
     final startedAt = _startedAt;
@@ -128,7 +128,10 @@ class RecordingSessionCoordinator {
     }
 
     stopSampling();
-    addSegment(finalSegment);
+    if (finalSegment != null) addSegment(finalSegment);
+    if (_segments.isEmpty) {
+      throw StateError('No finalized video segments to save.');
+    }
     recordOverlay(finalSnapshot, force: true);
 
     final history = List<VideoOverlaySample>.from(_overlayHistory);

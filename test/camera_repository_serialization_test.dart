@@ -2,8 +2,16 @@ import 'dart:async';
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:surveycam/features/camera/data/camera_repository_impl.dart';
+import 'package:surveycam/features/camera/domain/camera_lens_type.dart';
 
 void main() {
+  test(
+      'lens switching selects finalized-segment fallback without a native rebind',
+      () async {
+    final repository = CameraRepositoryImpl();
+    expect(await repository.switchLensWhileRecording(CameraLensType.front),
+        isFalse);
+  });
   group('CameraRepositoryImpl operation serialization', () {
     test('does not overlap native camera operations', () async {
       final repository = CameraRepositoryImpl();

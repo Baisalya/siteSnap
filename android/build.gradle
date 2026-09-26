@@ -47,7 +47,7 @@ subprojects {
 
 
 // SiteSnap Phase 3-7: keep camera_android_camerax pinned at 0.7.1+2 / CameraX
-// 1.5.3. Replace only the provider-binding, VideoCapture-builder, and ImageCapture seams so
+// 1.5.3. Replace the provider-binding, VideoCapture, ImageCapture and CameraControl seams so
 // realtime video effects/front mirroring plus professional still capture can be configured without
 // mutating Flutter's pub cache or upgrading the CameraX stack.
 subprojects { cameraProject ->
@@ -57,11 +57,20 @@ subprojects { cameraProject ->
                 exclude 'io/flutter/plugins/camerax/ProcessCameraProviderProxyApi.java'
                 exclude 'io/flutter/plugins/camerax/VideoCaptureProxyApi.java'
                 exclude 'io/flutter/plugins/camerax/ImageCaptureProxyApi.java'
+                exclude 'io/flutter/plugins/camerax/CameraControlProxyApi.java'
                 srcDir rootProject.file('camerax_patch')
             }
+            cameraProject.android.sourceSets.test.java.srcDir rootProject.file('camerax_patch_test')
             cameraProject.dependencies.add(
                 'implementation',
                 'androidx.camera:camera-effects:1.5.3'
+            )
+            // Newer javac resolves CameraX's JSpecify-annotated internal fields.
+            // Keep their referenced future type on the compile classpath, as
+            // upstream camera_android_camerax 0.7.4+6 does for this same error.
+            cameraProject.dependencies.add(
+                'implementation',
+                'androidx.concurrent:concurrent-futures:1.2.0'
             )
         }
     }

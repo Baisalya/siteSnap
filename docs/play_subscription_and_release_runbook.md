@@ -35,6 +35,33 @@ flutter analyze --no-pub
 flutter test --no-pub
 ```
 
+## Camera stability regression gate (September 2026)
+
+The post-v48 source guards late native focus/photo replies after engine detach,
+serializes recording transitions, and uses finalized video segments for lens
+switches instead of rebinding an active CameraX 1.5.3 recorder. MediaStore,
+storage and process-exit queries now run off the Android UI thread. Keep
+`share_plus >=13.3.0` for its Android share-cache IO ANR fix.
+
+Native regression tests (from `android/`):
+
+```powershell
+.\gradlew.bat :camera_android_camerax:testDebugUnitTest --tests '*SiteSnap*' --tests '*CameraControlTest' :app:testDebugUnitTest --tests '*BackgroundPlatformCallsTest'
+```
+
+Before rollout, test rapid record/stop, front/back switching followed immediately
+by Stop/Home/lock, returning to the app, tap-focus then exit, and sharing a large
+video. Verify saved segments, audio, overlays and front mirroring. Segment-based
+switching may briefly pause capture and require background merging. Do not claim
+the system-Binder/no-focused-window or missing-stack `nativePollOnce` ANRs are
+resolved without new device/Play evidence. No store rollout is performed by QA.
+
+Validation recorded 2026-09-26: analyzer clean; 198 Flutter tests, 15 native
+camera tests and 4 native background-IO tests passed. The 10 membership UI tests
+also passed with `SURVEYCAM_FREE_LAUNCH_MODE=false`. Device recording stress QA
+and a newly packaged minified release remain pending; this QA pass did not
+generate a release AAB or publish a Play release.
+
 ## Play Console subscription
 
 | Item | Required value | Notes |
