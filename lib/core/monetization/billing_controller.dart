@@ -32,6 +32,15 @@ final billingControllerProvider =
   );
 });
 
+/// Shared by the permanent membership entry and its details screen. Free-launch
+/// builds must not start Google Play Billing just to display account navigation.
+final proMembershipBillingProvider = Provider<BillingState>((ref) {
+  if (PremiumConfig.freeLaunchMode) {
+    return const BillingState(isInitializing: false);
+  }
+  return ref.watch(billingControllerProvider);
+});
+
 class BillingController extends StateNotifier<BillingState> {
   BillingController({
     required BillingClient client,

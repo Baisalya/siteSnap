@@ -27,13 +27,10 @@ class ProUpgradeScreen extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final BillingState billing = billingOverride ??
-        (PremiumConfig.freeLaunchMode
-            ? const BillingState(isInitializing: false)
-            : ref.watch(billingControllerProvider));
-    final controller = billingOverride != null || PremiumConfig.freeLaunchMode
-        ? null
-        : ref.read(billingControllerProvider.notifier);
+    final BillingState billing =
+        billingOverride ?? ref.watch(proMembershipBillingProvider);
+    final canInteract =
+        billingOverride == null && !PremiumConfig.freeLaunchMode;
     final product = billing.product;
     final hasTrial = product?.hasFreeTrial == true;
     final isLaunchOffer =
@@ -129,14 +126,19 @@ class ProUpgradeScreen extends ConsumerWidget {
               busy: busy,
               canSubscribe: canSubscribe,
               trialLabel: trialLabel,
-              onSubscribe: controller?.buyPro ?? _noAction,
+              onSubscribe: canInteract
+                  ? () => ref.read(billingControllerProvider.notifier).buyPro()
+                  : _noAction,
               onManage: _openPlaySubscriptions,
             ),
-            if (!PremiumConfig.freeLaunchMode && !billing.isPro) ...[
+            if (!PremiumConfig.freeLaunchMode) ...[
               const SizedBox(height: 10),
               OutlinedButton.icon(
                 key: const Key('pro-restore-button'),
-                onPressed: busy ? null : controller?.restore,
+                onPressed: busy || !canInteract
+                    ? null
+                    : () =>
+                        ref.read(billingControllerProvider.notifier).restore(),
                 style: OutlinedButton.styleFrom(
                   minimumSize: const Size.fromHeight(48),
                   foregroundColor: Colors.white,
@@ -146,7 +148,8 @@ class ProUpgradeScreen extends ConsumerWidget {
                   ),
                 ),
                 icon: const Icon(Icons.restore_rounded, size: 19),
-                label: const Text('Restore purchase'),
+                label:
+                    Text(billing.isPro ? 'Refresh status' : 'Restore purchase'),
               ),
             ],
             const SizedBox(height: 8),
@@ -191,12 +194,12 @@ class _OfferHero extends StatelessWidget {
       billing.isPro,
       PremiumConfig.freeLaunchMode,
       isLaunchOffer,
-      billing.isInitializing,
+      billing.isInitializing || billing.isRestoring,
     )) {
       (true, _, _, _) => 'Your Pro workspace\nis active',
       (_, true, _, _) => 'Pro is included\nduring free launch',
+      (_, _, _, true) => 'Checking your\nPro status',
       (_, _, true, _) => '$trialLabel free',
-      (_, _, _, true) => 'Checking your\nlaunch offer',
       _ => 'Upgrade your\nfield workflow',
     };
     final subtitle = billing.isPro
@@ -853,11 +856,15 @@ class _PrimaryAction extends StatelessWidget {
         ? 'Manage subscription'
         : PremiumConfig.freeLaunchMode
             ? 'Pro included during free launch'
-            : product?.hasFreeTrial == true
-                ? 'Start $trialLabel free trial'
-                : product == null
-                    ? 'Subscribe to Pro'
-                    : 'Subscribe for ${product!.displayPrice}';
+            : billing.isInitializing || billing.isRestoring
+                ? 'Checking subscription…'
+                : billing.purchasePending
+                    ? 'Waiting for Google Play…'
+                    : product?.hasFreeTrial == true
+                        ? 'Start $trialLabel free trial'
+                        : product == null
+                            ? 'Subscribe to Pro'
+                            : 'Subscribe for ${product!.displayPrice}';
     final onPressed = billing.isPro
         ? onManage
         : PremiumConfig.freeLaunchMode

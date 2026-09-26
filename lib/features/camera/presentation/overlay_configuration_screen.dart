@@ -9,6 +9,7 @@ import 'package:path_provider/path_provider.dart';
 import 'package:surveycam/core/monetization/premium_feature.dart';
 import 'package:surveycam/core/monetization/premium_access_gate.dart';
 import 'package:surveycam/core/monetization/premium_policy.dart';
+import 'package:surveycam/core/monetization/pro_membership_entry.dart';
 import 'package:surveycam/core/services/weather_service.dart';
 import 'package:surveycam/features/overlay/domain/overlay_settings.dart';
 import 'package:surveycam/features/overlay/presentation/overlay_settings_provider.dart';
@@ -155,6 +156,8 @@ class _OverlayConfigurationScreenState
         physics: const BouncingScrollPhysics(),
         padding: const EdgeInsets.fromLTRB(20, 8, 20, 28),
         children: [
+          const ProMembershipEntry(),
+          const SizedBox(height: 24),
           _buildSectionLabel("LOCALIZATION & UNITS"),
           const SizedBox(height: 12),
           _buildLocalizationUnitsCard(settings, notifier),

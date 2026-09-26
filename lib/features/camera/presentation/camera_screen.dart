@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:geolocator/geolocator.dart';
+import 'package:surveycam/core/monetization/pro_membership_entry.dart';
 import 'package:surveycam/core/services/location_service.dart';
 import 'package:surveycam/core/services/rate_us_service.dart';
 import 'package:surveycam/core/services/weather_service.dart';
@@ -1149,6 +1150,16 @@ class _CameraScreenState extends ConsumerState<CameraScreen> {
                                         ),
                                       ],
                                     ),
+                                  ),
+                                ),
+                                const SizedBox(height: 8),
+                                ConstrainedBox(
+                                  constraints:
+                                      const BoxConstraints(maxWidth: 180),
+                                  child: ProMembershipEntry(
+                                    compact: true,
+                                    enabled: !cameraState.isRecording &&
+                                        !_isCapturing,
                                   ),
                                 ),
                               ],
